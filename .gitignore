@@ -1,0 +1,51 @@
+# Local environments and private input models
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+IFC Model/
+**/IFC Model/
+*.ifc
+*.ifczip
+*.ifcxml
+*.inpx
+*.inp
+*.dxf
+*.dwg
+*.rvt
+*.rfa
+*.rvt
+*.nwc
+*.nwd
+*.pdf
+*.kmz
+*.kml
+
+# Build/runtime outputs
+output/
+outputs/
+runtime/
+cache/
+.cache/
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Third party downloaded viewer dependencies
+static/vendor/
+**/static/vendor/
+
+# Generated geometry/results
+geometry_ifc_*.json
+*_geometry_v03.json
+*_geometry_engine_report.json
+*_validation_v04.json
