@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Viswalk AI Model Builder v0.4.1</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">VA</div>
+        <div>
+          <div class="brand-title">Viswalk AI</div>
+          <div class="brand-subtitle">IFC → Viswalk MVP v0.4.1</div>
+        </div>
+      </div>
+
+      <nav class="workflow">
+        <div class="workflow-step done"><span>01</span> Import</div>
+        <div id="stepAnalyze" class="workflow-step"><span>02</span> Audit</div>
+        <div id="stepExplore" class="workflow-step"><span>03</span> 3D Explorer</div>
+        <div id="stepSelect" class="workflow-step"><span>04</span> Selection</div>
+        <div id="stepPreview" class="workflow-step"><span>05</span> Simulation Preview</div>
+        <div id="stepSemantic" class="workflow-step"><span>06</span> Semantic Mapping</div>
+        <div id="stepBuild" class="workflow-step"><span>07</span> Build Viswalk</div>
+      </nav>
+
+      <div class="sidebar-status">
+        <div class="status-label">Local engine</div>
+        <div id="healthText" class="status-value">Checking...</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>IFC → Simulation Model</h1>
+          <p>Inspect the full BIM source, select simulation-relevant objects, and preview what will become Viswalk geometry.</p>
+        </div>
+        <button id="resetBtn" class="secondary-btn">Reset project</button>
+      </header>
+
+      <section class="panel compact-panel">
+        <div class="import-row">
+          <label class="file-picker">
+            <input id="fileInput" type="file" accept=".ifc,.pdf,.dxf" />
+            <span>Choose IFC / PDF / DXF</span>
+          </label>
+          <button id="uploadBtn" class="primary-btn" disabled>Import</button>
+          <button id="analyzeBtn" class="secondary-btn" disabled>Analyze</button>
+          <button id="load3dBtn" class="secondary-btn" disabled>Load 3D model</button>
+          <button id="generateSemanticBtn" class="primary-btn" disabled>Generate Semantic Model</button>
+          <span class="import-divider" aria-hidden="true"></span>
+          <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>Download Semantic JSON</button>
+          <button id="downloadEngineTopBtn" class="secondary-btn" disabled>Download Engine JSON</button>
+          <span class="import-divider" aria-hidden="true"></span>
+          <button id="validateBtn" class="secondary-btn" disabled>Validate</button>
+          <button id="buildViswalkBtn" class="build-btn" disabled>Build Viswalk</button>
+          <button id="downloadInpxTopBtn" class="secondary-btn" disabled>Download .inpx</button>
+          <div id="fileMeta" class="file-meta">No file imported</div>
+        </div>
+      </section>
+
+      <section id="auditSection" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">IFC PRE-FLIGHT</div>
+            <h2 id="projectName">IFC Audit</h2>
+          </div>
+          <div class="badges">
+            <span id="schemaBadge" class="badge"></span>
+            <span id="unitBadge" class="badge"></span>
+          </div>
+        </div>
+
+        <div class="metric-grid six">
+          <div class="metric"><span>Storeys</span><strong id="storeyCount">0</strong></div>
+          <div class="metric"><span>Products</span><strong id="productCount">0</strong></div>
+          <div class="metric include"><span>Auto Include</span><strong id="includeCount">0</strong></div>
+          <div class="metric review"><span>Review</span><strong id="reviewCount">0</strong></div>
+          <div class="metric exclude"><span>Auto Exclude</span><strong id="excludeCount">0</strong></div>
+          <div class="metric opening"><span>Door Openings</span><strong id="doorOpeningCount">0</strong></div>
+        </div>
+
+        <div id="warningList" class="warning-list"></div>
+      </section>
+
+      <section id="largeModelSection" class="panel hidden large-model-section">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">LARGE IFC MODE</div>
+            <h2>Filtered / Storey-based 3D loading</h2>
+          </div>
+          <span id="largeModelBadge" class="badge">Standard model</span>
+        </div>
+
+        <div class="metric-grid six large-model-metrics">
+          <div class="metric"><span>File size</span><strong id="largeFileSize">—</strong></div>
+          <div class="metric"><span>Walls</span><strong id="largeWalls">—</strong></div>
+          <div class="metric"><span>Slab panels</span><strong id="largeSlabs">—</strong></div>
+          <div class="metric"><span>Columns</span><strong id="largeColumns">—</strong></div>
+          <div class="metric exclude"><span>Beams auto-excluded</span><strong id="largeBeams">—</strong></div>
+          <div class="metric review"><span>Stairs / flights</span><strong id="largeStairs">—</strong></div>
+        </div>
+
+        <div class="large-load-grid">
+          <label class="field-label">
+            <span>3D load mode</span>
+            <select id="geometryLoadMode">
+              <option value="simulation_storey">Simulation-relevant · selected storey</option>
+              <option value="simulation_all">Simulation-relevant · whole model</option>
+              <option value="full_storey">Full IFC · selected storey</option>
+              <option value="full_all">Full IFC · whole model (heavy)</option>
+            </select>
+          </label>
+
+          <label class="field-label">
+            <span>Storey</span>
+            <select id="geometryStoreySelect"></select>
+          </label>
+
+          <label class="append-option">
+            <input id="appendStoreyCheck" type="checkbox" />
+            <span>Append this storey to the current 3D view</span>
+          </label>
+
+          <div class="large-load-note">
+            <strong id="largeModelProfile">—</strong>
+            <span id="largeModelNote">Load mode will be recommended after IFC Audit.</span>
+          </div>
+        </div>
+
+        <div id="loadedSubsetText" class="engine-path">No 3D subset loaded yet.</div>
+      </section>
+
+      <section id="explorerSection" class="explorer-layout hidden">
+        <aside class="panel explorer-left">
+          <div class="panel-heading tight">
+            <div>
+              <div class="eyebrow">MODEL TREE</div>
+              <h2>Visibility</h2>
+            </div>
+          </div>
+
+          <div class="filter-block">
+            <div class="filter-title">Storeys</div>
+            <div id="storeyFilters" class="check-list"></div>
+          </div>
+
+          <div class="filter-block">
+            <div class="filter-title">IFC categories</div>
+            <div id="categoryFilters" class="check-list scroll-list"></div>
+          </div>
+
+          <div class="filter-block">
+            <div class="filter-title">Selection summary</div>
+            <div class="mini-summary">
+              <div><span>Include</span><strong id="effectiveInclude">0</strong></div>
+              <div><span>Review</span><strong id="effectiveReview">0</strong></div>
+              <div><span>Exclude</span><strong id="effectiveExclude">0</strong></div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="panel viewer-panel">
+          <div class="viewer-toolbar">
+            <div class="mode-switch">
+              <button id="sourceModeBtn" class="mode-btn active">Source IFC</button>
+              <button id="simulationModeBtn" class="mode-btn">Simulation Preview</button>
+            </div>
+            <div class="toolbar-actions">
+              <button id="fitModelBtn" class="icon-btn">Fit model</button>
+              <button id="fitSelectionBtn" class="icon-btn">Fit selection</button>
+              <button id="isolateBtn" class="icon-btn">Isolate selected</button>
+              <button id="showAllBtn" class="icon-btn">Show all</button>
+              <button id="wireframeBtn" class="icon-btn">Wireframe</button>
+            </div>
+          </div>
+
+          <div id="viewerCanvasHost" class="viewer-host">
+            <div id="viewerEmpty" class="viewer-empty">
+              <strong>IFC 3D Viewer</strong>
+              <span>Run Analyze, then Load 3D model.</span>
+            </div>
+          </div>
+
+          <div class="viewer-footer">
+            <span id="viewerStatus">3D geometry not loaded</span>
+            <span id="previewNote"></span>
+          </div>
+        </section>
+
+        <aside class="panel inspector-panel">
+          <div class="panel-heading tight">
+            <div>
+              <div class="eyebrow">ELEMENT INSPECTOR</div>
+              <h2 id="selectedName">No selection</h2>
+            </div>
+          </div>
+
+          <div id="emptyInspector" class="empty-inspector">Click an IFC object in the 3D viewer.</div>
+
+          <div id="inspectorContent" class="hidden">
+            <dl class="property-grid">
+              <dt>IFC type</dt><dd id="selectedType">—</dd>
+              <dt>Storey</dt><dd id="selectedStorey">—</dd>
+              <dt>GlobalId</dt><dd id="selectedGuid" class="mono">—</dd>
+              <dt>Auto rule</dt><dd id="selectedAuto">—</dd>
+              <dt>Viswalk mapping</dt><dd id="selectedMapping">—</dd>
+              <dt>Role</dt><dd id="selectedRole">—</dd>
+            </dl>
+
+            <div class="status-editor">
+              <div class="filter-title">Selection status</div>
+              <div class="status-buttons">
+                <button data-status="auto" class="status-btn">Auto</button>
+                <button data-status="include" class="status-btn include">Include</button>
+                <button data-status="review" class="status-btn review">Review</button>
+                <button data-status="exclude" class="status-btn exclude">Exclude</button>
+              </div>
+              <div id="effectiveStatus" class="effective-status">—</div>
+            </div>
+
+            <div class="semantic-note" id="semanticNote"></div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="semanticSection" class="panel hidden semantic-section">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">ENGINE-READY SEMANTIC MODEL</div>
+            <h2>IFC → Geometry Engine v0.3</h2>
+          </div>
+          <div class="semantic-actions">
+            <a id="downloadSemanticBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/download">Download Semantic JSON</a>
+            <a id="downloadEngineBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/engine-download">Download Engine JSON</a>
+            <button id="exportEngineBtn" class="secondary-btn">Save Engine JSON to Project</button>
+          </div>
+        </div>
+
+        <div class="metric-grid semantic-metrics">
+          <div class="metric"><span>Levels</span><strong id="semanticLevels">0</strong></div>
+          <div class="metric"><span>Source Floor Slabs</span><strong id="semanticSourceSlabs">0</strong></div>
+          <div class="metric include"><span>Merged Walkable Regions</span><strong id="semanticAreas">0</strong></div>
+          <div class="metric review"><span>Void Masks</span><strong id="semanticVoidMasks">0</strong></div>
+          <div class="metric"><span>Logical Walls</span><strong id="semanticLogicalWalls">0</strong></div>
+          <div class="metric opening"><span>Physical Segments</span><strong id="semanticWallSegments">0</strong></div>
+          <div class="metric opening"><span>Door Openings</span><strong id="semanticDoorOpenings">0</strong></div>
+          <div class="metric"><span>Columns / Obstacles</span><strong id="semanticObstacles">0</strong></div>
+          <div class="metric"><span>Vertical Connections</span><strong id="semanticVertical">0</strong></div>
+          <div class="metric review"><span>Warnings</span><strong id="semanticWarnings">0</strong></div>
+        </div>
+
+        <div class="semantic-status-grid">
+          <div class="semantic-rule ok">
+            <strong>Door logic</strong>
+            <span id="doorLogicText">Only included IfcDoor elements create pedestrian openings.</span>
+          </div>
+          <div class="semantic-rule ok">
+            <strong>Window logic</strong>
+            <span>IfcWindow never creates a pedestrian opening automatically.</span>
+          </div>
+          <div class="semantic-rule">
+            <strong>Wall output</strong>
+            <span>Engine-facing walls are physical segments. No hidden opening metadata is required.</span>
+          </div>
+        </div>
+
+        <div id="semanticWarningList" class="warning-list"></div>
+        <div id="semanticEnginePath" class="engine-path hidden"></div>
+      </section>
+
+
+      <section id="buildSection" class="panel hidden build-section">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">VISSIM / VISWALK BUILD</div>
+            <h2>Geometry Engine v0.3 → Vissim COM 2025</h2>
+          </div>
+          <div class="semantic-actions">
+            <button id="downloadInpxBtn" class="secondary-btn" disabled>Download .inpx</button>
+            <button id="downloadBuildReportBtn" class="secondary-btn" disabled>Engine Report</button>
+            <button id="downloadValidationBtn" class="secondary-btn" disabled>Validation Report</button>
+            <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Build Log</button>
+            <button id="openBuildFolderBtn" class="secondary-btn" disabled>Open Output Folder</button>
+          </div>
+        </div>
+
+        <div class="metric-grid build-metrics">
+          <div class="metric build-error"><span>Errors</span><strong id="buildErrors">—</strong></div>
+          <div class="metric review"><span>Warnings</span><strong id="buildWarnings">—</strong></div>
+          <div class="metric opening"><span>Information</span><strong id="buildInfo">—</strong></div>
+          <div class="metric include"><span>Vissim Status</span><strong id="buildStatus">Ready</strong></div>
+          <div class="metric"><span>Duration</span><strong id="buildDuration">—</strong></div>
+        </div>
+
+        <div id="buildIssueList" class="build-issue-list"></div>
+        <div id="buildOutputPath" class="engine-path hidden"></div>
+      </section>
+
+      <section id="categorySection" class="panel hidden">
+        <div class="panel-heading tight">
+          <div>
+            <div class="eyebrow">IFC CATEGORY AUDIT</div>
+            <h2>Automatic mapping rules</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>IFC type</th><th>Count</th><th>Auto</th><th>Simulation role</th><th>Viswalk mapping</th></tr>
+            </thead>
+            <tbody id="categoryRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel message-panel">
+        <div class="eyebrow">SYSTEM</div>
+        <div id="messageText">Ready.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js?v=040" defer></script>
+</body>
+</html>

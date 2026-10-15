@@ -1,51 +1,49 @@
 # Viswalk BIM Builder
 
-Local-first BIM-to-pedestrian-simulation model builder integrating IFC review, semantic geometry processing, and PTV Vissim/Viswalk COM automation.
+Local-first experimental BIM-to-pedestrian-simulation model builder for PTV Vissim/Viswalk.
 
-> **Status:** Research prototype (POC). Requires a locally installed, appropriately licensed PTV Vissim/Viswalk with COM support. Not affiliated with or endorsed by PTV Group.
+> **Status:** POC / active development. Not an official PTV product. Requires licensed local PTV Vissim/Viswalk with COM on Windows.
 
-## Proven workflow
+## Features
 
-1. Import and audit IFC.
-2. Review the source model in a 3D viewer, with storey and object filters.
-3. Generate a semantic model (levels, walkable areas, physical walls, columns, openings, vertical connections).
-4. Validate simulation geometry.
-5. Build a local Vissim/Viswalk `.inpx` model through Windows COM.
-
-The small IFC baseline has been built and manually validated in Vissim 2025. The large-model workflow adds storey-focused loading, geometry filtering, and walkable-area consolidation. It remains under evaluation.
+- IFC auditing and building-storey/category inspection
+- 3D IFC preview, single-storey and whole-building modes
+- Selection/review model for simulation-relevant objects
+- IFC to semantic pedestrian geometry: Levels, Areas, Walls, Doors, Columns
+- Walkable floor-panel consolidation and large-IFC preflight
+- Geometry validation and Windows COM `.inpx` builder
 
 ## Architecture
 
-```text
-IFC / drawing sources
-        |
-  Audit + 3D Review
-        |
-  Reviewed Selection
-        |
- Semantic Geometry
-        |
- Validation + Simplification
-        |
- Geometry Engine
-        |
- Windows Vissim COM
-        |
-      .inpx
+```
+IFC -> audit -> 3D review -> semantic model -> validate -> geometry engine -> Vissim COM -> .inpx
 ```
 
-## Technical stack
+## Status and limitations
 
-Python, FastAPI, IfcOpenShell, Shapely, Three.js and PTV Vissim COM on Windows.
+- The TallBuilding IFC baseline completed import, geometry generation and manual Vissim inspection.
+- Large structural IFCs need further validation of floor areas, openings and vertical movement.
+- Structural BIM without doors cannot automatically provide valid pedestrian openings.
+- Stair, ramp, elevator semantics are still under development.
+- The proven standalone `05_geometry_engine_v03.py` and `base_empty.inpx` are external local development dependencies **not included in this initial public source snapshot**. Building `.inpx` from this snapshot requires supplying these separately with appropriate rights. This is not a standalone release.
+- The JavaScript 3D viewer dependencies are downloaded by `setup_app.ps1` and are not committed.
 
-## Data and security
+## Local setup (Windows)
 
-Do **not** commit private client or project IFC/DXF/PDF files, proprietary Vissim model files, credentials, build outputs, caches, or the Python virtual environment. Use shareable synthetic/open fixtures only and verify redistribution rights before adding assets.
+1. Create a Python virtual environment in the parent project folder.
+2. Install `requirements.txt`.
+3. Run `setup_app.ps1` to install runtime browser libraries (requires internet connectivity).
+4. Run `run_app.ps1` and open the displayed local URL.
+5. For COM export, install and configure Vissim 2025, and provide the external Geometry Engine and Vissim base model files in the parent folder.
 
-## Source availability
+## Tests
 
-Repository initialization is underway. Application code will be imported from the validated local v0.4.1a development package; this initial commit is documentation and repository safeguards only.
+See `41_check_large_ifc_fixture_v041.py`, `42_check_walkable_merge_v041.py`, `43_check_large_ifc_preflight_v041.py`, and `46_check_storey_autoselect_v041a.py`. Certain integration tests require locally provided IFC fixtures and Vissim.
+
+## Data policy
+
+Do not commit client or project BIM assets, proprietary model files, raw datasets, passwords, `.env`, generated geometry, logs, caches, or installed binaries. Only use redistributable fixtures with documented provenance.
 
 ## License
 
-No open-source license has yet been selected. Public visibility alone does not grant permission to reuse, redistribute, or commercialize the code.
+No open-source license has been selected yet. Public repository visibility does not confer reuse rights.
