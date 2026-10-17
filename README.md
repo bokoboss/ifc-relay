@@ -43,6 +43,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 | IFC intake & audit | Read IFC metadata, units, storeys, categories and relationships | **Implemented; tested** |
 | BIM explorer | 3D source inspection, storey/category filters, single-storey and whole-building views | **Implemented; tested** |
 | Selection review | Auto / Include / Exclude / Review decisions per IFC GlobalId | **Implemented** |
+| Revision carry-over | Re-apply review decisions to a new IFC revision by GlobalId; report dropped decisions and elements changed since the decision | **Implemented; synthetic-IFC tested** |
 | Semantic model | Generate levels, floor areas, physical wall segments, column/obstacle representations | **Validated on small baseline** |
 | Openings | Use door-filled openings to split walls; windows are not pedestrian passages | **Validated on small baseline** |
 | Openings without doors | List unfilled wall openings, flag walkable-looking ones, open only those the engineer ticks | **Implemented; synthetic-IFC tested** |

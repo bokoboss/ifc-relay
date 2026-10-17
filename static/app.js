@@ -252,6 +252,7 @@ uploadBtn.addEventListener('click', async () => {
   try {
     const form = new FormData();
     form.append('file', selectedFile);
+    form.append('carry_selection', document.getElementById('carrySelectionCheck')?.checked ? 'true' : 'false');
     const result = await api('/api/import', { method: 'POST', body: form });
     document.getElementById('fileMeta').textContent =
       `${result.upload.original_name} · ${formatBytes(result.upload.size_bytes)} · imported`;
@@ -263,7 +264,9 @@ uploadBtn.addEventListener('click', async () => {
     currentSemantic = null;
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
-    setMessage('Import complete. Run Analyze.');
+    setMessage(result.carried_decisions_pending
+      ? `Import complete. ${result.carried_decisions_pending} review decision(s) will be re-applied by GlobalId. Run Analyze.`
+      : 'Import complete. Run Analyze.');
   } catch (error) {
     setMessage(`Import failed: ${error.message}`);
   } finally {
@@ -284,7 +287,10 @@ analyzeBtn.addEventListener('click', async () => {
     renderAudit(result);
     load3dBtn.disabled = false;
     document.getElementById('stepAnalyze').classList.add('done');
-    setMessage('IFC audit complete. Load the 3D model.');
+    const decisions = result.revision?.decisions;
+    setMessage(decisions
+      ? `IFC audit complete. ${decisions.carried} decision(s) carried over, ${decisions.changed} to re-check, ${decisions.orphaned} dropped. Load the 3D model.`
+      : 'IFC audit complete. Load the 3D model.');
   } catch (error) {
     setMessage(`Analysis failed: ${error.message}`);
   } finally {
