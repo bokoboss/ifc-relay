@@ -43,6 +43,9 @@ PASSAGE_MIN_WIDTH = 0.60
 # the footprint convex, so ordinary straight walls are unaffected.
 WALL_POLYGON_SOLIDITY = 0.95
 CANDIDATE_LIST_LIMIT = 500
+# Interior rings of merged floor regions smaller than this are slab-joint
+# precision gaps, not pedestrian-relevant voids; no void mask is generated.
+MIN_VOID_MASK_AREA = 0.05
 
 
 # Default first keys per engine-facing collection. They are kept whenever the
@@ -768,6 +771,7 @@ def build_semantic_model(
     generated_void_masks: list[dict[str, Any]] = []
     walkable_region_count = 0
     walkable_void_count = 0
+    ignored_void_count = 0
 
     for level_key in sorted(walkable_components_by_level):
         source_components = walkable_components_by_level[level_key]
@@ -802,7 +806,11 @@ def build_semantic_model(
             area_key += 1
             walkable_region_count += 1
 
-            for hole_no, hole in enumerate(hole_polygons(region), start=1):
+            holes = hole_polygons(region)
+            small = [h for h in holes if h.area < MIN_VOID_MASK_AREA]
+            ignored_void_count += len(small)
+            holes = [h for h in holes if h.area >= MIN_VOID_MASK_AREA]
+            for hole_no, hole in enumerate(holes, start=1):
                 generated_void_masks.append({
                     "name": f"Walkable Void - {level_name} [{region_no}.{hole_no}]",
                     "type": "walkable_void_mask",
@@ -814,6 +822,12 @@ def build_semantic_model(
                     "generated_from": "slab_union_interior_ring",
                 })
                 walkable_void_count += 1
+
+    if ignored_void_count:
+        warnings.append(
+            f"{ignored_void_count} interior gap(s) smaller than {MIN_VOID_MASK_AREA:.2f} m2 in merged floor regions "
+            "were treated as slab-joint gaps (no void mask)."
+        )
 
     # ---------------------------------------------------------
     # Intermediate landings -> generated levels + areas
@@ -1158,6 +1172,7 @@ def build_semantic_model(
         "walkable_areas": len(areas),
         "walkable_regions": walkable_region_count,
         "walkable_void_masks": walkable_void_count,
+        "ignored_tiny_voids": ignored_void_count,
         "logical_walls": logical_wall_count,
         "physical_wall_segments": len(walls),
         "included_doors": included_door_count,

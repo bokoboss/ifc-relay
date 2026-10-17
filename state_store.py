@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +31,14 @@ class ProjectStateStore:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def write(self, state: dict[str, Any]) -> None:
-        self.path.write_text(
+        # Write to a sibling temp file and atomically replace, so an
+        # interrupted write never leaves a truncated project_state.json.
+        tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+        tmp.write_text(
             json.dumps(state, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        os.replace(tmp, self.path)
 
     def reset(self) -> None:
         if self.path.exists():

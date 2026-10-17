@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fixture_paths import large_ifc_from_env
+
 from ifc_geometry_service import extract_ifc_geometry
 from ifc_service import audit_ifc
 
@@ -14,8 +16,8 @@ CACHE_DIR = APP_DIR / "runtime" / "regression"
 
 def fixture() -> Path:
     for root in (PROJECT_ROOT, PROJECT_ROOT.parent):
-        preferred = root / "large_fixture.ifc"
-        if preferred.exists():
+        preferred = large_ifc_from_env()
+        if preferred is not None and preferred.exists():
             return preferred
     candidates = []
     for root in (PROJECT_ROOT, PROJECT_ROOT.parent):

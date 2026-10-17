@@ -4,6 +4,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from fixture_paths import large_ifc_from_env
+
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_DIR.parent
@@ -14,7 +16,7 @@ def find_fixture() -> Path:
     candidates = []
     for root in search_roots:
         candidates.extend([
-            root / "large_fixture.ifc",
+            *([large_ifc_from_env()] if large_ifc_from_env() else []),
             *sorted(root.glob("*30*.ifc")),
             *sorted(root.glob("*.ifc")),
         ])
@@ -27,7 +29,7 @@ def find_fixture() -> Path:
         if path.exists() and path.stat().st_size > 10_000_000:
             return path
     raise FileNotFoundError(
-        "Large IFC fixture not found. Put 'large_fixture.ifc' in the project root."
+        "Large IFC fixture not found. Set VBB_LARGE_IFC to the large IFC path or put it in the project root."
     )
 
 
