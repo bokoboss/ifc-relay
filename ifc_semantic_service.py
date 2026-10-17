@@ -33,6 +33,16 @@ from ifc_vertical_service import (
 EPS = 1e-8
 # Storey elevation vs. floor-slab top difference that is reported as a datum warning.
 STOREY_DATUM_WARNING = 0.05
+# Unfilled wall openings that look like walkable passages (never applied
+# automatically; the engineer includes them by opening GlobalId).
+PASSAGE_MAX_SILL = 0.30
+PASSAGE_MIN_HEIGHT = 1.80
+PASSAGE_MIN_WIDTH = 0.60
+# Wall footprints less convex than this (L/T/curved) are exported as polygon
+# obstacles instead of a single rectangular centreline wall. Mitred ends keep
+# the footprint convex, so ordinary straight walls are unaffected.
+WALL_POLYGON_SOLIDITY = 0.95
+CANDIDATE_LIST_LIMIT = 500
 
 
 # Default first keys per engine-facing collection. They are kept whenever the
@@ -339,7 +349,8 @@ def split_wall_axis(
     return segments, intervals
 
 
-def _opening_shape_polygon(model: Any, opening: Any) -> Polygon | None:
+def _opening_shape(model: Any, opening: Any) -> tuple[Polygon, float, float] | None:
+    """Return (XY footprint, z_min, z_max) of an IfcOpeningElement."""
     import ifcopenshell.geom
 
     if getattr(opening, "Representation", None) is None:
@@ -354,7 +365,37 @@ def _opening_shape_polygon(model: Any, opening: Any) -> Polygon | None:
     except Exception:
         return None
 
-    return largest_polygon(mesh_footprint(verts, faces))
+    poly = largest_polygon(mesh_footprint(verts, faces))
+    if poly is None or not verts:
+        return None
+    zs = verts[2::3]
+    return poly, min(zs), max(zs)
+
+
+def _opening_shape_polygon(model: Any, opening: Any) -> Polygon | None:
+    shape = _opening_shape(model, opening)
+    return shape[0] if shape is not None else None
+
+
+def _filled_opening_ids(model: Any) -> set[int]:
+    ids: set[int] = set()
+    for rel in model.by_type("IfcRelFillsElement"):
+        opening = getattr(rel, "RelatingOpeningElement", None)
+        if opening is not None:
+            ids.add(int(opening.id()))
+    return ids
+
+
+def classify_unfilled_opening(width: float, height: float, sill: float) -> str:
+    """'passage_candidate' when the opening could be walked through."""
+    if sill <= PASSAGE_MAX_SILL and height >= PASSAGE_MIN_HEIGHT and width >= PASSAGE_MIN_WIDTH:
+        return "passage_candidate"
+    return "not_passage"
+
+
+def wall_footprint_solidity(footprint: Polygon) -> float:
+    hull = footprint.convex_hull
+    return float(footprint.area / hull.area) if hull.area > EPS else 1.0
 
 
 def _door_relationships(model: Any) -> tuple[dict[int, Any], dict[int, Any]]:
@@ -530,7 +571,87 @@ def build_semantic_model(
                 "opening_entity_id": int(opening.id()),
                 "center": center,
                 "width": width,
+                "polygon": opening_poly,
             }
+        )
+
+    # ---------------------------------------------------------
+    # Wall openings without a door (IfcOpeningElement with no fill)
+    # Never opened automatically: the engineer includes the opening by its
+    # GlobalId. Openings that look walkable are reported for review.
+    # ---------------------------------------------------------
+    filled_ids = _filled_opening_ids(model)
+    opening_candidates: list[dict[str, Any]] = []
+    unfilled_applied = 0
+
+    for rel in model.by_type("IfcRelVoidsElement"):
+        host = getattr(rel, "RelatingBuildingElement", None)
+        opening = getattr(rel, "RelatedOpeningElement", None)
+        if host is None or opening is None or not is_a(host, "IfcWall"):
+            continue
+        if int(opening.id()) in filled_ids:
+            continue
+        if effective_status(host, selection_overrides) != "include":
+            continue
+
+        opening_guid = global_id(opening)
+        decision = selection_overrides.get(opening_guid) if opening_guid else None
+        host_mesh = mesh_by_id.get(int(host.id()))
+        shape = _opening_shape(model, opening)
+        if shape is None or host_mesh is None:
+            warnings.append(
+                f"Wall opening {opening_guid or opening.id()} without a door has no usable geometry; it stays closed."
+            )
+            continue
+
+        opening_poly, z_min, z_max = shape
+        wall_min, _ = mesh_bounds(host_mesh)
+        open_axis = axis_from_footprint(opening_poly)
+        width = float(open_axis["length"])
+        height = float(z_max - z_min)
+        sill = float(z_min - wall_min[2])
+        classification = classify_unfilled_opening(width, height, sill)
+        applied = decision == "include"
+
+        opening_candidates.append({
+            "global_id": opening_guid,
+            "name": entity_name(opening, ""),
+            "host_wall_global_id": global_id(host),
+            "host_wall_name": entity_name(host, ""),
+            "level_key": resolve_level_key(host),
+            "width": round(width, 3),
+            "height": round(height, 3),
+            "sill": round(sill, 3),
+            "classification": classification,
+            "decision": decision or "auto",
+            "applied": applied,
+        })
+
+        if applied:
+            unfilled_applied += 1
+            openings_by_wall_id.setdefault(int(host.id()), []).append(
+                {
+                    "name": entity_name(opening, f"Opening {opening.id()}"),
+                    "door_global_id": None,
+                    "door_entity_id": None,
+                    "opening_global_id": opening_guid,
+                    "opening_entity_id": int(opening.id()),
+                    "center": [float(opening_poly.centroid.x), float(opening_poly.centroid.y)],
+                    "width": width,
+                    "polygon": opening_poly,
+                    "unfilled": True,
+                }
+            )
+
+    pending_passages = [
+        c for c in opening_candidates
+        if c["classification"] == "passage_candidate" and c["decision"] == "auto"
+    ]
+    if pending_passages:
+        warnings.append(
+            f"{len(pending_passages)} wall opening(s) without a door look walkable (sill <= {PASSAGE_MAX_SILL:.2f} m, "
+            f"height >= {PASSAGE_MIN_HEIGHT:.2f} m, width >= {PASSAGE_MIN_WIDTH:.2f} m) but are kept closed. "
+            "Review them under Opening candidates and include the ones that are real passages."
         )
 
     # ---------------------------------------------------------
@@ -755,6 +876,8 @@ def build_semantic_model(
     # Physical wall segments (door openings split here)
     # ---------------------------------------------------------
     walls: list[dict[str, Any]] = []
+    polygon_wall_obstacles: list[dict[str, Any]] = []
+    polygon_wall_count = 0
     logical_wall_count = 0
     wall_key = 1101
 
@@ -784,6 +907,38 @@ def build_semantic_model(
 
         logical_wall_count += 1
         wall_openings = openings_by_wall_id.get(int(wall.id()), [])
+
+        solidity = wall_footprint_solidity(footprint)
+        if solidity < WALL_POLYGON_SOLIDITY:
+            # L/T/curved wall: a single centreline would block the corner.
+            # Keep the true footprint and cut openings out of it.
+            cut = [o["polygon"].buffer(0.001) for o in wall_openings if o.get("polygon") is not None]
+            missing = [o for o in wall_openings if o.get("polygon") is None]
+            if missing:
+                warnings.append(
+                    f"Wall {global_id(wall) or wall.id()} is not straight and {len(missing)} of its openings have no footprint; those openings stay closed."
+                )
+            geom = footprint.difference(unary_union(cut)) if cut else footprint
+            parts = polygon_components(geom if geom.is_valid else geom.buffer(0))
+            door_openings_applied += len({o["door_global_id"] for o in wall_openings if o.get("door_global_id") and o.get("polygon") is not None})
+            name = entity_name(wall, f"IFC Wall {wall.id()}")
+            for part_no, part in enumerate(parts, start=1):
+                polygon_wall_obstacles.append({
+                    "name": name if len(parts) == 1 else f"{name} [part {part_no}/{len(parts)}]",
+                    "type": "IfcWall",
+                    "level_key": level_key,
+                    "height": round(height, 5),
+                    "z_offset": round(z_offset, 5),
+                    "polygon": polygon_points(part),
+                    "ifc_global_id": global_id(wall),
+                    "ifc_entity_id": int(wall.id()),
+                    "logical_wall_global_id": global_id(wall),
+                    "wall_shape": "polygon",
+                    "footprint_solidity": round(solidity, 4),
+                })
+            polygon_wall_count += 1
+            continue
+
         physical_segments, normalized_openings = split_wall_axis(
             axis["start"], axis["end"], wall_openings
         )
@@ -791,9 +946,10 @@ def build_semantic_model(
         # Sanity-check opening centers against the inferred wall axis.
         valid_opening_guids = set()
         for opening_info in normalized_openings:
+            label = opening_info.get("door_global_id") or opening_info.get("opening_global_id")
             if opening_info["perpendicular_distance"] > max(axis["thickness"] * 1.5, 0.35):
                 warnings.append(
-                    f"Door {opening_info.get('door_global_id')} is {opening_info['perpendicular_distance']:.3f} m from inferred wall axis; verify this opening in 3D review."
+                    f"{'Door' if opening_info.get('door_global_id') else 'Opening'} {label} is {opening_info['perpendicular_distance']:.3f} m from inferred wall axis; verify this opening in 3D review."
                 )
             valid_opening_guids.add(opening_info.get("door_global_id"))
         door_openings_applied += len([g for g in valid_opening_guids if g])
@@ -838,6 +994,10 @@ def build_semantic_model(
 
     for generated in generated_void_masks:
         obstacles.append({"key": obstacle_key, **generated})
+        obstacle_key += 1
+
+    for wall_obstacle in polygon_wall_obstacles:
+        obstacles.append({"key": obstacle_key, **wall_obstacle})
         obstacle_key += 1
 
     for element in model.by_type("IfcElement"):
@@ -1002,6 +1162,10 @@ def build_semantic_model(
         "physical_wall_segments": len(walls),
         "included_doors": included_door_count,
         "door_openings_applied": door_openings_applied,
+        "unfilled_openings": len(opening_candidates),
+        "unfilled_passage_candidates": sum(1 for c in opening_candidates if c["classification"] == "passage_candidate"),
+        "unfilled_openings_applied": unfilled_applied,
+        "polygon_walls": polygon_wall_count,
         "windows_used_as_openings": 0,
         "source_windows": source_window_count,
         "columns": len(columns),
@@ -1052,6 +1216,7 @@ def build_semantic_model(
             "summary": summary,
             "warnings": warnings,
             "excluded_detail_preview": excluded_detail[:100],
+            "opening_candidates": opening_candidates[:CANDIDATE_LIST_LIMIT],
             "door_logic": {
                 "source_doors": source_door_count,
                 "included_doors": included_door_count,
@@ -1061,7 +1226,8 @@ def build_semantic_model(
             },
             "notes": [
                 "Walls in this file are physical segments; there is no hidden openings metadata in engine-facing wall records.",
-                "Only included IfcDoor relationships split walls. IfcWindow never creates a pedestrian opening automatically.",
+                "Only included IfcDoor relationships split walls automatically. IfcWindow never creates a pedestrian opening. Unfilled IfcOpeningElements split a wall only when the engineer includes the opening GlobalId; walkable-looking ones are listed in opening_candidates.",
+                "Walls whose footprint is not convex (L/T/curved) are exported as polygon obstacles with openings cut out, instead of a single centreline wall.",
                 "Roof/base/non-floor slabs are not promoted automatically unless their IFC rule or manual selection includes them.",
                 "IfcSlab floor panels are consolidated per storey before creating Viswalk Areas.",
                 "Interior holes in consolidated floor regions become generated walkable-void obstacles because Vissim Areas cannot contain enclaves.",
