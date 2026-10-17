@@ -232,11 +232,26 @@ function addSemanticPreview(model) {
 
   for (const connection of model.vertical_connections || []) {
     if (!connection.polygon?.length) continue;
-    const startZ = levels.get(Number(connection.start_level)) || 0;
-    const endZ = levels.get(Number(connection.end_level)) || startZ;
-    const geometry = new THREE.ShapeGeometry(shapeFromPolygon(connection.polygon));
-    const mesh = new THREE.Mesh(geometry, semanticMaterial(0xb18a57, 0.82));
-    mesh.position.z = (startZ + endZ) / 2;
+    const startZ = (levels.get(Number(connection.start_level)) || 0) + Number(connection.start_z_offset || 0);
+    const endZ = (levels.get(Number(connection.end_level)) ?? startZ) + Number(connection.end_z_offset || 0);
+    let geometry;
+    let mesh;
+    if (connection.polygon_order === 'bottom_edge_first' && connection.polygon.length === 4) {
+      // Sloped plane: first two points sit at the start height, last two at the end height.
+      const p = connection.polygon;
+      const zs = [startZ, startZ, endZ, endZ];
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(
+        p.flatMap((pt, i) => [Number(pt[0]), Number(pt[1]), zs[i]]), 3,
+      ));
+      geometry.setIndex([0, 1, 2, 0, 2, 3]);
+      geometry.computeVertexNormals();
+      mesh = new THREE.Mesh(geometry, semanticMaterial(0xb18a57, 0.82));
+    } else {
+      geometry = new THREE.ShapeGeometry(shapeFromPolygon(connection.polygon));
+      mesh = new THREE.Mesh(geometry, semanticMaterial(0xb18a57, 0.82));
+      mesh.position.z = (startZ + endZ) / 2;
+    }
     mesh.userData.semantic = { kind: 'vertical_connection', source: connection };
     semanticGroup.add(mesh);
     semanticMeshes.push(mesh);

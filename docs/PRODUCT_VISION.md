@@ -59,7 +59,7 @@ BIM / CAD / Drawing
 | C. Engineering review | Auto / Include / Exclude / Review; source-to-simulation comparison; future manual edits, draw/move/split/merge geometry | Selection implemented; geometry editing planned |
 | D. Semantic mapping | Map slabs to walkable areas; walls/columns/other objects to obstacles; door-filled openings to gaps; exclude window openings | Validated baseline; complex cases need QA |
 | E. Simplification | Consolidate floor panels, preserve openings/voids, remove unnecessary detail, handle irregular geometry | Slab merge & void logic implemented / needs full large-IFC QA |
-| F. Multi-level circulation | Geometry-aware mapping of stairs, stair flights, ramps, elevators; endpoints/elevations and connected walkable surfaces | Planned v0.5; not validated for real IFC |
+| F. Multi-level circulation | Geometry-aware mapping of stairs, stair flights, ramps, elevators; endpoints/elevations and connected walkable surfaces | Stairs/ramps per flight + intermediate landing levels implemented (v0.5 draft, synthetic-IFC tested; see [VERTICAL_CIRCULATION.md](VERTICAL_CIRCULATION.md)); Vissim verification pending; elevators planned |
 | G. Validation | Geometry integrity, unit/level consistency, passability, warnings with severity and evidence | Core implemented; richer connectivity checks planned |
 | H. Build / Export | Deterministic geometry engine, Vissim COM, save `.inpx`, JSON/reports/logs | Validated baseline; external engine and template not in public repo |
 | I. Simulation configuration | Pedestrian inputs, origins/destinations, routes, demand, scenario presets | Longer-term extension |
