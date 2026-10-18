@@ -1,102 +1,140 @@
 <!doctype html>
-<html lang="en">
+<html lang="th">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Viswalk AI Model Builder v0.4.1</title>
+  <title>Viswalk BIM Builder — Engineering Workspace</title>
+  <meta name="theme-color" content="#14242c" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/studio.css?v=1" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">VA</div>
-        <div>
-          <div class="brand-title">Viswalk AI</div>
-          <div class="brand-subtitle">IFC → Viswalk MVP v0.4.1</div>
+        <div class="brand-mark" aria-hidden="true"><span class="brand-glyph">V</span><span class="brand-glyph-accent"></span></div>
+        <div class="brand-copy">
+          <div class="brand-title">VISWALK</div>
+          <div class="brand-subtitle">BIM BUILDER <span class="brand-edition">STUDIO</span></div>
         </div>
       </div>
 
-      <nav class="workflow">
-        <div class="workflow-step done"><span>01</span> Import</div>
-        <div id="stepAnalyze" class="workflow-step"><span>02</span> Audit</div>
-        <div id="stepExplore" class="workflow-step"><span>03</span> 3D Explorer</div>
-        <div id="stepSelect" class="workflow-step"><span>04</span> Selection</div>
+      <div class="rail-kicker">ENGINEERING WORKSPACE <span>v0.4.1</span></div>
+      <nav class="workflow" aria-label="ลำดับขั้นตอนสร้างโมเดล">
+        <div class="workflow-caption">WORKFLOW <span>7 STAGES</span></div>
+        <div class="workflow-step done"><span>01</span> นำเข้าไฟล์</div>
+        <div id="stepAnalyze" class="workflow-step"><span>02</span> ตรวจสอบ IFC</div>
+        <div id="stepExplore" class="workflow-step"><span>03</span> สำรวจโมเดล 3D</div>
+        <div id="stepSelect" class="workflow-step"><span>04</span> ตรวจเลือกองค์ประกอบ</div>
         <div id="stepPreview" class="workflow-step"><span>05</span> Simulation Preview</div>
-        <div id="stepSemantic" class="workflow-step"><span>06</span> Semantic Mapping</div>
-        <div id="stepBuild" class="workflow-step"><span>07</span> Build Viswalk</div>
+        <div id="stepSemantic" class="workflow-step"><span>06</span> สร้าง Semantic Geometry</div>
+        <div id="stepBuild" class="workflow-step"><span>07</span> สร้าง Viswalk Model</div>
       </nav>
+      <div class="rail-mission">
+        <span class="rail-mission-line"></span>
+        <strong>BIM → SIMULATION</strong>
+        <p>Geometry ที่ตรวจสอบได้<br>ก่อนสร้างแบบจำลองคนเดิน</p>
+      </div>
 
       <div class="sidebar-status">
-        <div class="status-label">Local engine</div>
+        <div class="status-label">LOCAL ENVIRONMENT <span class="health-dot"></span></div>
         <div id="healthText" class="status-value">Checking...</div>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div>
-          <h1>IFC → Simulation Model</h1>
-          <p>Inspect the full BIM source, select simulation-relevant objects, and preview what will become Viswalk geometry.</p>
+        <div class="topbar-heading">
+          <div class="breadcrumb"><span>PROJECT WORKSPACE</span><span class="breadcrumb-separator">/</span><strong>MODEL BUILDER</strong></div>
+          <h1>พื้นที่ทำงานโมเดล <span>BIM <em>→</em> Viswalk</span></h1>
+          <p>เปิดแบบต้นทาง ตรวจสอบองค์ประกอบ และสร้าง Geometry สำหรับการจำลองคนเดิน</p>
         </div>
-        <button id="resetBtn" class="secondary-btn">Reset project</button>
+        <div class="topbar-actions">
+          <div class="session-tag"><span class="session-dot" aria-hidden="true"></span> ทำงานภายในเครื่อง</div>
+          <button id="resetBtn" class="secondary-btn">เริ่มโครงการใหม่</button>
+        </div>
       </header>
 
-      <section class="panel compact-panel">
+      <section class="panel compact-panel" aria-label="แถบคำสั่งสร้างโมเดล">
         <div class="import-row">
-          <label class="file-picker">
-            <input id="fileInput" type="file" accept=".ifc,.pdf,.dxf" />
-            <span>Choose IFC / PDF / DXF</span>
-          </label>
-          <button id="uploadBtn" class="primary-btn" disabled>Import</button>
-          <label class="append-option carry-option" title="Re-apply Include/Exclude/Review decisions by IFC GlobalId when importing a new revision of the same model">
-            <input id="carrySelectionCheck" type="checkbox" checked />
-            <span>Keep review decisions</span>
-          </label>
-          <button id="analyzeBtn" class="secondary-btn" disabled>Analyze</button>
-          <button id="load3dBtn" class="secondary-btn" disabled>Load 3D model</button>
-          <button id="generateSemanticBtn" class="primary-btn" disabled>Generate Semantic Model</button>
-          <span class="import-divider" aria-hidden="true"></span>
-          <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>Download Semantic JSON</button>
-          <button id="downloadEngineTopBtn" class="secondary-btn" disabled>Download Engine JSON</button>
-          <span class="import-divider" aria-hidden="true"></span>
-          <button id="validateBtn" class="secondary-btn" disabled>Validate</button>
-          <button id="buildViswalkBtn" class="build-btn" disabled>Build Viswalk</button>
-          <button id="downloadInpxTopBtn" class="secondary-btn" disabled>Download .inpx</button>
-          <div id="fileMeta" class="file-meta">No file imported</div>
+          <div class="command-group command-source">
+            <div class="command-heading"><span class="command-index">01</span><span>ไฟล์ต้นทาง</span></div>
+            <div class="command-controls">
+              <label class="file-picker" title="นำเข้าไฟล์ IFC; การแปลง PDF/DXF ยังอยู่ระหว่างพัฒนา">
+                <input id="fileInput" type="file" accept=".ifc,.pdf,.dxf" />
+                <span>เลือกไฟล์ BIM <span aria-hidden="true">＋</span></span>
+              </label>
+              <button id="uploadBtn" class="primary-btn" disabled>เปิดโมเดล</button>
+            </div>
+            <div class="source-footer">
+              <div id="fileMeta" class="file-meta" title="ไฟล์ที่เลือกหรือนำเข้า">ยังไม่มีไฟล์ที่นำเข้า</div>
+              <label class="append-option carry-option" title="รักษาสถานะ Include/Exclude/Review ตาม IFC GlobalId เมื่ออัปโหลด Revision ใหม่">
+                <input id="carrySelectionCheck" type="checkbox" checked />
+                <span>รักษาการเลือกเดิม</span>
+              </label>
+            </div>
+          </div>
+          <div class="command-group command-convert">
+            <div class="command-heading"><span class="command-index">02</span><span>ตรวจสอบและเตรียม Geometry</span></div>
+            <div class="command-controls">
+              <button id="analyzeBtn" class="secondary-btn" disabled>ตรวจ IFC</button>
+              <button id="load3dBtn" class="secondary-btn" disabled>โหลดโมเดล 3D</button>
+              <button id="generateSemanticBtn" class="primary-btn" disabled>สร้าง Geometry</button>
+            </div>
+            <div class="command-hint">เลือกวัตถุและตรวจแบบก่อนส่งเข้า Engine</div>
+          </div>
+          <div class="command-group command-output">
+            <div class="command-heading"><span class="command-index">03</span><span>ตรวจสอบและสร้าง Viswalk</span></div>
+            <div class="command-controls">
+              <button id="validateBtn" class="secondary-btn" disabled>ตรวจ Geometry</button>
+              <button id="buildViswalkBtn" class="build-btn" disabled>Build Viswalk <span aria-hidden="true">↗</span></button>
+            </div>
+            <div class="command-hint">ผ่าน Validation ก่อนจึงสร้าง .inpx</div>
+          </div>
+          <div class="command-group command-download">
+            <div class="command-heading"><span class="command-index">04</span><span>ส่งออก</span></div>
+            <details class="export-dropdown">
+              <summary>ไฟล์และรายงาน <span aria-hidden="true">⌄</span></summary>
+              <div class="export-dropdown-items">
+                <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>Semantic JSON</button>
+                <button id="downloadEngineTopBtn" class="secondary-btn" disabled>Engine JSON</button>
+                <button id="downloadInpxTopBtn" class="secondary-btn" disabled>Viswalk .inpx</button>
+              </div>
+            </details>
+          </div>
         </div>
       </section>
 
       <section class="panel message-panel">
-        <div class="eyebrow">SYSTEM</div>
+        <div class="eyebrow">สถานะระบบ</div>
         <div id="messageText">Ready.</div>
       </section>
 
-      <section id="explorerSection" class="explorer-layout hidden">
+      <section id="explorerSection" class="explorer-layout" aria-label="พื้นที่ทำงานตรวจสอบโมเดล">
         <aside class="panel explorer-left">
           <div class="panel-heading tight">
             <div>
-              <div class="eyebrow">MODEL TREE</div>
-              <h2>Visibility</h2>
+              <div class="eyebrow">MODEL HIERARCHY</div>
+              <h2>โครงสร้างโมเดล</h2>
             </div>
           </div>
 
           <div class="filter-block">
-            <div class="filter-title">Storeys</div>
-            <div id="storeyFilters" class="check-list"></div>
+            <div class="filter-title">ชั้นอาคาร</div>
+            <div id="storeyFilters" class="check-list"><div class="tree-empty">ชั้นอาคารจะแสดงหลังนำเข้า IFC</div></div>
           </div>
 
           <div class="filter-block">
-            <div class="filter-title">IFC categories</div>
-            <div id="categoryFilters" class="check-list scroll-list"></div>
+            <div class="filter-title">ประเภทองค์ประกอบ IFC</div>
+            <div id="categoryFilters" class="check-list scroll-list"><div class="tree-empty">ยังไม่มีองค์ประกอบ</div></div>
           </div>
 
           <div class="filter-block">
-            <div class="filter-title">Selection summary</div>
+            <div class="filter-title">สรุปการคัดเลือก</div>
             <div class="mini-summary">
-              <div><span>Include</span><strong id="effectiveInclude">0</strong></div>
-              <div><span>Review</span><strong id="effectiveReview">0</strong></div>
-              <div><span>Exclude</span><strong id="effectiveExclude">0</strong></div>
+              <div><span>นำเข้า</span><strong id="effectiveInclude">0</strong></div>
+              <div><span>รอตรวจสอบ</span><strong id="effectiveReview">0</strong></div>
+              <div><span>ไม่ใช้</span><strong id="effectiveExclude">0</strong></div>
             </div>
           </div>
         </aside>
@@ -104,27 +142,45 @@
         <section class="panel viewer-panel">
           <div class="viewer-toolbar">
             <div class="mode-switch">
-              <button id="sourceModeBtn" class="mode-btn active">Source IFC</button>
+              <button id="sourceModeBtn" class="mode-btn active">โมเดลต้นฉบับ</button>
               <button id="simulationModeBtn" class="mode-btn">Simulation Preview</button>
             </div>
             <div class="toolbar-actions">
-              <button id="fitModelBtn" class="icon-btn">Fit model</button>
-              <button id="fitSelectionBtn" class="icon-btn">Fit selection</button>
-              <button id="isolateBtn" class="icon-btn">Isolate selected</button>
-              <button id="showAllBtn" class="icon-btn">Show all</button>
-              <button id="wireframeBtn" class="icon-btn">Wireframe</button>
+              <button id="fitModelBtn" class="icon-btn" title="แสดงโมเดลทั้งหมด">พอดีโมเดล</button>
+              <button id="fitSelectionBtn" class="icon-btn" title="ขยายไปยังวัตถุที่เลือก">พอดีวัตถุ</button>
+              <button id="isolateBtn" class="icon-btn" title="แยกแสดงเฉพาะวัตถุที่เลือก">Isolate</button>
+              <button id="showAllBtn" class="icon-btn" title="แสดงวัตถุทั้งหมด">แสดงทั้งหมด</button>
+              <button id="wireframeBtn" class="icon-btn" title="สลับการแสดงแบบโครงลวด">Wireframe</button>
             </div>
           </div>
 
           <div id="viewerCanvasHost" class="viewer-host">
+            <div class="viewport-ident" aria-hidden="true">
+              <span class="viewport-ident-mark"></span>
+              <span>3D MODEL SPACE <small> / IFC GEOMETRY</small></span>
+            </div>
             <div id="viewerEmpty" class="viewer-empty">
-              <strong>IFC 3D Viewer</strong>
-              <span>Run Analyze, then Load 3D model.</span>
+              <div class="viewer-empty-illustration" aria-hidden="true">
+                <svg viewBox="0 0 168 138" xmlns="http://www.w3.org/2000/svg" fill="none">
+                  <path d="M85 15 143 46v63l-58 30-59-30V46L85 15Z" fill="#e5eef0" stroke="#93a6ad" stroke-width="1.5"/>
+                  <path d="m85 15 58 31-58 31-59-31 59-31Z" fill="#f6faf9" stroke="#738b96" stroke-width="1.5"/>
+                  <path d="M85 77v62M26 46v63M143 46v63" stroke="#8ea3ad" stroke-width="1.5"/>
+                  <path d="m26 67 59 32 58-32M26 88l59 31 58-31" stroke="#afbfc4" stroke-width="1.1" stroke-dasharray="4 4"/>
+                  <path d="M84 15v25M71 22v13M98 22v13" stroke="#afc0c3" stroke-width="1.2"/>
+                  <path d="M111 63v25l16-8V55" stroke="#1b8692" stroke-width="2.5"/>
+                  <circle cx="111" cy="63" r="3" fill="#1b8692"/>
+                  <path d="M8 118h15M16 111v15M145 18h16M153 10v16" stroke="#90a5a9" stroke-width="1.4"/>
+                </svg>
+              </div>
+              <div class="viewer-empty-overline">MODEL WORKSPACE · READY</div>
+              <strong>เปิดโมเดล BIM เพื่อเริ่มทำงาน</strong>
+              <span>เลือกไฟล์ IFC จากแถบคำสั่งด้านบน<br/>เพื่อตรวจสอบและเตรียมพื้นที่เดินสำหรับ Viswalk</span>
+              <div class="viewer-empty-formats">IFC2x3 <span>·</span> IFC4 <span>·</span> IFC4.3</div>
             </div>
           </div>
 
           <div class="viewer-footer">
-            <span id="viewerStatus">3D geometry not loaded</span>
+            <span id="viewerStatus">ยังไม่ได้โหลดข้อมูลเรขาคณิต 3D</span>
             <span id="previewNote"></span>
           </div>
         </section>
@@ -132,12 +188,12 @@
         <aside class="panel inspector-panel">
           <div class="panel-heading tight">
             <div>
-              <div class="eyebrow">ELEMENT INSPECTOR</div>
-              <h2 id="selectedName">No selection</h2>
+              <div class="eyebrow">ELEMENT PROPERTIES</div>
+              <h2 id="selectedName">รายละเอียดวัตถุ</h2>
             </div>
           </div>
 
-          <div id="emptyInspector" class="empty-inspector">Click an IFC object in the 3D viewer.</div>
+          <div id="emptyInspector" class="empty-inspector"><span class="empty-inspector-icon" aria-hidden="true">⌖</span>คลิกวัตถุในพื้นที่ 3D<br>เพื่อดูข้อมูลและกำหนดการใช้งาน</div>
 
           <div id="inspectorContent" class="hidden">
             <dl class="property-grid">
@@ -150,12 +206,12 @@
             </dl>
 
             <div class="status-editor">
-              <div class="filter-title">Selection status</div>
+              <div class="filter-title">สถานะการใช้งานใน Viswalk</div>
               <div class="status-buttons">
-                <button data-status="auto" class="status-btn">Auto</button>
-                <button data-status="include" class="status-btn include">Include</button>
-                <button data-status="review" class="status-btn review">Review</button>
-                <button data-status="exclude" class="status-btn exclude">Exclude</button>
+                <button data-status="auto" class="status-btn">อัตโนมัติ</button>
+                <button data-status="include" class="status-btn include">นำเข้า</button>
+                <button data-status="review" class="status-btn review">รอตรวจ</button>
+                <button data-status="exclude" class="status-btn exclude">ไม่ใช้</button>
               </div>
               <div id="effectiveStatus" class="effective-status">—</div>
             </div>
@@ -168,8 +224,8 @@
       <section id="largeModelSection" class="panel hidden large-model-section">
         <div class="panel-heading">
           <div>
-            <div class="eyebrow">LARGE IFC MODE</div>
-            <h2>Filtered / Storey-based 3D loading</h2>
+            <div class="eyebrow">GEOMETRY LOADING</div>
+            <h2>ตั้งค่าการแสดงโมเดลขนาดใหญ่</h2>
           </div>
           <span id="largeModelBadge" class="badge">Standard model</span>
         </div>
@@ -216,7 +272,7 @@
       <section id="auditSection" class="panel hidden">
         <div class="panel-heading">
           <div>
-            <div class="eyebrow">IFC PRE-FLIGHT</div>
+            <div class="eyebrow">MODEL AUDIT / PRE-FLIGHT</div>
             <h2 id="projectName">IFC Audit</h2>
           </div>
           <div class="badges">
@@ -240,7 +296,7 @@
       <section id="semanticSection" class="panel hidden semantic-section">
         <div class="panel-heading">
           <div>
-            <div class="eyebrow">ENGINE-READY SEMANTIC MODEL</div>
+            <div class="eyebrow">SIMULATION GEOMETRY</div>
             <h2>IFC → Geometry Engine v0.3</h2>
           </div>
           <div class="semantic-actions">
@@ -291,7 +347,7 @@
       <section id="buildSection" class="panel hidden build-section">
         <div class="panel-heading">
           <div>
-            <div class="eyebrow">VISSIM / VISWALK BUILD</div>
+            <div class="eyebrow">BUILD / VALIDATION</div>
             <h2>Geometry Engine v0.3 → Vissim COM 2025</h2>
           </div>
           <div class="semantic-actions">
@@ -318,7 +374,7 @@
       <section id="categorySection" class="panel hidden">
         <div class="panel-heading tight">
           <div>
-            <div class="eyebrow">IFC CATEGORY AUDIT</div>
+            <div class="eyebrow">MODEL CLASSIFICATION</div>
             <h2>Automatic mapping rules</h2>
           </div>
         </div>
