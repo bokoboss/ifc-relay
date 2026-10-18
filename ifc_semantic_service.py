@@ -1157,7 +1157,7 @@ def build_semantic_model(
         for level in levels
         if not level.get("generated")
     ] + [
-        {"key": int(lv["key"]), "z": float(lv["match_z"])} for lv in landing_levels
+        {"key": int(lv["key"]), "z": float(lv["match_z"]), "generated": True} for lv in landing_levels
     ]
 
     def _included(entity: Any) -> bool:
