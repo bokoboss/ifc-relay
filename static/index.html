@@ -6,54 +6,46 @@
   <title>Viswalk BIM Builder — Engineering Workspace</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/studio.css?v=1" />
+  <link rel="stylesheet" href="/static/studio.css?v=2" />
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true"><span class="brand-glyph">V</span><span class="brand-glyph-accent"></span></div>
-        <div class="brand-copy">
-          <div class="brand-title">VISWALK</div>
-          <div class="brand-subtitle">BIM BUILDER <span class="brand-edition">STUDIO</span></div>
-        </div>
-      </div>
-
-      <div class="rail-kicker">ENGINEERING WORKSPACE <span>v0.4.1</span></div>
-      <nav class="workflow" aria-label="ลำดับขั้นตอนสร้างโมเดล">
-        <div class="workflow-caption">WORKFLOW <span>7 STAGES</span></div>
-        <div class="workflow-step done"><span>01</span> นำเข้าไฟล์</div>
-        <div id="stepAnalyze" class="workflow-step"><span>02</span> ตรวจสอบ IFC</div>
-        <div id="stepExplore" class="workflow-step"><span>03</span> สำรวจโมเดล 3D</div>
-        <div id="stepSelect" class="workflow-step"><span>04</span> ตรวจเลือกองค์ประกอบ</div>
-        <div id="stepPreview" class="workflow-step"><span>05</span> Simulation Preview</div>
-        <div id="stepSemantic" class="workflow-step"><span>06</span> สร้าง Semantic Geometry</div>
-        <div id="stepBuild" class="workflow-step"><span>07</span> สร้าง Viswalk Model</div>
-      </nav>
-      <div class="rail-mission">
-        <span class="rail-mission-line"></span>
-        <strong>BIM → SIMULATION</strong>
-        <p>Geometry ที่ตรวจสอบได้<br>ก่อนสร้างแบบจำลองคนเดิน</p>
-      </div>
-
-      <div class="sidebar-status">
-        <div class="status-label">LOCAL ENVIRONMENT <span class="health-dot"></span></div>
-        <div id="healthText" class="status-value">Checking...</div>
-      </div>
-    </aside>
-
     <main class="main">
       <header class="topbar">
+        <div class="topbar-brand" aria-label="Viswalk BIM Builder">
+          <div class="brand-mark" aria-hidden="true"><span class="brand-glyph">V</span><span class="brand-glyph-accent"></span></div>
+          <div class="topbar-brand-copy">
+            <div class="brand-title">VISWALK</div>
+            <div class="brand-subtitle">BIM BUILDER <span class="brand-edition">STUDIO</span></div>
+          </div>
+        </div>
+        <div class="topbar-divider" aria-hidden="true"></div>
         <div class="topbar-heading">
-          <div class="breadcrumb"><span>PROJECT WORKSPACE</span><span class="breadcrumb-separator">/</span><strong>MODEL BUILDER</strong></div>
+          <div class="breadcrumb"><span>ENGINEERING WORKSPACE</span><span class="breadcrumb-separator">/</span><strong>MODEL BUILDER</strong></div>
           <h1>พื้นที่ทำงานโมเดล <span>BIM <em>→</em> Viswalk</span></h1>
-          <p>เปิดแบบต้นทาง ตรวจสอบองค์ประกอบ และสร้าง Geometry สำหรับการจำลองคนเดิน</p>
+          <p>เปิดแบบ ตรวจสอบองค์ประกอบ และสร้างเรขาคณิตสำหรับการจำลองคนเดิน</p>
         </div>
         <div class="topbar-actions">
-          <div class="session-tag"><span class="session-dot" aria-hidden="true"></span> ทำงานภายในเครื่อง</div>
+          <details class="environment-menu">
+            <summary class="environment-trigger"><span class="health-dot" aria-hidden="true"></span> Local Engine <span class="environment-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="environment-popover">
+              <div class="environment-title">สถานะระบบภายในเครื่อง</div>
+              <div id="healthText" class="status-value">กำลังตรวจสอบระบบ...</div>
+            </div>
+          </details>
           <button id="resetBtn" class="secondary-btn">เริ่มโครงการใหม่</button>
         </div>
       </header>
+
+      <!-- Keep workflow state anchors for the current JS contract; no permanent steps sidebar. -->
+      <div class="workflow-state hidden" hidden aria-hidden="true">
+        <span id="stepAnalyze"></span>
+        <span id="stepExplore"></span>
+        <span id="stepSelect"></span>
+        <span id="stepPreview"></span>
+        <span id="stepSemantic"></span>
+        <span id="stepBuild"></span>
+      </div>
 
       <section class="panel compact-panel" aria-label="แถบคำสั่งสร้างโมเดล">
         <div class="import-row">
