@@ -18,12 +18,14 @@ from ifc_geometry_service import extract_ifc_geometry
 from ifc_semantic_service import build_semantic_model, write_semantic_model
 from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
+from project_paths import project_root
 from state_store import ProjectStateStore
 from vissim_build_service import build_vissim_model, validate_engine_input
 
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = APP_DIR.parent
+PROJECT_ROOT = project_root()
+PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
 STATIC_DIR = APP_DIR / "static"
 RUNTIME_DIR = APP_DIR / "runtime"
 UPLOAD_DIR = RUNTIME_DIR / "uploads"

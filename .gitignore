@@ -39,3 +39,6 @@ geometry_ifc_*.json
 *_geometry_v03.json
 *_geometry_engine_report.json
 *_validation_v04.json
+
+# Local engine, base network, fixtures and outputs (never committed)
+local/
