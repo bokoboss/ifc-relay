@@ -61,6 +61,30 @@ def test_three_pane_workspace_and_stages_exist() -> None:
         assert name in dom.ids
 
 
+
+def test_no_permanent_workflow_sidebar() -> None:
+    """Legacy progress IDs remain for JS state but must not consume viewport width."""
+    dom = parsed()
+    assert '<aside class="sidebar">' not in HTML
+    assert '<nav class="workflow"' not in HTML
+    assert 'class="workflow-state hidden"' in HTML
+    assert "topbar-brand" in HTML
+    assert "environment-menu" in HTML
+    assert dom.tags["healthText"] == "div"
+    assert ".app-shell {display:block;" in STUDIO
+    assert ".workflow-state {display:none!important;}" in STUDIO
+
+
+def test_primary_engineering_layout_preserved() -> None:
+    dom = parsed()
+    assert dom.tags["explorerSection"] == "section"
+    assert "hidden" not in dom.classes["explorerSection"]
+    assert dom.tags["viewerCanvasHost"] == "div"
+    assert dom.tags["storeyFilters"] == "div"
+    assert dom.tags["categoryFilters"] == "div"
+    assert dom.tags["inspectorContent"] == "div"
+
+
 def test_controls_and_exports_remain_wired() -> None:
     dom = parsed()
     for name in (
@@ -78,8 +102,8 @@ def test_controls_and_exports_remain_wired() -> None:
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
     assert "/static/styles.css" in dom.anchors
-    assert "/static/studio.css?v=1" in dom.anchors
-    assert dom.anchors.index("/static/studio.css?v=1") > dom.anchors.index("/static/styles.css")
+    assert "/static/studio.css?v=2" in dom.anchors
+    assert dom.anchors.index("/static/studio.css?v=2") > dom.anchors.index("/static/styles.css")
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
     assert "@import" not in STUDIO
