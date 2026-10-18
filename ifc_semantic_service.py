@@ -20,6 +20,7 @@ from ifc_service import (
 )
 from ifc_vertical_service import (
     INTERMEDIATE_LANDING_THRESHOLD,
+    LANDING_LEVEL_KEY_START,
     LEVEL_SNAP_TOLERANCE,
     build_vertical_connections,
     children_map,
@@ -32,6 +33,44 @@ from ifc_vertical_service import (
 EPS = 1e-8
 # Storey elevation vs. floor-slab top difference that is reported as a datum warning.
 STOREY_DATUM_WARNING = 0.05
+
+
+# Default first keys per engine-facing collection. They are kept whenever the
+# collection fits below the next default, so small models keep their keys.
+DEFAULT_KEY_STARTS: tuple[tuple[str, int], ...] = (
+    ("areas", 1001),
+    ("walls", 1101),
+    ("columns", 1301),
+    ("obstacles", 1401),
+    ("vertical_connections", 2001),
+)
+KEY_BLOCK = 1000
+
+
+def assign_key_ranges(collections: dict[str, list[dict[str, Any]]]) -> dict[str, list[int]]:
+    """Give every engine object a key that is unique across all collections.
+
+    v0.4.1a used fixed starts (areas 1001, walls 1101, columns 1301,
+    obstacles 1401, vertical 2001), so >100 areas or >200 wall segments
+    overlapped the next range. Each collection now starts at its default when
+    that is free, otherwise at the next free block of 1000 (x001). Order inside
+    each collection is preserved. Returns ``{name: [first, last]}``.
+    """
+    ranges: dict[str, list[int]] = {}
+    next_free = 0
+    for name, default in DEFAULT_KEY_STARTS:
+        items = collections.get(name) or []
+        start = default
+        if start < next_free:
+            start = ((next_free - 1) // KEY_BLOCK + 1) * KEY_BLOCK + 1
+        for i, item in enumerate(items):
+            item["key"] = start + i
+        if items:
+            ranges[name] = [start, start + len(items) - 1]
+            next_free = start + len(items)
+        else:
+            next_free = max(next_free, start)
+    return ranges
 
 
 def effective_status(entity: Any, overrides: dict[str, str]) -> str:
@@ -664,6 +703,7 @@ def build_semantic_model(
     landing_levels = cluster_landing_levels(
         [c["top_z"] for c in intermediate_landings],
         [{"key": k, "z": z} for k, z in level_datum_by_key.items()],
+        key_start=max(LANDING_LEVEL_KEY_START, len(levels) + 1),
     )
     landing_area_count = 0
     for landing_level in landing_levels:
@@ -938,6 +978,14 @@ def build_semantic_model(
                 "it is exported only as an obstacle footprint. Model the elevator in Viswalk manually."
             )
 
+    key_ranges = assign_key_ranges({
+        "areas": areas,
+        "walls": walls,
+        "columns": columns,
+        "obstacles": obstacles,
+        "vertical_connections": vertical_connections,
+    })
+
     # ---------------------------------------------------------
     # Summary / audit metadata
     # ---------------------------------------------------------
@@ -999,6 +1047,7 @@ def build_semantic_model(
             "schema_version": "0.5.0-dev",
             "ifc_schema": str(model.schema),
             "unit_scale_to_m": unit_scale,
+            "key_ranges": key_ranges,
             "selection_overrides": selection_overrides,
             "summary": summary,
             "warnings": warnings,
