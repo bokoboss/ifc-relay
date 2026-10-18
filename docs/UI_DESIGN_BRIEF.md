@@ -24,52 +24,58 @@ Frontend v0.4.1 เดิมเป็นแบบ dashboard: Sidebar แสด�
 ลักษณะเด่น:
 1. **Canvas-first:** 3D Workspace เป็นพื้นที่หลัก มองเห็นตั้งแต่ก่อนเปิดไฟล์
 2. **Full-width three-pane workbench:** ไม่มี Sidebar Workflow; Model Hierarchy ซ้าย / Viewer กลาง / Properties ขวา และขยายพื้นที่ Viewer
-3. **Stage-based commands:** Import → Prepare Geometry → Validate & Build → Export; Downloads ที่ไม่ใช่ Primary Action อยู่ในเมนูเดียว
+3. **Single-row primary toolbar:** เลือกไฟล์/เปิดโมเดล → เตรียมโมเดลคนเดิน → ตรวจสอบโมเดล → สร้างไฟล์ Viswalk; Analyze/Load 3D/Export เป็นคำสั่งรองในเมนูเพิ่มเติม (Desktop 1366 px ขึ้นไปควรเหลือแถวเดียว)
 4. **System traceability:** Status Strip แจ้งข้อความจาก Backend; Local Engine status ย้ายเป็นเมนูสถานะที่ Top Bar
 5. **Visual discipline:** ใช้สีเขียวอมฟ้าสำหรับการทำงานทั่วไป สีดินเผาสำหรับ Build, สีเหลืองสำหรับ Review และแดงเฉพาะ Error
 6. **Clear hierarchy:** ขนาดฟอนต์ทั่วไป 12–14 px, ชื่อขั้นตอน 11–12 px, หัวข้อ 15–23 px
 7. **Offline-friendly:** ไม่มี External Fonts, CDN หรือการเชื่อมต่อ API ใหม่จากการแก้ดีไซน์นี้
 
-## 3. Layout — No Sidebar
+## 3. Layout — No Sidebar, Minimal Toolbar
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ [V] VISWALK BIM BUILDER │ ENGINEERING WORKSPACE │ Local Engine │ Reset     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  01 FILE INPUT  │ 02 GEOMETRY PREP │ 03 VALIDATE + BUILD │ 04 EXPORT       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  status strip                                                               │
-├───────────────────────┬───────────────────────────────────┬─────────────────┤
-│ MODEL TREE            │ Source IFC | Simulation Preview   │ PROPERTIES      │
-│  Storeys              ├───────────────────────────────────┤  IFC Type       │
-│  Categories           │                                   │  Level          │
-│  Selection summary    │          3D MODEL SPACE           │  GlobalId       │
-│                       │          primary workspace        │  Include/Review │
-│                       │                                   │  Exclude        │
-│                       ├───────────────────────────────────┤                 │
-│                       │ geometry / loading status         │                 │
-├───────────────────────┴───────────────────────────────────┴─────────────────┤
-│ Audit / Large IFC / Semantic / Validation & Build / Category Details        │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [V] VISWALK BIM BUILDER    ENGINEERING WORKSPACE    Local Engine    Reset    │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [เลือกไฟล์ BIM] [เปิดโมเดล] │ [เตรียมโมเดลคนเดิน] [ตรวจสอบโมเดล]               │
+│                                             [สร้างไฟล์ Viswalk]  [เพิ่มเติม]   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Status Strip — File Imported / Geometry Ready / Validation / Errors          │
+├───────────────────────┬──────────────────────────────────────┬───────────────┤
+│ MODEL TREE            │ โมเดลต้นฉบับ / โมเดลคนเดิน           │ PROPERTIES     │
+│ Storeys               ├──────────────────────────────────────┤ IFC Type       │
+│ Categories            │                                      │ Level          │
+│ Selection summary     │         3D MODEL WORKSPACE           │ GlobalId       │
+│                       │  พื้นที่เดิน / ผนัง / สิ่งกีดขวาง  │ Include/Review │
+│                       │                                      │ Exclude        │
+│                       ├──────────────────────────────────────┤               │
+│                       │ Viewer Status                        │               │
+├───────────────────────┴──────────────────────────────────────┴───────────────┤
+│ IFC Audit / Large IFC / Semantic / Validation / Build / Category Details    │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**ลำดับคำสั่งไม่ได้ถูกลบ:** ปุ่มต่าง ๆ ยังแสดง Enable/Disable ตามเงื่อนไขเดิม, Status Strip แจ้งความคืบหน้า และ `stepAnalyze/stepExplore/stepSelect/stepPreview/stepSemantic/stepBuild` ยังเก็บเป็น hidden DOM anchors เพื่อไม่ให้ JavaScript ที่มีอยู่เกิด Regression การลบสถานะภายในจะพิจารณาใน PR refactor ต่างหาก
+**แถบคำสั่งในรูปคือองค์ประกอบของแถวเดียวเมื่อ Desktop มีความกว้างเพียงพอ** แต่แสดงเป็นสองบรรทัดในผังเพื่อความชัดเจน; CSS ตั้งให้แยกเป็นหลายแถวเมื่อ viewport ไม่เกิน 1120 px เพื่อไม่ให้ปุ่มทับกัน
+
+**ลำดับคำสั่งไม่ได้ถูกลบ:** ปุ่มต่าง ๆ ยังถูกเปิด/ปิดตามเงื่อนไขเดิม, Status Strip แสดงความคืบหน้า และ hidden DOM anchors สำหรับ `stepAnalyze/stepExplore/stepSelect/stepPreview/stepSemantic/stepBuild` คงไว้เพื่อป้องกัน JavaScript Regression
+
+**คำว่า “เตรียมโมเดลคนเดิน” หมายถึง:** สร้าง Semantic/Engine Geometry จาก IFC ไม่ใช่การโหลดโมเดลต้นฉบับซ้ำ; ระบบจะเรียก `loadSemantic()` และสลับเป็นโหมดโมเดลคนเดินใน 3D อัตโนมัติหลังสร้างสำเร็จ หากข้อมูลถูกสร้างสำเร็จแต่ Preview มีปัญหา ต้องยังดาวน์โหลดไฟล์ JSON และตรวจสอบเหตุได้
 
 **พื้นที่หน้าจอเป้าหมาย:** Desktop 1920×1080 และ 1366×768; Tablet 1024×768; Mobile 390×844 เป็นรอง
 
 ## 4. สิ่งที่แก้ใน PR นี้
 
-- `static/index.html`: ย้าย Branding และ Local Engine ไป Top Bar, ลบ Sidebar 7 ขั้นจาก Layout, ปรับ Command grouping และ Empty Model State โดยรักษา ID ของ Control และ API contract เดิม
-- `static/studio.css`: ใช้ Full-width Workspace ไม่มี Rail Sidebar, เพิ่ม responsive top bar และ Design Tokens, command bar, 3D workbench, audit sections
-- `tests/test_ui_workbench_contract.py`: ทดสอบ DOM IDs, การไม่มี Sidebar ถาวร, UI state anchors ที่ยังคงอยู่, CSS loading และ viewer visible shell
-- ไม่มีการแก้ `app.py`, `app.js`, `app3d.js`, geometry engine, IFC parser, COM adapter หรือระบบ state
+- `static/index.html`: Branding และ Local Engine อยู่ใน Top Bar, ไม่มี Sidebar และ Stage numbers; ทำ Single-row Toolbar พร้อมชื่อปุ่ม “เตรียมโมเดลคนเดิน” และเมนู “เพิ่มเติม”; คง DOM IDs และ API contract
+- `static/studio.css`: Full-width Workspace, Compact Toolbar สำหรับ Desktop, พื้นที่ 3D ที่ปรับตามความสูงหน้าจอ และ Responsive Breakpoint (1120/1060/730 px)
+- `tests/test_ui_workbench_contract.py`: ทดสอบ DOM IDs, การไม่มี Sidebar ถาวร, Single-row Command Bar, ปุ่ม Semantic ที่เปลี่ยนชื่อ และ Automatic Simulation Preview
+- `static/app.js`: แก้เฉพาะพฤติกรรมแจ้งสถานะหลัง Semantic Generation ให้ยืนยันการสลับ Simulation Preview ใน 3D และแจ้งเหตุหาก Preview ไม่พร้อม โดยไม่แตะ Backend/API
+- ไม่มีการแก้ `app.py`, `app3d.js`, geometry engine, IFC parser, COM adapter หรือระบบ state
 
 ## 5. คำแนะนำการใช้งาน
 
 - เปิดไฟล์ IFC แล้วระบบควร Audit + Load 3D อัตโนมัติเช่นเดิม (จาก PR #9)
 - กดองค์ประกอบใน Viewer แล้วข้อมูลแสดงใน Inspector; สถานะ Include/Review/Exclude ต้องยังทำงานเหมือนเดิม
-- Stage Build ไม่ควรใช้งานได้ก่อนมี Semantic Model และ Validation
-- Download Semantic, Engine JSON และ INPX ย้ายเข้าเมนู **ไฟล์และรายงาน** แต่ Button IDs/handlers ยังเดิม
+- เป้าหมาย UX คือให้ผู้ใช้ตรวจ Geometry ก่อน Build ตามลำดับที่แสดง; **ปัจจุบันต้องยังตรวจ Backend Validation Gate/สถานะปุ่มจริงใน Browser** ก่อนอ้างว่า UI บังคับ Validate แล้ว
+- Download Semantic, Engine JSON และ INPX รวมทั้ง Analyze และ Load 3D ซ้ำ ย้ายเข้าเมนู **เพิ่มเติม** โดย Button IDs/handlers ยังเดิม
 - รายละเอียด Large IFC / Audit / Semantic / Build ยังคงแสดงด้านล่างเพื่อไม่เปลี่ยน workflow ในรอบแรก
 - รุ่นถัดไปสามารถทำ Inspector tabs, dockable panes, keyboard shortcuts, building-floor navigator และ persistent workspaces ได้โดยแยก PR
 
@@ -80,8 +86,8 @@ Frontend v0.4.1 เดิมเป็นแบบ dashboard: Sidebar แสด�
 3. คลิก Wall/Door/Slab → ตรวจ Inspector, การตั้งค่า Include/Review/Exclude และไฟล์ Semantic ที่ได้
 4. Large IFC: เลือก Storey/Full mode/Append ไม่ขัดกับ Viewer
 5. Generate Semantic → Validate → Build Vissim COM → Download
-6. ทดสอบที่ 1920×1080, 1366×768, 1024×768 และ 390×844; ไม่เกิด horizontal overflow
-7. เปิด Keyboard focus, Export Dropdown, Local Engine status popover, Disabled State และรีเฟรชหน้ากลาง Workflow
+6. ทดสอบที่ 1920×1080, **1366×768 (Command Bar แถวเดียว)**, 1024×768 และ 390×844; ไม่เกิด horizontal overflow
+7. ทดสอบ Keyboard focus, **เมนูเพิ่มเติม (รวม Analyze, Load 3D, Carry Selection, Export)**, Local Engine status popover, Disabled State และรีเฟรชหน้ากลาง Workflow
 
 **การแก้แบบ Design-only ยังไม่ได้รับประกันว่าทุกหน้าจอแสดงผลสมบูรณ์** ต้องทดสอบใน Browser/Windows จริงก่อน Merge
 
