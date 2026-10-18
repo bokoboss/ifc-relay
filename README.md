@@ -48,7 +48,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 | Large IFC workflow | Relevant-geometry filtering, per-storey loading, whole-building inspection | **Implemented; viewer tested on large IFC** |
 | Walkable areas | Merge floor panels; track internal voids | **Implemented; unit tested; large-model QA pending** |
 | Validation & export | Check geometry, download JSON, run local Vissim COM build and generate `.inpx` with reports | **Validated on small baseline** |
-| Vertical circulation | Resolve true stair/ramp/elevator geometry and floor-to-floor links | **Planned / under development** |
+| Vertical circulation | Stair/ramp flights from mesh geometry, intermediate landing levels, level snapping with explicit offsets ([details](docs/VERTICAL_CIRCULATION.md)) | **Implemented (v0.5 draft); synthetic-IFC tested; Vissim QA pending. Elevators planned** |
 | Drawing inputs | Full DXF/PDF interpretation and editable 2D review in the app | **Planned; not supported by the current web workflow** |
 | Pedestrian demand/results | Set origins/destinations, run simulation, summarize KPIs | **Longer-term extension; not implemented** |
 
@@ -86,6 +86,13 @@ The present scripts assume a local project layout and are not yet packaged as a 
 ## Engineering quality and roadmap
 
 See [Product Vision & Scope](docs/PRODUCT_VISION.md) for acceptance criteria, risks and planned phases. Baseline regression scripts are included, but some tests require separately supplied IFC files and local Vissim.
+
+Self-contained tests build synthetic IFC models in code and need no project files or Vissim:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests
+```
 
 ## Data, trademark and licensing
 
