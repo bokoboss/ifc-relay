@@ -184,6 +184,10 @@ def distinct_end_level(
     others = [lv for lv in levels if int(lv["key"]) != int(start_key)]
     if not others:
         return None
+    # Prefer storey levels: a generated landing level elsewhere in the
+    # building has no area under this flight.
+    storeys = [lv for lv in others if not lv.get("generated")]
+    others = storeys or others
     above = [lv for lv in others if float(lv["z"]) >= z_top]
     pool = above or others
     best = min(pool, key=lambda lv: abs(float(lv["z"]) - z_top))
