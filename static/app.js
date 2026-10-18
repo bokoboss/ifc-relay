@@ -275,7 +275,7 @@ uploadBtn.addEventListener('click', async () => {
           const large = audit.large_model?.detected;
           setMessage(large
             ? 'Large IFC: first storey with geometry loaded. Pick other storeys (or append) in the load panel.'
-            : 'Model loaded. Review the selection, then Generate Semantic Model.');
+            : 'เปิดโมเดลแล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"');
         }
       }
     } else {
@@ -376,7 +376,7 @@ async function runLoad3d() {
     setMessage(
       request.append
         ? 'Storey appended to 3D view. Review selection or add another storey.'
-        : 'Filtered 3D IFC loaded. Review selection, then Generate Semantic Model.'
+        : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"'
     );
     return true;
   } catch (error) {
@@ -700,7 +700,7 @@ function renderOpeningCandidates(candidates) {
           body: JSON.stringify({ global_id: c.global_id, status: input.checked ? 'include' : 'auto' }),
         });
         c.decision = input.checked ? 'include' : 'auto';
-        setMessage('Opening decision saved. Generate Semantic Model again to apply it.');
+        setMessage('บันทึกการเปิดช่องแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
       } catch (error) {
         input.checked = !input.checked;
         setMessage(`Could not save opening decision: ${error.message}`);
