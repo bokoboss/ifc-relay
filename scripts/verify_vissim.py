@@ -32,6 +32,7 @@ from typing import Any
 
 APP_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_DIR))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from project_paths import BASE_NETWORK_FILE, engine_path, project_root  # noqa: E402
 
@@ -329,7 +330,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--skip-build", action="store_true", help="do everything except the Vissim COM build")
     parser.add_argument("--no-open", action="store_true", help="do not open the report folder at the end")
+    parser.add_argument("--ifc", help="dry-run a real IFC (audit -> geometry -> semantic -> engine validation), no Vissim needed")
+    parser.add_argument("--redact", action="store_true", help="with --ifc: remove file/project/storey names and paths from the report")
+    parser.add_argument("--stairs-review-only", action="store_true",
+                        help="with --ifc: keep stairs review-only (app default) instead of including all stairs")
     args = parser.parse_args()
+
+    if args.ifc:
+        from ifc_dry_run import run_ifc_check
+
+        if not args.skip_build:
+            print("Note: --ifc runs a dry run only (no Vissim build). Use the app to build a real model.")
+        overall, md = run_ifc_check(Path(args.ifc), include_stairs=not args.stairs_review_only, redact=args.redact)
+        if not args.no_open and os.name == "nt":
+            try:
+                os.startfile(str(md.parent))  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        return 1 if overall == "FAIL" else 0
 
     root = project_root()
     out_dir = root / "output" / f"verify_{datetime.now():%Y%m%d_%H%M%S}"

@@ -86,6 +86,16 @@ Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (th
 4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
 5. On the Vissim machine, double-click **`verify_vissim.bat`**: runs the automated tests (including engine-contract tests), Fixture #1 if `local\TallBuilding.ifc` exists, builds a synthetic verification model (straight stair, U-stair with landing, partial flight, L-wall, closed wall loop, door-less opening) through Vissim COM, and writes `output\verify_<time>\report.md` with a short manual checklist for Vissim. Use `verify_vissim.bat -SkipBuild` to skip the COM build.
 
+**Check a real IFC without Vissim** (no `base_empty.inpx` needed):
+
+```bat
+verify_vissim.bat -Ifc "D:\Models\building.ifc" -SkipBuild
+verify_vissim.bat -Ifc "D:\Models\building.ifc" -SkipBuild -Redact            &REM report safe to share
+verify_vissim.bat -Ifc "D:\Models\building.ifc" -SkipBuild -StairsReviewOnly  &REM keep app default for stairs
+```
+
+Runs import (read-only, SHA-256 checked before/after) → IFC audit → geometry extraction → pedestrian-model conversion → Geometry Engine validation, and writes `output\ifc_check_<name>_<time>\report.md` and `report.json` with step timings, element counts, converted objects, skipped objects with reasons, all warnings and the engine result (PASS / WARN / FAIL). Passing this check is **not** a Viswalk check. `-Redact` removes the file name, paths and project/site/building/storey names from the report; unredacted intermediate files stay in `_private\`. Example: [`docs/examples/sample_ifc_check_report.md`](docs/examples/sample_ifc_check_report.md).
+
 Lookup order (`project_paths.py`): engine `VBB_GEOMETRY_ENGINE` -> `local\` -> bundled `engine\` -> parent folder; base network and outputs `VBB_PROJECT_ROOT` -> `local\` -> parent folder. `local\` is git-ignored.
 
 ## Local development (Windows)
