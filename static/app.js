@@ -715,7 +715,7 @@ function renderOpeningCandidates(candidates) {
 
 generateSemanticBtn.addEventListener('click', async () => {
   generateSemanticBtn.disabled = true;
-  setMessage('Generating authoritative simulation-relevant geometry and consolidating floor slabs per storey...');
+  setMessage('กำลังเตรียมโมเดลคนเดิน: รวมพื้นที่เดิน แปลงผนังและช่องเปิดตามองค์ประกอบที่เลือก...');
   try {
     const result = await api('/api/ifc/semantic', { method: 'POST' });
     currentSemantic = result.model;
@@ -726,21 +726,41 @@ generateSemanticBtn.addEventListener('click', async () => {
     setBuildOutputReady(false);
     document.getElementById('stepSemantic').classList.add('done');
 
-    const v = await waitForViewer();
-    if (v.loadSemantic) {
-      v.loadSemantic(result.model);
-      v.setMode('simulation');
-      document.getElementById('simulationModeBtn').classList.add('active');
-      document.getElementById('sourceModeBtn').classList.remove('active');
-      document.getElementById('stepPreview').classList.add('done');
+    // The source IFC viewer is already open. After generating semantic geometry,
+    // switch it to the simulation-facing walkable/obstacle model automatically.
+    // Preview failures must not discard an otherwise successful model export.
+    let previewMeshes = 0;
+    let previewIssue = '';
+    try {
+      const v = await waitForViewer();
+      if (typeof v.loadSemantic === 'function') {
+        previewMeshes = Number(v.loadSemantic(result.model) || 0);
+      }
+      if (previewMeshes > 0) {
+        v.setMode('simulation');
+        document.getElementById('simulationModeBtn').classList.add('active');
+        document.getElementById('sourceModeBtn').classList.remove('active');
+        document.getElementById('stepPreview').classList.add('done');
+      } else {
+        previewIssue = 'ไม่พบ Geometry ที่สามารถแสดงใน 3D Preview ได้';
+      }
+    } catch (error) {
+      previewIssue = error?.message || String(error);
     }
 
     const enginePath = document.getElementById('semanticEnginePath');
     enginePath.classList.remove('hidden');
-    enginePath.textContent = 'Semantic model ready. Download JSON or save geometry_ifc_v03.json for Geometry Engine handoff.';
-    setMessage('Semantic model generated. Simulation Preview now shows simplified engine-facing geometry.');
+    enginePath.textContent = 'เตรียมข้อมูลโมเดลคนเดินแล้ว · สามารถดาวน์โหลด Semantic/Engine JSON หรือดำเนินการตรวจสอบ Geometry';
+    if (previewMeshes > 0) {
+      const summary = result.summary || result.ifc_semantic?.summary || {};
+      document.getElementById('viewerStatus').textContent =
+        `โมเดลคนเดิน · พื้นที่เดิน ${summary.walkable_regions ?? summary.walkable_areas ?? 0} · ผนัง ${summary.physical_wall_segments ?? 0} · Preview ${previewMeshes} ชิ้น`;
+      setMessage('เตรียมโมเดลคนเดินเสร็จแล้ว · กำลังแสดงพื้นที่เดินและสิ่งกีดขวางใน 3D · โปรดตรวจสอบก่อนสร้างไฟล์ Viswalk');
+    } else {
+      setMessage(`เตรียมข้อมูลโมเดลคนเดินแล้ว แต่เปิด Preview ไม่สำเร็จ: ${previewIssue} · ยังสามารถดาวน์โหลด JSON และตรวจสอบปัญหาได้`);
+    }
   } catch (error) {
-    setMessage(`Semantic generation failed: ${error.message}`);
+    setMessage(`เตรียมโมเดลคนเดินไม่สำเร็จ: ${error.message}`);
   } finally {
     generateSemanticBtn.disabled = false;
   }
