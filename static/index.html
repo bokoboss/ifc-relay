@@ -67,76 +67,9 @@
         </div>
       </section>
 
-      <section id="auditSection" class="panel hidden">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">IFC PRE-FLIGHT</div>
-            <h2 id="projectName">IFC Audit</h2>
-          </div>
-          <div class="badges">
-            <span id="schemaBadge" class="badge"></span>
-            <span id="unitBadge" class="badge"></span>
-          </div>
-        </div>
-
-        <div class="metric-grid six">
-          <div class="metric"><span>Storeys</span><strong id="storeyCount">0</strong></div>
-          <div class="metric"><span>Products</span><strong id="productCount">0</strong></div>
-          <div class="metric include"><span>Auto Include</span><strong id="includeCount">0</strong></div>
-          <div class="metric review"><span>Review</span><strong id="reviewCount">0</strong></div>
-          <div class="metric exclude"><span>Auto Exclude</span><strong id="excludeCount">0</strong></div>
-          <div class="metric opening"><span>Door Openings</span><strong id="doorOpeningCount">0</strong></div>
-        </div>
-
-        <div id="warningList" class="warning-list"></div>
-      </section>
-
-      <section id="largeModelSection" class="panel hidden large-model-section">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">LARGE IFC MODE</div>
-            <h2>Filtered / Storey-based 3D loading</h2>
-          </div>
-          <span id="largeModelBadge" class="badge">Standard model</span>
-        </div>
-
-        <div class="metric-grid six large-model-metrics">
-          <div class="metric"><span>File size</span><strong id="largeFileSize">—</strong></div>
-          <div class="metric"><span>Walls</span><strong id="largeWalls">—</strong></div>
-          <div class="metric"><span>Slab panels</span><strong id="largeSlabs">—</strong></div>
-          <div class="metric"><span>Columns</span><strong id="largeColumns">—</strong></div>
-          <div class="metric exclude"><span>Beams auto-excluded</span><strong id="largeBeams">—</strong></div>
-          <div class="metric review"><span>Stairs / flights</span><strong id="largeStairs">—</strong></div>
-        </div>
-
-        <div class="large-load-grid">
-          <label class="field-label">
-            <span>3D load mode</span>
-            <select id="geometryLoadMode">
-              <option value="simulation_storey">Simulation-relevant · selected storey</option>
-              <option value="simulation_all">Simulation-relevant · whole model</option>
-              <option value="full_storey">Full IFC · selected storey</option>
-              <option value="full_all">Full IFC · whole model (heavy)</option>
-            </select>
-          </label>
-
-          <label class="field-label">
-            <span>Storey</span>
-            <select id="geometryStoreySelect"></select>
-          </label>
-
-          <label class="append-option">
-            <input id="appendStoreyCheck" type="checkbox" />
-            <span>Append this storey to the current 3D view</span>
-          </label>
-
-          <div class="large-load-note">
-            <strong id="largeModelProfile">—</strong>
-            <span id="largeModelNote">Load mode will be recommended after IFC Audit.</span>
-          </div>
-        </div>
-
-        <div id="loadedSubsetText" class="engine-path">No 3D subset loaded yet.</div>
+      <section class="panel message-panel">
+        <div class="eyebrow">SYSTEM</div>
+        <div id="messageText">Ready.</div>
       </section>
 
       <section id="explorerSection" class="explorer-layout hidden">
@@ -230,6 +163,78 @@
             <div class="semantic-note" id="semanticNote"></div>
           </div>
         </aside>
+      </section>
+
+      <section id="largeModelSection" class="panel hidden large-model-section">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">LARGE IFC MODE</div>
+            <h2>Filtered / Storey-based 3D loading</h2>
+          </div>
+          <span id="largeModelBadge" class="badge">Standard model</span>
+        </div>
+
+        <div class="metric-grid six large-model-metrics">
+          <div class="metric"><span>File size</span><strong id="largeFileSize">—</strong></div>
+          <div class="metric"><span>Walls</span><strong id="largeWalls">—</strong></div>
+          <div class="metric"><span>Slab panels</span><strong id="largeSlabs">—</strong></div>
+          <div class="metric"><span>Columns</span><strong id="largeColumns">—</strong></div>
+          <div class="metric exclude"><span>Beams auto-excluded</span><strong id="largeBeams">—</strong></div>
+          <div class="metric review"><span>Stairs / flights</span><strong id="largeStairs">—</strong></div>
+        </div>
+
+        <div class="large-load-grid">
+          <label class="field-label">
+            <span>3D load mode</span>
+            <select id="geometryLoadMode">
+              <option value="simulation_storey">Simulation-relevant · selected storey</option>
+              <option value="simulation_all">Simulation-relevant · whole model</option>
+              <option value="full_storey">Full IFC · selected storey</option>
+              <option value="full_all">Full IFC · whole model (heavy)</option>
+            </select>
+          </label>
+
+          <label class="field-label">
+            <span>Storey</span>
+            <select id="geometryStoreySelect"></select>
+          </label>
+
+          <label class="append-option">
+            <input id="appendStoreyCheck" type="checkbox" />
+            <span>Append this storey to the current 3D view</span>
+          </label>
+
+          <div class="large-load-note">
+            <strong id="largeModelProfile">—</strong>
+            <span id="largeModelNote">Load mode will be recommended after IFC Audit.</span>
+          </div>
+        </div>
+
+        <div id="loadedSubsetText" class="engine-path">No 3D subset loaded yet.</div>
+      </section>
+
+      <section id="auditSection" class="panel hidden">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">IFC PRE-FLIGHT</div>
+            <h2 id="projectName">IFC Audit</h2>
+          </div>
+          <div class="badges">
+            <span id="schemaBadge" class="badge"></span>
+            <span id="unitBadge" class="badge"></span>
+          </div>
+        </div>
+
+        <div class="metric-grid six">
+          <div class="metric"><span>Storeys</span><strong id="storeyCount">0</strong></div>
+          <div class="metric"><span>Products</span><strong id="productCount">0</strong></div>
+          <div class="metric include"><span>Auto Include</span><strong id="includeCount">0</strong></div>
+          <div class="metric review"><span>Review</span><strong id="reviewCount">0</strong></div>
+          <div class="metric exclude"><span>Auto Exclude</span><strong id="excludeCount">0</strong></div>
+          <div class="metric opening"><span>Door Openings</span><strong id="doorOpeningCount">0</strong></div>
+        </div>
+
+        <div id="warningList" class="warning-list"></div>
       </section>
 
       <section id="semanticSection" class="panel hidden semantic-section">
@@ -327,10 +332,6 @@
         </div>
       </section>
 
-      <section class="panel message-panel">
-        <div class="eyebrow">SYSTEM</div>
-        <div id="messageText">Ready.</div>
-      </section>
     </main>
   </div>
 

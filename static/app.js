@@ -264,9 +264,23 @@ uploadBtn.addEventListener('click', async () => {
     currentSemantic = null;
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
-    setMessage(result.carried_decisions_pending
-      ? `Import complete. ${result.carried_decisions_pending} review decision(s) will be re-applied by GlobalId. Run Analyze.`
-      : 'Import complete. Run Analyze.');
+    setMessage('Import complete. Analysing IFC...');
+    // Open the model like a BIM viewer: audit, then load the recommended
+    // 3D subset (whole model, or the first storey with geometry on large IFCs).
+    if (result.upload?.extension === '.ifc') {
+      const audit = await runAnalyze();
+      if (audit) {
+        const loaded = await runLoad3d();
+        if (loaded) {
+          const large = audit.large_model?.detected;
+          setMessage(large
+            ? 'Large IFC: first storey with geometry loaded. Pick other storeys (or append) in the load panel.'
+            : 'Model loaded. Review the selection, then Generate Semantic Model.');
+        }
+      }
+    } else {
+      await runAnalyze();
+    }
   } catch (error) {
     setMessage(`Import failed: ${error.message}`);
   } finally {
@@ -274,14 +288,14 @@ uploadBtn.addEventListener('click', async () => {
   }
 });
 
-analyzeBtn.addEventListener('click', async () => {
+async function runAnalyze() {
   analyzeBtn.disabled = true;
   setMessage('Running IFC pre-flight audit...');
   try {
     const result = await api('/api/analyze', { method: 'POST' });
     if (result.kind !== 'ifc') {
       setMessage(result.message || 'Analysis complete.');
-      return;
+      return null;
     }
     currentAudit = result;
     renderAudit(result);
@@ -289,16 +303,20 @@ analyzeBtn.addEventListener('click', async () => {
     document.getElementById('stepAnalyze').classList.add('done');
     const decisions = result.revision?.decisions;
     setMessage(decisions
-      ? `IFC audit complete. ${decisions.carried} decision(s) carried over, ${decisions.changed} to re-check, ${decisions.orphaned} dropped. Load the 3D model.`
-      : 'IFC audit complete. Load the 3D model.');
+      ? `IFC audit complete. ${decisions.carried} decision(s) carried over, ${decisions.changed} to re-check, ${decisions.orphaned} dropped.`
+      : 'IFC audit complete.');
+    return result;
   } catch (error) {
     setMessage(`Analysis failed: ${error.message}`);
+    return null;
   } finally {
     analyzeBtn.disabled = false;
   }
-});
+}
 
-load3dBtn.addEventListener('click', async () => {
+analyzeBtn.addEventListener('click', () => runAnalyze());
+
+async function runLoad3d() {
   load3dBtn.disabled = true;
   const request = geometryRequestFromControls();
   const subsetLabel = request.storey_ids.length
@@ -325,7 +343,7 @@ load3dBtn.addEventListener('click', async () => {
         `No 3D geometry found for ${selectedLabel}. ` +
         `Choose a storey with sim meshes, or switch to Full IFC mode.`
       );
-      return;
+      return false;
     }
 
     currentGeometry = mergeGeometryPayload(currentGeometry, geometry, request.append);
@@ -360,12 +378,16 @@ load3dBtn.addEventListener('click', async () => {
         ? 'Storey appended to 3D view. Review selection or add another storey.'
         : 'Filtered 3D IFC loaded. Review selection, then Generate Semantic Model.'
     );
+    return true;
   } catch (error) {
     setMessage(`3D load failed: ${error.message}`);
+    return false;
   } finally {
     load3dBtn.disabled = false;
   }
-});
+}
+
+load3dBtn.addEventListener('click', () => runLoad3d());
 
 resetBtn.addEventListener('click', async () => {
   try {
