@@ -122,6 +122,24 @@
               <div><span>ไม่ใช้</span><strong id="effectiveExclude">0</strong></div>
             </div>
           </div>
+
+          <div class="filter-block stair-review" id="stairReviewBlock">
+            <div class="filter-title">บันไดและทางลาด</div>
+            <div class="mini-summary">
+              <div><span>ทั้งหมด (ชุด)</span><strong id="stairUnits">0</strong></div>
+              <div><span>นำเข้าแล้ว</span><strong id="stairIncluded">0</strong></div>
+              <div><span>รอตรวจสอบ</span><strong id="stairReview">0</strong></div>
+            </div>
+            <button id="stairBulkBtn" class="secondary-btn stair-bulk-btn" disabled>นำเข้าบันไดทั้งหมด…</button>
+            <div id="stairConfirm" class="stair-confirm hidden" role="dialog" aria-live="polite">
+              <p id="stairConfirmText"></p>
+              <div class="stair-confirm-actions">
+                <button id="stairConfirmBtn" class="primary-btn">ยืนยันนำเข้า</button>
+                <button id="stairCancelBtn" class="secondary-btn">ยกเลิก</button>
+              </div>
+            </div>
+            <button id="stairResetBtn" class="link-btn hidden">คืนบันไดทั้งหมดเป็น "รอตรวจสอบ"</button>
+          </div>
         </aside>
 
         <section class="panel viewer-panel">
@@ -321,9 +339,14 @@
 
         <div id="semanticWarningList" class="warning-list"></div>
         <div id="openingCandidateSection" class="opening-candidates hidden">
-          <h3>Wall openings without a door</h3>
-          <p class="opening-candidates-note">Kept closed unless ticked. Tick only real pedestrian passages, then generate the semantic model again.</p>
+          <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
+          <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
           <div id="openingCandidateList"></div>
+        </div>
+        <div id="verticalSection" class="opening-candidates hidden">
+          <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>
+          <p class="opening-candidates-note">ลูกศรใน 3D ชี้ทิศขึ้น · <span class="dir-ok">เขียว</span> = หาจาก Geometry · <span class="dir-review">ส้ม</span> = ต้องตรวจทิศ · ทิศบันไดยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim</p>
+          <div id="verticalList"></div>
         </div>
         <div id="semanticEnginePath" class="engine-path hidden"></div>
       </section>

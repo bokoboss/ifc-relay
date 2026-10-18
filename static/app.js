@@ -377,6 +377,7 @@ async function runLoad3d() {
     document.getElementById('stepSelect').classList.add('done');
     generateSemanticBtn.disabled = false;
     updateSelectionSummary();
+    refreshStairOverview();
     setMessage(
       request.append
         ? 'เพิ่มชั้นในมุมมอง 3D แล้ว · ตรวจการคัดเลือก หรือเพิ่มชั้นถัดไป'
@@ -665,6 +666,7 @@ function renderSemanticSummary(result) {
   renderOpeningCandidates(
     result.model?.ifc_semantic?.opening_candidates || result.ifc_semantic?.opening_candidates || [],
   );
+  renderVerticalConnections(result.model?.vertical_connections || result.vertical_connections || []);
 
   const root = document.getElementById('semanticWarningList');
   root.innerHTML = '';
@@ -682,6 +684,112 @@ function renderSemanticSummary(result) {
     }
   }
 }
+
+const DIRECTION_REASON_TH = {
+  'footprint is not a straight flight': 'แนวบันไดไม่ตรง',
+  'both ends of the flight reach similar heights': 'ปลายทั้งสองข้างสูงใกล้กัน หาทิศขึ้นไม่ได้',
+};
+
+function renderVerticalConnections(connections) {
+  const section = document.getElementById('verticalSection');
+  const root = document.getElementById('verticalList');
+  if (!section || !root) return;
+  root.innerHTML = '';
+  section.classList.toggle('hidden', !connections.length);
+  for (const c of connections) {
+    const row = document.createElement('div');
+    row.className = 'vertical-row';
+    const badge = document.createElement('span');
+    const review = c.direction_status !== 'derived_from_geometry';
+    badge.className = `dir-badge ${review ? 'dir-review' : 'dir-ok'}`;
+    badge.textContent = review ? 'ต้องตรวจทิศ' : 'ทิศจาก Geometry';
+    const text = document.createElement('span');
+    const kind = c.type === 'ramp' ? 'ทางลาด' : 'บันได';
+    const offsets = (Number(c.start_z_offset || 0) || Number(c.end_z_offset || 0))
+      ? ` · offset ${Number(c.start_z_offset || 0).toFixed(2)}/${Number(c.end_z_offset || 0).toFixed(2)} m` : '';
+    text.textContent = `#${c.key} ${kind} ระดับ ${c.start_level} → ${c.end_level} · สูง ${Number(c.rise || 0).toFixed(2)} m` +
+      (c.steps ? ` · ${c.steps} ขั้น` : '') + offsets + (review && c.direction_reason ? ` · ${DIRECTION_REASON_TH[c.direction_reason] || c.direction_reason}` : '');
+    row.append(badge, text);
+    root.appendChild(row);
+  }
+}
+
+let stairOverview = null;
+
+function renderStairOverview(overview) {
+  stairOverview = overview;
+  const counts = overview?.counts || { units: 0, include: 0, review: 0, exclude: 0 };
+  document.getElementById('stairUnits').textContent = counts.units;
+  document.getElementById('stairIncluded').textContent = counts.include;
+  document.getElementById('stairReview').textContent = counts.review;
+  const btn = document.getElementById('stairBulkBtn');
+  if (btn) btn.disabled = !counts.review;
+  document.getElementById('stairResetBtn')?.classList.toggle('hidden', !counts.include);
+}
+
+async function refreshStairOverview() {
+  try {
+    renderStairOverview(await api('/api/stairs'));
+  } catch (error) {
+    renderStairOverview(null);
+  }
+}
+
+function hideStairConfirm() {
+  document.getElementById('stairConfirm')?.classList.add('hidden');
+}
+
+async function applyStairBulk(status) {
+  const result = await api('/api/stairs/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  selectionState = result.selection;
+  viewer()?.setOverrides(selectionState.overrides || {});
+  updateSelectionSummary();
+  renderStairOverview(result.overview);
+  if (currentSemantic) {
+    const enginePath = document.getElementById('semanticEnginePath');
+    enginePath?.classList.remove('hidden');
+    if (enginePath) enginePath.textContent = 'การคัดเลือกเปลี่ยนแล้ว · โมเดลคนเดินเดิมใช้ไม่ได้ กด "เตรียมโมเดลคนเดิน" อีกครั้ง';
+  }
+  return result;
+}
+
+document.getElementById('stairBulkBtn')?.addEventListener('click', async () => {
+  await refreshStairOverview();
+  const c = stairOverview?.counts;
+  if (!c || !c.review) {
+    setMessage('ไม่มีบันไดหรือทางลาดที่รอตรวจสอบ');
+    return;
+  }
+  document.getElementById('stairConfirmText').textContent =
+    `พบบันได/ทางลาด ${c.units} ชุด (${c.flights} flight) · นำเข้าแล้ว ${c.include} · รอตรวจสอบ ${c.review} · ไม่ใช้ ${c.exclude}. ` +
+    `จะตั้ง ${c.review} ชุดที่รอตรวจสอบให้เป็น "นำเข้า" (ชุดที่ตั้งเป็น "ไม่ใช้" จะไม่ถูกเปลี่ยน และไม่สร้างบันไดซ้ำจาก flight ลูก)`;
+  document.getElementById('stairConfirm').classList.remove('hidden');
+});
+
+document.getElementById('stairCancelBtn')?.addEventListener('click', hideStairConfirm);
+
+document.getElementById('stairConfirmBtn')?.addEventListener('click', async () => {
+  hideStairConfirm();
+  try {
+    const result = await applyStairBulk('include');
+    setMessage(`นำเข้าบันได/ทางลาดแล้ว ${result.overview.counts.include} ชุด · กด "เตรียมโมเดลคนเดิน" เพื่อดูลูกศรทิศขึ้นใน 3D`);
+  } catch (error) {
+    setMessage(`นำเข้าบันไดไม่สำเร็จ: ${error.message}`);
+  }
+});
+
+document.getElementById('stairResetBtn')?.addEventListener('click', async () => {
+  try {
+    await applyStairBulk('auto');
+    setMessage('คืนบันได/ทางลาดทั้งหมดเป็น "รอตรวจสอบ" แล้ว');
+  } catch (error) {
+    setMessage(`คืนสถานะบันไดไม่สำเร็จ: ${error.message}`);
+  }
+});
 
 function renderOpeningCandidates(candidates) {
   const section = document.getElementById('openingCandidateSection');

@@ -44,6 +44,9 @@ MIN_RISE = 0.05
 STRAIGHTNESS_WARNING = 0.85
 # Fraction of the run length sampled at each end to find the low/high end.
 END_SAMPLE_FRACTION = 0.2
+# Minimum height difference between the two ends (as a fraction of the rise)
+# for the up-direction to count as derived from geometry.
+DIRECTION_MIN_END_SEPARATION = 0.5
 # Generated landing level keys start here to keep storey keys (1..N) stable.
 LANDING_LEVEL_KEY_START = 901
 DEFAULT_RISER_HEIGHT = 0.17
@@ -117,12 +120,14 @@ def flight_profile(
 
     # The walking surface is the top of the solid, so compare the highest
     # vertex near each end. Swap the axis if the "high" sample is lower.
+    end_gap = abs(max(high_side) - max(low_side))
     if max(low_side) > max(high_side):
         ux, uy = -ux, -uy
 
     z_values = [c[2] for c in coords]
     z_bottom = min(z_values)
     z_top = max(z_values)
+    end_separation = end_gap / (z_top - z_bottom) if z_top - z_bottom > 1e-9 else 0.0
 
     # Perpendicular unit vector for the rectangle width.
     px, py = -uy, ux
@@ -150,6 +155,7 @@ def flight_profile(
         "z_top": float(z_top),
         "rise": float(z_top - z_bottom),
         "straightness": straightness,
+        "end_separation": float(end_separation),
     }
 
 
@@ -192,6 +198,20 @@ def distinct_end_level(
     pool = above or others
     best = min(pool, key=lambda lv: abs(float(lv["z"]) - z_top))
     return int(best["key"]), round(z_top - float(best["z"]), 5)
+
+
+def direction_assessment(profile: dict[str, Any]) -> tuple[str, str]:
+    """Is the up-direction derived reliably from geometry?
+
+    Returns ``(status, reason)`` with status ``derived_from_geometry`` or
+    ``needs_review``. Even a derived direction is not certified until it has
+    been checked in Vissim.
+    """
+    if profile["straightness"] < STRAIGHTNESS_WARNING:
+        return "needs_review", "footprint is not a straight flight"
+    if profile.get("end_separation", 0.0) < DIRECTION_MIN_END_SEPARATION:
+        return "needs_review", "both ends of the flight reach similar heights"
+    return "derived_from_geometry", "low and high ends found from the mesh"
 
 
 def match_level(
@@ -394,6 +414,13 @@ def build_vertical_connections(
             name = entity_name(parent, "")
         name = name or f"IFC Vertical {element.id()}"
 
+        direction_status, direction_reason = direction_assessment(profile)
+        if direction_status == "needs_review":
+            warnings.append(
+                f"Vertical element {label}: up-direction could not be determined reliably ({direction_reason}); "
+                "check the arrow in the pedestrian-model view."
+            )
+
         record: dict[str, Any] = {
             "key": key,
             "name": name,
@@ -419,6 +446,9 @@ def build_vertical_connections(
             "rise": round(profile["rise"], 5),
             "run_length": round(profile["run_length"], 5),
             "width": round(profile["width"], 5),
+            "direction_status": direction_status,
+            "direction_reason": direction_reason,
+            "direction_certified": False,
             "level_match": {
                 "start": "exact" if start_exact else "offset",
                 "end": "exact" if end_exact else "offset",
@@ -451,3 +481,62 @@ def children_map(model: Any) -> dict[int, list[Any]]:
         for child in getattr(rel, "RelatedObjects", None) or []:
             result[int(parent.id())].append(child)
     return result
+
+
+def stair_overview(model: Any, overrides: dict[str, str], parent_of: dict[int, Any],
+                   children_of: dict[int, list[Any]]) -> dict[str, Any]:
+    """Stair/ramp units for bulk review, without double counting.
+
+    A unit is a parent ``IfcStair``/``IfcRamp`` (driving its flights) or a
+    flight that has no parent stair/ramp. Bulk actions set the decision on
+    these drivers only; child flights follow their parent, and a child flight
+    the engineer excluded explicitly stays excluded.
+    """
+    def decision(entity: Any) -> str:
+        guid = global_id(entity)
+        return overrides.get(guid, "auto") if guid else "auto"
+
+    units: list[dict[str, Any]] = []
+    for parent_type in PARENT_TYPES:
+        for parent in model.by_type(parent_type):
+            flights = [c for c in children_of.get(int(parent.id()), []) if any(is_a(c, t) for t in FLIGHT_TYPES)]
+            own = decision(parent)
+            child = [decision(f) for f in flights]
+            if own == "include" or "include" in child:
+                state = "include"
+            elif own == "exclude":
+                state = "exclude"
+            else:
+                state = "review"
+            units.append({
+                "global_id": global_id(parent),
+                "name": entity_name(parent, ""),
+                "kind": "stair" if is_a(parent, "IfcStair") else "ramp",
+                "flights": len(flights),
+                "flight_global_ids": [g for g in (global_id(f) for f in flights) if g],
+                "excluded_flights": child.count("exclude"),
+                "state": state,
+            })
+    for flight_type in FLIGHT_TYPES:
+        for flight in model.by_type(flight_type):
+            parent = parent_of.get(int(flight.id()))
+            if parent is not None and any(is_a(parent, t) for t in PARENT_TYPES):
+                continue
+            d = decision(flight)
+            units.append({
+                "global_id": global_id(flight),
+                "name": entity_name(flight, ""),
+                "kind": "stair" if is_a(flight, "IfcStairFlight") else "ramp",
+                "flights": 1,
+                "flight_global_ids": [],
+                "excluded_flights": 0,
+                "state": d if d in ("include", "exclude") else "review",
+            })
+    counts = {
+        "units": len(units),
+        "flights": sum(u["flights"] for u in units),
+        "include": sum(1 for u in units if u["state"] == "include"),
+        "review": sum(1 for u in units if u["state"] == "review"),
+        "exclude": sum(1 for u in units if u["state"] == "exclude"),
+    }
+    return {"counts": counts, "units": units}

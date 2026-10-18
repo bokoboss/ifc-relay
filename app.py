@@ -384,6 +384,79 @@ def bulk_update_selection(update: BulkSelectionUpdate) -> dict[str, Any]:
     return {"status": "ok", "selection": selection}
 
 
+class StairBulkUpdate(BaseModel):
+    status: Literal["include", "auto"]
+
+
+def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]:
+    import ifcopenshell
+
+    from ifc_semantic_service import _parent_map
+    from ifc_vertical_service import children_map, stair_overview
+
+    model = ifcopenshell.open(str(path))
+    return stair_overview(model, overrides, _parent_map(model), children_map(model))
+
+
+@app.get("/api/stairs")
+def get_stairs() -> dict[str, Any]:
+    """Stair/ramp units (parent stairs and stand-alone flights) and their review state."""
+    path = current_upload_or_404()
+    if path.suffix.lower() != ".ifc":
+        raise HTTPException(status_code=400, detail="Current input is not IFC.")
+    overrides = (store.read().get("selection") or {}).get("overrides", {})
+    return _stair_overview_for(path, overrides)
+
+
+@app.post("/api/stairs/bulk")
+def bulk_update_stairs(update: StairBulkUpdate) -> dict[str, Any]:
+    """Include all stair/ramp units, or return them to review (auto).
+
+    Units are parent IfcStair/IfcRamp (with their flights) and flights without
+    a parent. The semantic builder decomposes a parent into its flights once,
+    so a stair is never converted twice. A flight that was excluded
+    explicitly stays excluded.
+    """
+    path = current_upload_or_404()
+    if path.suffix.lower() != ".ifc":
+        raise HTTPException(status_code=400, detail="Current input is not IFC.")
+    state = store.read()
+    selection = state.setdefault("selection", {"mode": "auto", "overrides": {}})
+    overrides = selection.setdefault("overrides", {})
+    overview = _stair_overview_for(path, overrides)
+    changed = 0
+    for unit in overview["units"]:
+        guid = unit.get("global_id")
+        if not guid or unit["state"] == "exclude":
+            continue
+        if update.status == "include":
+            # Driver plus its flights, so the 3D view and selection summary show
+            # them as included. Explicitly excluded flights stay excluded; the
+            # semantic builder decomposes a parent once, so nothing is duplicated.
+            for g in [guid, *unit.get("flight_global_ids", [])]:
+                if overrides.get(g) not in ("include", "exclude"):
+                    overrides[g] = "include"
+                    changed += 1
+        elif update.status == "auto":
+            for g in [guid, *unit.get("flight_global_ids", [])]:
+                if overrides.get(g) == "include":
+                    overrides.pop(g, None)
+                    changed += 1
+    if changed and state.get("semantic"):
+        state["semantic"]["stale"] = True
+        state["build"] = {
+            "status": "selection_changed",
+            "message": "Selection changed. Regenerate semantic model before build.",
+        }
+    store.write(state)
+    return {
+        "status": "ok",
+        "changed": changed,
+        "selection": selection,
+        "overview": _stair_overview_for(path, overrides),
+    }
+
+
 @app.post("/api/ifc/semantic")
 def generate_ifc_semantic() -> dict[str, Any]:
     path = current_upload_or_404()
