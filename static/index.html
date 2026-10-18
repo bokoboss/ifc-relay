@@ -6,7 +6,7 @@
   <title>Viswalk BIM Builder — Engineering Workspace</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/studio.css?v=2" />
+  <link rel="stylesheet" href="/static/studio.css?v=3" />
 </head>
 <body>
   <div class="app-shell">
@@ -47,50 +47,43 @@
         <span id="stepBuild"></span>
       </div>
 
-      <section class="panel compact-panel" aria-label="แถบคำสั่งสร้างโมเดล">
-        <div class="import-row">
-          <div class="command-group command-source">
-            <div class="command-heading"><span class="command-index">01</span><span>ไฟล์ต้นทาง</span></div>
-            <div class="command-controls">
-              <label class="file-picker" title="นำเข้าไฟล์ IFC; การแปลง PDF/DXF ยังอยู่ระหว่างพัฒนา">
-                <input id="fileInput" type="file" accept=".ifc,.pdf,.dxf" />
-                <span>เลือกไฟล์ BIM <span aria-hidden="true">＋</span></span>
-              </label>
-              <button id="uploadBtn" class="primary-btn" disabled>เปิดโมเดล</button>
-            </div>
-            <div class="source-footer">
-              <div id="fileMeta" class="file-meta" title="ไฟล์ที่เลือกหรือนำเข้า">ยังไม่มีไฟล์ที่นำเข้า</div>
-              <label class="append-option carry-option" title="รักษาสถานะ Include/Exclude/Review ตาม IFC GlobalId เมื่ออัปโหลด Revision ใหม่">
-                <input id="carrySelectionCheck" type="checkbox" checked />
-                <span>รักษาการเลือกเดิม</span>
-              </label>
-            </div>
+      <section class="panel compact-panel workspace-toolbar-shell" aria-label="คำสั่งหลักของ Viswalk BIM Builder">
+        <div class="workspace-toolbar">
+          <div class="toolbar-primary">
+            <label class="file-picker" title="เลือกไฟล์ IFC; การนำเข้า PDF/DXF ยังอยู่ระหว่างทดลอง">
+              <input id="fileInput" type="file" accept=".ifc,.pdf,.dxf" aria-label="เลือกไฟล์ BIM สำหรับเปิดโมเดล" />
+              <span>เลือกไฟล์ BIM <span aria-hidden="true">＋</span></span>
+            </label>
+            <button id="uploadBtn" class="primary-btn" disabled title="เปิดไฟล์ นำเข้าและแสดงโมเดล 3D โดยอัตโนมัติ">เปิดโมเดล</button>
+            <span class="toolbar-separator" aria-hidden="true"></span>
+            <button id="generateSemanticBtn" class="secondary-btn prepare-btn" disabled
+              title="แปลงพื้น ผนัง ช่องเปิด เสา และองค์ประกอบที่เลือกเป็น Geometry สำหรับ Viswalk พร้อมแสดง Simulation Preview ใน 3D">
+              เตรียมโมเดลคนเดิน
+            </button>
+            <button id="validateBtn" class="secondary-btn" disabled
+              title="ตรวจ Geometry และปัญหาก่อนส่งออกเป็นไฟล์ Viswalk">ตรวจสอบโมเดล</button>
+            <button id="buildViswalkBtn" class="build-btn" disabled
+              title="สร้างไฟล์ .inpx ผ่าน Vissim/Viswalk ในเครื่องหลังตรวจสอบโมเดล">สร้างไฟล์ Viswalk <span aria-hidden="true">↗</span></button>
           </div>
-          <div class="command-group command-convert">
-            <div class="command-heading"><span class="command-index">02</span><span>ตรวจสอบและเตรียม Geometry</span></div>
-            <div class="command-controls">
-              <button id="analyzeBtn" class="secondary-btn" disabled>ตรวจ IFC</button>
-              <button id="load3dBtn" class="secondary-btn" disabled>โหลดโมเดล 3D</button>
-              <button id="generateSemanticBtn" class="primary-btn" disabled>สร้าง Geometry</button>
-            </div>
-            <div class="command-hint">เลือกวัตถุและตรวจแบบก่อนส่งเข้า Engine</div>
-          </div>
-          <div class="command-group command-output">
-            <div class="command-heading"><span class="command-index">03</span><span>ตรวจสอบและสร้าง Viswalk</span></div>
-            <div class="command-controls">
-              <button id="validateBtn" class="secondary-btn" disabled>ตรวจ Geometry</button>
-              <button id="buildViswalkBtn" class="build-btn" disabled>Build Viswalk <span aria-hidden="true">↗</span></button>
-            </div>
-            <div class="command-hint">ผ่าน Validation ก่อนจึงสร้าง .inpx</div>
-          </div>
-          <div class="command-group command-download">
-            <div class="command-heading"><span class="command-index">04</span><span>ส่งออก</span></div>
-            <details class="export-dropdown">
-              <summary>ไฟล์และรายงาน <span aria-hidden="true">⌄</span></summary>
-              <div class="export-dropdown-items">
-                <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>Semantic JSON</button>
-                <button id="downloadEngineTopBtn" class="secondary-btn" disabled>Engine JSON</button>
-                <button id="downloadInpxTopBtn" class="secondary-btn" disabled>Viswalk .inpx</button>
+
+          <div class="toolbar-utilities">
+            <div id="fileMeta" class="file-meta" title="ชื่อไฟล์ที่เลือกหรือนำเข้า">ยังไม่มีไฟล์ที่นำเข้า</div>
+            <details class="tools-dropdown">
+              <summary class="tools-dropdown-trigger" aria-label="เครื่องมือเพิ่มเติมและไฟล์ส่งออก"
+                title="ตรวจ IFC ใหม่ โหลดโมเดล 3D อีกครั้ง และดาวน์โหลดไฟล์">เพิ่มเติม <span aria-hidden="true">⋯</span></summary>
+              <div class="tools-dropdown-items">
+                <div class="tools-dropdown-heading">เครื่องมือเพิ่มเติม</div>
+                <label class="append-option carry-option" title="รักษาสถานะ Include/Exclude/Review ตาม IFC GlobalId เมื่ออัปโหลด Revision ใหม่">
+                  <input id="carrySelectionCheck" type="checkbox" checked />
+                  <span>รักษาการเลือกเดิมเมื่อเปลี่ยน Revision</span>
+                </label>
+                <button id="analyzeBtn" class="secondary-btn" disabled>ตรวจสอบ IFC อีกครั้ง</button>
+                <button id="load3dBtn" class="secondary-btn" disabled>โหลดโมเดล 3D ใหม่</button>
+                <div class="tools-dropdown-divider" role="separator"></div>
+                <div class="tools-dropdown-heading">ไฟล์ส่งออก</div>
+                <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>ดาวน์โหลด Semantic JSON</button>
+                <button id="downloadEngineTopBtn" class="secondary-btn" disabled>ดาวน์โหลด Engine JSON</button>
+                <button id="downloadInpxTopBtn" class="secondary-btn" disabled>ดาวน์โหลดไฟล์ Viswalk (.inpx)</button>
               </div>
             </details>
           </div>
@@ -99,7 +92,7 @@
 
       <section class="panel message-panel">
         <div class="eyebrow">สถานะระบบ</div>
-        <div id="messageText">Ready.</div>
+        <div id="messageText">พร้อมทำงาน · เลือกไฟล์ BIM เพื่อเริ่มต้น</div>
       </section>
 
       <section id="explorerSection" class="explorer-layout" aria-label="พื้นที่ทำงานตรวจสอบโมเดล">
@@ -135,11 +128,11 @@
           <div class="viewer-toolbar">
             <div class="mode-switch">
               <button id="sourceModeBtn" class="mode-btn active">โมเดลต้นฉบับ</button>
-              <button id="simulationModeBtn" class="mode-btn">Simulation Preview</button>
+              <button id="simulationModeBtn" class="mode-btn" title="ดูพื้นที่เดิน สิ่งกีดขวาง และการเชื่อมต่อที่แปลงไว้">โมเดลคนเดิน</button>
             </div>
             <div class="toolbar-actions">
-              <button id="fitModelBtn" class="icon-btn" title="แสดงโมเดลทั้งหมด">พอดีโมเดล</button>
-              <button id="fitSelectionBtn" class="icon-btn" title="ขยายไปยังวัตถุที่เลือก">พอดีวัตถุ</button>
+              <button id="fitModelBtn" class="icon-btn" title="ซูมให้เห็นโมเดลทั้งหมด">ซูมทั้งโมเดล</button>
+              <button id="fitSelectionBtn" class="icon-btn" title="ซูมให้เห็นวัตถุที่เลือก">ซูมที่วัตถุ</button>
               <button id="isolateBtn" class="icon-btn" title="แยกแสดงเฉพาะวัตถุที่เลือก">Isolate</button>
               <button id="showAllBtn" class="icon-btn" title="แสดงวัตถุทั้งหมด">แสดงทั้งหมด</button>
               <button id="wireframeBtn" class="icon-btn" title="สลับการแสดงแบบโครงลวด">Wireframe</button>
@@ -289,7 +282,7 @@
         <div class="panel-heading">
           <div>
             <div class="eyebrow">SIMULATION GEOMETRY</div>
-            <h2>IFC → Geometry Engine v0.3</h2>
+            <h2>โมเดลเรขาคณิตสำหรับคนเดิน</h2>
           </div>
           <div class="semantic-actions">
             <a id="downloadSemanticBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/download">Download Semantic JSON</a>
