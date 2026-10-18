@@ -182,3 +182,16 @@ def test_polygon_extends_past_both_ends_for_engine_overlap(tmp_path):
     assert math.isclose(min(xs), 2.0 - conn["end_overlap"], abs_tol=1e-3)
     assert math.isclose(max(xs), 8.0 + conn["end_overlap"], abs_tol=1e-3)
     assert all(math.isclose(p[0], 2.0, abs_tol=1e-3) for p in conn["bottom_edge"])
+
+
+def test_flight_ending_between_levels_prefers_storey_over_landing_level(tmp_path):
+    b = _two_storey()
+    u = b.stair(b.storeys[0])
+    b.flight(2.0, 6.0, 1.0, 2.2, 0.0, STOREY_HEIGHT / 2, parent=u)
+    b.flight(6.0, 2.0, 2.4, 3.6, STOREY_HEIGHT / 2, STOREY_HEIGHT, parent=u)
+    b.slab([(6.0, 1.0), (7.5, 1.0), (7.5, 3.6), (6.0, 3.6)], STOREY_HEIGHT / 2, None,
+           predefined="LANDING", parent=u)
+    partial = b.flight(8.5, 9.8, 4.0, 5.2, 0.0, 1.2, storey=b.storeys[0])
+    sem = semantic_for(b.write(tmp_path / "pref.ifc"), {u.GlobalId: "include", partial.GlobalId: "include"})
+    [conn] = [c for c in sem["vertical_connections"] if c["ifc_global_id"] == partial.GlobalId]
+    assert (conn["start_level"], conn["end_level"]) == (1, 2)
