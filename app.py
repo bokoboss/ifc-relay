@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ifc_geometry_service import extract_ifc_geometry
 from ifc_semantic_service import build_semantic_model, write_semantic_model
 from ifc_service import audit_ifc, ifcopenshell_version
+from revision_service import compare_revisions, report_messages
 from state_store import ProjectStateStore
 from vissim_build_service import build_vissim_model, validate_engine_input
 
@@ -148,7 +149,10 @@ def reset_project() -> dict[str, Any]:
 
 
 @app.post("/api/import")
-async def import_file(file: UploadFile = File(...)) -> dict[str, Any]:
+async def import_file(
+    file: UploadFile = File(...),
+    carry_selection: bool = Form(True),
+) -> dict[str, Any]:
     original = safe_filename(file.filename or "upload")
     suffix = Path(original).suffix.lower()
 
@@ -167,6 +171,18 @@ async def import_file(file: UploadFile = File(...)) -> dict[str, Any]:
 
     target.write_bytes(content)
 
+    # Carry review decisions from the previous IFC import (matched by GlobalId
+    # during Analyze). The previous upload file is kept for the revision diff.
+    previous = store.read()
+    previous_upload = previous.get("upload") or {}
+    previous_overrides = dict(((previous.get("selection") or {}).get("overrides")) or {})
+    carry = (
+        carry_selection
+        and suffix == ".ifc"
+        and previous_upload.get("extension") == ".ifc"
+        and bool(previous_overrides)
+    )
+
     state = {
         "schema_version": "0.4.1",
         "upload": {
@@ -177,12 +193,25 @@ async def import_file(file: UploadFile = File(...)) -> dict[str, Any]:
         },
         "analysis": None,
         "geometry": None,
-        "selection": {"mode": "auto", "overrides": {}},
+        "selection": {"mode": "auto", "overrides": previous_overrides if carry else {}},
+        "revision": (
+            {
+                "status": "pending",
+                "previous_upload": previous_upload,
+                "previous_decisions": len(previous_overrides),
+            }
+            if carry
+            else None
+        ),
         "semantic": None,
         "build": {"status": "not_ready"},
     }
     store.write(state)
-    return {"status": "ok", "upload": state["upload"]}
+    return {
+        "status": "ok",
+        "upload": state["upload"],
+        "carried_decisions_pending": len(previous_overrides) if carry else 0,
+    }
 
 
 @app.post("/api/analyze")
@@ -204,6 +233,27 @@ def analyze() -> dict[str, Any]:
                 status_code=500,
                 detail=f"IFC audit failed: {type(exc).__name__}: {exc}",
             )
+
+        revision = state.get("revision") or {}
+        if revision.get("status") == "pending":
+            previous_path_text = (revision.get("previous_upload") or {}).get("path")
+            try:
+                carried, report = compare_revisions(
+                    Path(previous_path_text) if previous_path_text else None,
+                    path,
+                    (state.get("selection") or {}).get("overrides", {}),
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Revision carry-over failed: {type(exc).__name__}: {exc}",
+                )
+            state.setdefault("selection", {"mode": "auto"})["overrides"] = carried
+            state["revision"] = report
+        if (state.get("revision") or {}).get("status") == "applied":
+            result = dict(result)
+            result["revision"] = state["revision"]
+            result["warnings"] = report_messages(state["revision"]) + list(result.get("warnings") or [])
 
         state["analysis"] = result
         state["build"] = {
@@ -268,6 +318,15 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
     }
     store.write(state)
     return result
+
+
+@app.get("/api/revision")
+def get_revision() -> dict[str, Any]:
+    state = store.read()
+    revision = state.get("revision")
+    if not revision:
+        raise HTTPException(status_code=404, detail="No revision carry-over for the current import.")
+    return revision
 
 
 @app.get("/api/selection")
