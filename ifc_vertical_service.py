@@ -47,6 +47,10 @@ END_SAMPLE_FRACTION = 0.2
 # Generated landing level keys start here to keep storey keys (1..N) stable.
 LANDING_LEVEL_KEY_START = 901
 DEFAULT_RISER_HEIGHT = 0.17
+# Engine v0.3 validation requires each ramp/stair end to overlap (not just
+# touch) the walkable area of its level. IFC flights usually only abut the
+# landing, so the polygon is extended this far beyond both ends of the run.
+END_OVERLAP = 0.10
 
 STAIR_TYPES = ("IfcStair", "IfcStairFlight")
 RAMP_TYPES = ("IfcRamp", "IfcRampFlight")
@@ -147,6 +151,43 @@ def flight_profile(
         "rise": float(z_top - z_bottom),
         "straightness": straightness,
     }
+
+
+def extend_run(profile: dict[str, Any], overlap: float = END_OVERLAP) -> list[list[float]]:
+    """Oriented rectangle (bottom edge first) lengthened by ``overlap`` at both ends."""
+    (bx, by), (tx, ty) = profile["bottom_center"], profile["top_center"]
+    length = math.hypot(tx - bx, ty - by)
+    if length <= 1e-9:
+        return profile["polygon"]
+    ux, uy = (tx - bx) / length, (ty - by) / length
+    px, py = -uy, ux
+    hw = profile["width"] / 2.0
+    b = (bx - ux * overlap, by - uy * overlap)
+    t = (tx + ux * overlap, ty + uy * overlap)
+    pts = [
+        (b[0] - px * hw, b[1] - py * hw),
+        (b[0] + px * hw, b[1] + py * hw),
+        (t[0] + px * hw, t[1] + py * hw),
+        (t[0] - px * hw, t[1] - py * hw),
+    ]
+    return [[round(x, 5), round(y, 5)] for x, y in pts]
+
+
+def distinct_end_level(
+    z_top: float,
+    start_key: int,
+    levels: list[dict[str, Any]],
+) -> tuple[int, float] | None:
+    """Engine v0.3 rejects start_level == end_level, so express a flight that
+    ends between levels relative to the nearest *other* level: preferably the
+    one above (negative offset), otherwise the nearest one below."""
+    others = [lv for lv in levels if int(lv["key"]) != int(start_key)]
+    if not others:
+        return None
+    above = [lv for lv in others if float(lv["z"]) >= z_top]
+    pool = above or others
+    best = min(pool, key=lambda lv: abs(float(lv["z"]) - z_top))
+    return int(best["key"]), round(z_top - float(best["z"]), 5)
 
 
 def match_level(
@@ -325,6 +366,14 @@ def build_vertical_connections(
                 f"Vertical element {label} starts and ends on the same level; skipped."
             )
             continue
+        if start_key == end_key:
+            alt = distinct_end_level(profile["z_top"], start_key, all_levels)
+            if alt is None:
+                warnings.append(
+                    f"Vertical element {label} ends between levels and the model has no other level to reference; skipped."
+                )
+                continue
+            end_key, end_off = alt
         for which, exact, z in (("bottom", start_exact, profile["z_bottom"]), ("top", end_exact, profile["z_top"])):
             if not exact:
                 warnings.append(
@@ -349,7 +398,8 @@ def build_vertical_connections(
             "end_level": end_key,
             "start_z_offset": start_off,
             "end_z_offset": end_off,
-            "polygon": profile["polygon"],
+            "polygon": extend_run(profile),
+            "end_overlap": END_OVERLAP,
             "thickness": 0.20,
             "show_balustrade": True,
             "ifc_global_id": global_id(element),
@@ -357,6 +407,7 @@ def build_vertical_connections(
             "ifc_parent_global_id": global_id(parent) if parent is not None else None,
             "geometry_source": "ifc_mesh",
             "polygon_order": "bottom_edge_first",
+            # True flight edges (without the END_OVERLAP extension).
             "bottom_edge": profile["bottom_edge"],
             "top_edge": profile["top_edge"],
             "z_bottom": round(profile["z_bottom"], 5),

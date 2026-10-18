@@ -97,7 +97,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests
 ```
 
-The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (41/43/45/46) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository.
+The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (41/43/45/46) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the external `05_geometry_engine_v03.py` in validate-only mode (no Vissim) when `VBB_GEOMETRY_ENGINE` points to a local copy; they are skipped in public CI.
 
 ## Data, trademark and licensing
 
