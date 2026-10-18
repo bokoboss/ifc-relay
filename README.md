@@ -76,6 +76,19 @@ This public source snapshot does **not** include the proven standalone `05_geome
 
 Structural IFC models may contain no doors or other information needed to establish pedestrian connections. Such gaps must be identified and reviewed, **not silently inferred as valid passages**. Multi-level stair/ramp/elevator extraction is not yet production-ready.
 
+## Quick start on Windows (no .exe)
+
+Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (the installer can install Python 3.12 with `winget` if none is found). `Build Viswalk` additionally needs a licensed PTV Vissim 2025.
+
+1. Download the repository ZIP (or `git clone`) and extract it anywhere, e.g. `C:\Tools\viswalk-bim-builder`.
+2. Copy your `05_geometry_engine_v03.py` and `base_empty.inpx` into the `local\` folder (created by step 3), or pass them to the installer:
+   `install.bat -EnginePath D:\proj\05_geometry_engine_v03.py -BaseNetworkPath D:\proj\base_empty.inpx`
+3. Double-click **`install.bat`**: creates `.venv` inside the app folder, installs packages, downloads the local Three.js runtime and checks Vissim COM.
+4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
+5. On the Vissim machine, double-click **`verify_vissim.bat`**: runs the automated tests (including engine-contract tests), Fixture #1 if `local\TallBuilding.ifc` exists, builds a synthetic verification model (straight stair, U-stair with landing, partial flight, L-wall, closed wall loop, door-less opening) through Vissim COM, and writes `output\verify_<time>\report.md` with a short manual checklist for Vissim. Use `verify_vissim.bat -SkipBuild` to skip the COM build.
+
+Engine and base-network lookup order: `VBB_PROJECT_ROOT` -> `local\` -> the app's parent folder (original layout). `local\` is git-ignored.
+
 ## Local development (Windows)
 
 1. Clone the repository to the intended local project folder.
