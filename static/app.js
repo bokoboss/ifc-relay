@@ -616,7 +616,13 @@ function renderSemanticSummary(result) {
   document.getElementById('semanticVertical').textContent = summary.vertical_connections ?? 0;
   document.getElementById('semanticWarnings').textContent = summary.warnings ?? warnings.length;
   document.getElementById('doorLogicText').textContent =
-    `${summary.included_doors ?? 0} included door(s) → ${summary.door_openings_applied ?? 0} physical wall opening(s); windows used as openings: ${summary.windows_used_as_openings ?? 0}.`;
+    `${summary.included_doors ?? 0} included door(s) → ${summary.door_openings_applied ?? 0} physical wall opening(s); ` +
+    `openings without a door: ${summary.unfilled_openings_applied ?? 0} opened of ${summary.unfilled_openings ?? 0}; ` +
+    `windows used as openings: ${summary.windows_used_as_openings ?? 0}.`;
+
+  renderOpeningCandidates(
+    result.model?.ifc_semantic?.opening_candidates || result.ifc_semantic?.opening_candidates || [],
+  );
 
   const root = document.getElementById('semanticWarningList');
   root.innerHTML = '';
@@ -632,6 +638,50 @@ function renderSemanticSummary(result) {
       item.textContent = warning;
       root.appendChild(item);
     }
+  }
+}
+
+function renderOpeningCandidates(candidates) {
+  const section = document.getElementById('openingCandidateSection');
+  const root = document.getElementById('openingCandidateList');
+  if (!section || !root) return;
+  root.innerHTML = '';
+  section.classList.toggle('hidden', !candidates.length);
+  const ordered = [...candidates].sort((a, b) =>
+    (a.classification === 'passage_candidate' ? 0 : 1) - (b.classification === 'passage_candidate' ? 0 : 1));
+  for (const c of ordered) {
+    const row = document.createElement('label');
+    row.className = 'check-row opening-row';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = c.decision === 'include';
+    input.disabled = !c.global_id;
+    const text = document.createElement('span');
+    const where = c.host_wall_name || c.host_wall_global_id || 'wall';
+    text.textContent = `${where} · ${Number(c.width).toFixed(2)} × ${Number(c.height).toFixed(2)} m, sill ${Number(c.sill).toFixed(2)} m` +
+      (c.level_key != null ? ` · level ${c.level_key}` : '');
+    const tag = document.createElement('span');
+    tag.className = `tag ${c.classification === 'passage_candidate' ? 'review' : 'exclude'}`;
+    tag.textContent = c.classification === 'passage_candidate' ? 'passage?' : 'not walkable';
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      try {
+        await api('/api/selection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ global_id: c.global_id, status: input.checked ? 'include' : 'auto' }),
+        });
+        c.decision = input.checked ? 'include' : 'auto';
+        setMessage('Opening decision saved. Generate Semantic Model again to apply it.');
+      } catch (error) {
+        input.checked = !input.checked;
+        setMessage(`Could not save opening decision: ${error.message}`);
+      } finally {
+        input.disabled = false;
+      }
+    });
+    row.append(input, text, tag);
+    root.appendChild(row);
   }
 }
 

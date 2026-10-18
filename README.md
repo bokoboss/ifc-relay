@@ -45,6 +45,8 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 | Selection review | Auto / Include / Exclude / Review decisions per IFC GlobalId | **Implemented** |
 | Semantic model | Generate levels, floor areas, physical wall segments, column/obstacle representations | **Validated on small baseline** |
 | Openings | Use door-filled openings to split walls; windows are not pedestrian passages | **Validated on small baseline** |
+| Openings without doors | List unfilled wall openings, flag walkable-looking ones, open only those the engineer ticks | **Implemented; synthetic-IFC tested** |
+| Non-straight walls | L/T/curved wall footprints exported as polygon obstacles with openings cut out | **Implemented; synthetic-IFC tested** |
 | Large IFC workflow | Relevant-geometry filtering, per-storey loading, whole-building inspection | **Implemented; viewer tested on large IFC** |
 | Walkable areas | Merge floor panels; track internal voids | **Implemented; unit tested; large-model QA pending** |
 | Validation & export | Check geometry, download JSON, run local Vissim COM build and generate `.inpx` with reports | **Validated on small baseline** |

@@ -257,3 +257,8 @@ th { position: sticky; top: 0; background: #f8fafb; color: var(--muted); font-we
     grid-template-columns: 1fr;
   }
 }
+
+.opening-candidates { margin-top: 12px; }
+.opening-candidates h3 { font-size: 12px; margin: 0 0 4px; }
+.opening-candidates-note { color: var(--muted); font-size: 11px; margin: 0 0 6px; }
+.opening-row span:nth-child(2) { overflow-wrap: anywhere; }

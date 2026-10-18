@@ -112,3 +112,18 @@ def semantic_for(path: Path, overrides: dict[str, str] | None = None) -> dict[st
     geometry = extract_ifc_geometry(path)
     assert not geometry["mesh_failures"], geometry["mesh_failures"]
     return build_semantic_model(path, geometry, overrides or {})
+
+
+def add_wall(b: "Building", x0: float, y: float, length: float, storey: Any,
+             height: float = 3.0, thickness: float = 0.2) -> Any:
+    """Straight wall along +X from (x0, y), centred on y."""
+    wall = b.box("IfcWall", x0, y - thickness / 2, x0 + length, y + thickness / 2, 0.0, height, storey)
+    return wall
+
+
+def add_opening(b: "Building", wall: Any, x0: float, x1: float, y: float,
+                z0: float, z1: float, depth: float = 0.4) -> Any:
+    """Unfilled IfcOpeningElement cutting ``wall`` between x0..x1, z0..z1."""
+    opening = b.box("IfcOpeningElement", x0, y - depth / 2, x1, y + depth / 2, z0, z1, None)
+    b._run("feature.add_feature", feature=opening, element=wall)
+    return opening
