@@ -71,6 +71,8 @@ def test_no_permanent_workflow_sidebar() -> None:
     assert "topbar-brand" in HTML
     assert "environment-menu" in HTML
     assert dom.tags["healthText"] == "div"
+    assert "command-index" not in HTML
+    assert 'class="workspace-toolbar"' in HTML
     assert ".app-shell {display:block;" in STUDIO
     assert ".workflow-state {display:none!important;}" in STUDIO
 
@@ -99,11 +101,39 @@ def test_controls_and_exports_remain_wired() -> None:
     assert 'id="downloadEngineTopBtn" class="secondary-btn" disabled' in HTML
 
 
+
+def test_compact_toolbar_has_direct_primary_actions_and_secondary_tools() -> None:
+    dom = parsed()
+    for name in ("fileInput", "uploadBtn", "generateSemanticBtn", "validateBtn", "buildViswalkBtn"):
+        assert name in dom.ids
+    assert 'class="toolbar-primary"' in HTML
+    assert 'class="toolbar-utilities"' in HTML
+    assert 'class="tools-dropdown"' in HTML
+    assert "เตรียมโมเดลคนเดิน" in HTML
+    assert "สร้างไฟล์ Viswalk" in HTML
+    assert "ซูมทั้งโมเดล" in HTML and "ซูมที่วัตถุ" in HTML
+    assert "command-group" not in HTML
+    assert "command-index" not in HTML
+    assert "workspace-toolbar" in STUDIO
+    assert "@media (max-width:1120px)" in STUDIO
+
+
+def test_semantic_preparation_activates_simulation_preview_automatically() -> None:
+    begin = JS.index("generateSemanticBtn.addEventListener('click', async () => {")
+    end = JS.index("downloadSemanticTopBtn.addEventListener('click', () => {", begin)
+    handler = JS[begin:end]
+    assert "'/api/ifc/semantic'" in handler
+    assert handler.index("v.loadSemantic(result.model)") < handler.index("v.setMode('simulation')")
+    assert "if (previewMeshes > 0)" in handler
+    assert "previewIssue" in handler
+    assert "เตรียมโมเดลคนเดินเสร็จแล้ว" in handler
+
+
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
     assert "/static/styles.css" in dom.anchors
-    assert "/static/studio.css?v=2" in dom.anchors
-    assert dom.anchors.index("/static/studio.css?v=2") > dom.anchors.index("/static/styles.css")
+    assert "/static/studio.css?v=3" in dom.anchors
+    assert dom.anchors.index("/static/studio.css?v=3") > dom.anchors.index("/static/styles.css")
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
     assert "@import" not in STUDIO
