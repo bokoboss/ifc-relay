@@ -61,7 +61,7 @@ BIM / CAD / Drawing
 | E. Simplification | Consolidate floor panels, preserve openings/voids, remove unnecessary detail, handle irregular geometry | Slab merge & void logic implemented / needs full large-IFC QA |
 | F. Multi-level circulation | Geometry-aware mapping of stairs, stair flights, ramps, elevators; endpoints/elevations and connected walkable surfaces | Stairs/ramps per flight + intermediate landing levels implemented (v0.5 draft, synthetic-IFC tested; see [VERTICAL_CIRCULATION.md](VERTICAL_CIRCULATION.md)); Vissim verification pending; elevators planned |
 | G. Validation | Geometry integrity, unit/level consistency, passability, warnings with severity and evidence | Core implemented; richer connectivity checks planned |
-| H. Build / Export | Deterministic geometry engine, Vissim COM, save `.inpx`, JSON/reports/logs | Validated baseline; external engine and template not in public repo |
+| H. Build / Export | Deterministic geometry engine, Vissim COM, save `.inpx`, JSON/reports/logs | Validated baseline; engine bundled in `engine/` (private repo); `base_empty.inpx` stays local |
 | I. Simulation configuration | Pedestrian inputs, origins/destinations, routes, demand, scenario presets | Longer-term extension |
 | J. Simulation results | Run scenarios, measure travel time/density/LOS/queues, export QA and reports | Longer-term extension |
 
@@ -159,7 +159,7 @@ Ordering may change based on engineering risk and the available licensed Vissim 
 ## 9. Source code, BIM files, and distribution
 
 - Project IFC files, client drawings, proprietary PTV files, outputs, local database, and caches must remain outside the public repo.
-- The current public repo is **not self-contained**: standalone geometry engine and the local Vissim base network are external and require an appropriate license/right to share.
+- The repository is **private**. The Geometry Engine v0.3 is bundled in `engine/`; the Vissim base network (`base_empty.inpx`) is created with licensed Vissim and stays local (`local\`). Re-check publishing rights before making the repository public again.
 - No open-source LICENSE is selected yet; do not infer license rights from public visibility.
 - Preserve local-first processing. Any future remote service must require explicit design/security review.
 

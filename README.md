@@ -60,7 +60,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 ## Outputs
 
 - Reviewed semantic/engine-facing geometry JSON.
-- Locally generated Vissim/Viswalk `.inpx` (requires the installed licensed software and supporting engine files).
+- Locally generated Vissim/Viswalk `.inpx` (requires licensed Vissim 2025 and a local `base_empty.inpx`).
 - Validation results, model-building report, and build log.
 
 ## Architecture and boundaries
@@ -72,7 +72,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 
 ## Current repository limitations
 
-This public source snapshot does **not** include the proven standalone `05_geometry_engine_v03.py` or the local `base_empty.inpx` Vissim template. Both are external development dependencies requiring appropriate rights. Without them, the public clone cannot complete the `.inpx` build flow. The browser's Three.js libraries are downloaded by `setup_app.ps1` rather than committed.
+The proven Geometry Engine v0.3 is bundled in `engine/` (private repository). The `base_empty.inpx` Vissim template is created with licensed Vissim and is **not** committed; place it in `local\` on each machine. Validation works without it; only the `.inpx` build needs it. The browser's Three.js libraries are downloaded by the installer rather than committed.
 
 Structural IFC models may contain no doors or other information needed to establish pedestrian connections. Such gaps must be identified and reviewed, **not silently inferred as valid passages**. Multi-level stair/ramp/elevator extraction is not yet production-ready.
 
@@ -81,13 +81,12 @@ Structural IFC models may contain no doors or other information needed to establ
 Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (the installer can install Python 3.12 with `winget` if none is found). `Build Viswalk` additionally needs a licensed PTV Vissim 2025.
 
 1. Download the repository ZIP (or `git clone`) and extract it anywhere, e.g. `C:\Tools\viswalk-bim-builder`.
-2. Copy your `05_geometry_engine_v03.py` and `base_empty.inpx` into the `local\` folder (created by step 3), or pass them to the installer:
-   `install.bat -EnginePath D:\proj\05_geometry_engine_v03.py -BaseNetworkPath D:\proj\base_empty.inpx`
+2. Copy `base_empty.inpx` (an empty network saved from Vissim 2025) into the `local\` folder (created by step 3), or pass it to the installer: `install.bat -BaseNetworkPath D:\proj\base_empty.inpx`. The Geometry Engine is bundled in `engine\`; `-EnginePath` copies an override into `local\`.
 3. Double-click **`install.bat`**: creates `.venv` inside the app folder, installs packages, downloads the local Three.js runtime and checks Vissim COM.
 4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
 5. On the Vissim machine, double-click **`verify_vissim.bat`**: runs the automated tests (including engine-contract tests), Fixture #1 if `local\TallBuilding.ifc` exists, builds a synthetic verification model (straight stair, U-stair with landing, partial flight, L-wall, closed wall loop, door-less opening) through Vissim COM, and writes `output\verify_<time>\report.md` with a short manual checklist for Vissim. Use `verify_vissim.bat -SkipBuild` to skip the COM build.
 
-Engine and base-network lookup order: `VBB_PROJECT_ROOT` -> `local\` -> the app's parent folder (original layout). `local\` is git-ignored.
+Lookup order (`project_paths.py`): engine `VBB_GEOMETRY_ENGINE` -> `local\` -> bundled `engine\` -> parent folder; base network and outputs `VBB_PROJECT_ROOT` -> `local\` -> parent folder. `local\` is git-ignored.
 
 ## Local development (Windows)
 
@@ -95,7 +94,7 @@ Engine and base-network lookup order: `VBB_PROJECT_ROOT` -> `local\` -> the app'
 2. Prepare a Python environment and install packages from `requirements.txt`.
 3. Run `setup_app.ps1` to install Python dependencies and locally hosted Three.js modules (initial setup requires internet).
 4. Run `run_app.ps1` and open `http://127.0.0.1:8765`.
-5. For `.inpx` export, configure licensed PTV Vissim 2025 COM and place the separately supplied geometry engine and Vissim base model at the expected parent-folder paths.
+5. For `.inpx` export, configure licensed PTV Vissim 2025 COM and place `base_empty.inpx` in `local\` (or the parent folder, original layout). The engine is bundled in `engine/`.
 
 The present scripts assume a local project layout and are not yet packaged as a one-click installer.
 
@@ -110,7 +109,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests
 ```
 
-The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (41/43/45/46) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the external `05_geometry_engine_v03.py` in validate-only mode (no Vissim) when `VBB_GEOMETRY_ENGINE` points to a local copy; they are skipped in public CI.
+The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (41/43/45/46) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the bundled `engine/05_geometry_engine_v03.py` in validate-only mode (no Vissim, no base network) on every run, including CI; `VBB_GEOMETRY_ENGINE` can point to another copy.
 
 ## Data, trademark and licensing
 

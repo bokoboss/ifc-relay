@@ -130,7 +130,13 @@ function Place-File([string]$given, [string]$name) {
     Warn "$name missing. Copy it into: $Local"
     return $false
 }
-$engineOk = Place-File $EnginePath "05_geometry_engine_v03.py"
+$Bundled = Join-Path $App "engine\05_geometry_engine_v03.py"
+if ((-not $EnginePath) -and (Test-Path $Bundled) -and -not (Test-Path (Join-Path $Local "05_geometry_engine_v03.py"))) {
+    Ok "05_geometry_engine_v03.py bundled in engine\"
+    $engineOk = $true
+} else {
+    $engineOk = Place-File $EnginePath "05_geometry_engine_v03.py"
+}
 $baseOk = Place-File $BaseNetworkPath "base_empty.inpx"
 if ($Fixture1Ifc) { [void](Place-File $Fixture1Ifc "TallBuilding.ifc") }
 
@@ -146,6 +152,6 @@ if (Test-Path "Registry::HKEY_CLASSES_ROOT\VISSIM.Vissim.2025") {
 Write-Host ""
 Write-Host "Install finished." -ForegroundColor Green
 if (-not ($engineOk -and $baseOk)) {
-    Write-Host "Put 05_geometry_engine_v03.py and base_empty.inpx in $Local before Validate / Build." -ForegroundColor Yellow
+    Write-Host "Put base_empty.inpx (saved from Vissim 2025) in $Local before Build Viswalk." -ForegroundColor Yellow
 }
 Write-Host "Next: start.bat (open the app)  or  verify_vissim.bat (full check with Vissim)."
