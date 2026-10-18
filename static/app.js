@@ -37,18 +37,18 @@ window.addEventListener('error', event => {
   const message = String(event.message || 'Unknown browser error');
   if (source.includes('app3d.js') || source.includes('three') || message.toLowerCase().includes('webgl')) {
     viewerRuntimeError = message;
-    setMessage(`3D viewer error: ${message}`);
+    setMessage(`ตัวแสดงผล 3D ผิดพลาด: ${message}`);
     const status = document.getElementById('viewerStatus');
-    if (status) status.textContent = `3D engine error: ${message}`;
+    if (status) status.textContent = `ตัวแสดงผล 3D ผิดพลาด: ${message}`;
   }
 });
 
 window.addEventListener('unhandledrejection', event => {
   const message = event.reason?.message || String(event.reason || 'Unknown module error');
   viewerRuntimeError = message;
-  setMessage(`3D viewer module error: ${message}`);
+  setMessage(`โหลดโมดูล 3D ไม่สำเร็จ: ${message}`);
   const status = document.getElementById('viewerStatus');
-  if (status) status.textContent = `3D module error: ${message}`;
+  if (status) status.textContent = `โหลดโมดูล 3D ไม่สำเร็จ: ${message}`;
 });
 
 function setMessage(text) {
@@ -128,9 +128,9 @@ async function ensureViewerModule() {
         const message = error?.message || String(error);
         viewerRuntimeError = message;
         viewerModulePromise = null;
-        setMessage(`3D viewer module error: ${message}`);
+        setMessage(`โหลดโมดูล 3D ไม่สำเร็จ: ${message}`);
         const status = document.getElementById('viewerStatus');
-        if (status) status.textContent = `3D module error: ${message}`;
+        if (status) status.textContent = `โหลดโมดูล 3D ไม่สำเร็จ: ${message}`;
         throw error;
       });
   }
@@ -248,7 +248,7 @@ fileInput.addEventListener('change', () => {
 uploadBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   uploadBtn.disabled = true;
-  setMessage('Importing source model...');
+  setMessage('กำลังนำเข้าไฟล์ต้นฉบับ...');
   try {
     const form = new FormData();
     form.append('file', selectedFile);
@@ -264,7 +264,7 @@ uploadBtn.addEventListener('click', async () => {
     currentSemantic = null;
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
-    setMessage('Import complete. Analysing IFC...');
+    setMessage('นำเข้าไฟล์แล้ว · กำลังตรวจ IFC...');
     // Open the model like a BIM viewer: audit, then load the recommended
     // 3D subset (whole model, or the first storey with geometry on large IFCs).
     if (result.upload?.extension === '.ifc') {
@@ -274,7 +274,7 @@ uploadBtn.addEventListener('click', async () => {
         if (loaded) {
           const large = audit.large_model?.detected;
           setMessage(large
-            ? 'Large IFC: first storey with geometry loaded. Pick other storeys (or append) in the load panel.'
+            ? 'IFC ขนาดใหญ่: โหลดชั้นแรกที่มี Geometry แล้ว · เลือกชั้นอื่นหรือเพิ่มชั้นได้จากแผงโหลดโมเดล'
             : 'เปิดโมเดลแล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"');
         }
       }
@@ -282,7 +282,7 @@ uploadBtn.addEventListener('click', async () => {
       await runAnalyze();
     }
   } catch (error) {
-    setMessage(`Import failed: ${error.message}`);
+    setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`);
   } finally {
     uploadBtn.disabled = false;
   }
@@ -290,11 +290,11 @@ uploadBtn.addEventListener('click', async () => {
 
 async function runAnalyze() {
   analyzeBtn.disabled = true;
-  setMessage('Running IFC pre-flight audit...');
+  setMessage('กำลังตรวจ IFC เบื้องต้น...');
   try {
     const result = await api('/api/analyze', { method: 'POST' });
     if (result.kind !== 'ifc') {
-      setMessage(result.message || 'Analysis complete.');
+      setMessage(result.message || 'ตรวจไฟล์เสร็จแล้ว');
       return null;
     }
     currentAudit = result;
@@ -303,11 +303,11 @@ async function runAnalyze() {
     document.getElementById('stepAnalyze').classList.add('done');
     const decisions = result.revision?.decisions;
     setMessage(decisions
-      ? `IFC audit complete. ${decisions.carried} decision(s) carried over, ${decisions.changed} to re-check, ${decisions.orphaned} dropped.`
-      : 'IFC audit complete.');
+      ? `ตรวจ IFC เสร็จแล้ว · ใช้ผลการคัดเลือกเดิม ${decisions.carried} รายการ · ต้องตรวจใหม่ ${decisions.changed} · ตัดออก ${decisions.orphaned}`
+      : 'ตรวจ IFC เสร็จแล้ว');
     return result;
   } catch (error) {
-    setMessage(`Analysis failed: ${error.message}`);
+    setMessage(`ตรวจ IFC ไม่สำเร็จ: ${error.message}`);
     return null;
   } finally {
     analyzeBtn.disabled = false;
@@ -320,9 +320,9 @@ async function runLoad3d() {
   load3dBtn.disabled = true;
   const request = geometryRequestFromControls();
   const subsetLabel = request.storey_ids.length
-    ? `storey ${request.storey_ids[0]}`
-    : 'whole model';
-  setMessage(`Extracting ${request.mode} IFC geometry for ${subsetLabel}...`);
+    ? `ชั้น ${geometryStoreySelect?.selectedOptions?.[0]?.textContent?.split(' · ')[0] || request.storey_ids[0]}`
+    : 'ทั้งอาคาร';
+  setMessage(`กำลังโหลด Geometry ${request.mode === 'full' ? 'ทั้งหมด' : 'ที่เกี่ยวกับการจำลอง'} ของ${subsetLabel}...`);
 
   try {
     const [geometry, selection] = await Promise.all([
@@ -338,10 +338,10 @@ async function runLoad3d() {
       const selectedOption = geometryStoreySelect?.selectedOptions?.[0];
       const selectedLabel = selectedOption?.textContent || subsetLabel;
       document.getElementById('viewerStatus').textContent =
-        `No 3D geometry in ${selectedLabel} for ${request.mode} mode.`;
+        `ไม่มี Geometry 3D ใน ${selectedLabel}`;
       setMessage(
-        `No 3D geometry found for ${selectedLabel}. ` +
-        `Choose a storey with sim meshes, or switch to Full IFC mode.`
+        `ไม่พบ Geometry 3D ใน ${selectedLabel} · ` +
+        `เลือกชั้นที่มีวัตถุสำหรับการจำลอง หรือเปลี่ยนเป็นโหมด IFC ทั้งหมด`
       );
       return false;
     }
@@ -352,21 +352,25 @@ async function runLoad3d() {
 
     const explorerSection = document.getElementById('explorerSection');
     explorerSection.classList.remove('hidden');
-    document.getElementById('viewerStatus').textContent = '3D engine readying canvas...';
+    document.getElementById('viewerStatus').textContent = 'กำลังเตรียมพื้นที่แสดงผล 3D...';
 
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
     const v = await waitForViewer();
     v.load(geometry, selectionState.overrides || {}, { append: request.append });
+    // viewer.load() always returns to the source IFC view.
+    setViewerBadge('source');
+    document.getElementById('sourceModeBtn')?.classList.add('active');
+    document.getElementById('simulationModeBtn')?.classList.remove('active');
 
     document.getElementById('viewerStatus').textContent =
-      `${currentGeometry.element_count} loaded mesh elements · ${currentGeometry.triangle_count || 0} triangles · WebGL ready`;
+      `โหลดแล้ว ${currentGeometry.element_count} ชิ้น · ${currentGeometry.triangle_count || 0} triangles · WebGL พร้อม`;
     document.getElementById('previewNote').textContent = geometry.preview_note || '';
 
     const loadedText = document.getElementById('loadedSubsetText');
     if (loadedText) {
-      const storeyText = Object.keys(currentGeometry.storeys || {}).join(', ') || 'Unassigned';
-      loadedText.textContent = `Loaded subset: ${currentGeometry.element_count} elements · ${storeyText}`;
+      const storeyText = Object.keys(currentGeometry.storeys || {}).join(', ') || 'ไม่ระบุชั้น';
+      loadedText.textContent = `ที่โหลดแล้ว: ${currentGeometry.element_count} ชิ้น · ${storeyText}`;
     }
 
     document.getElementById('stepExplore').classList.add('done');
@@ -375,12 +379,12 @@ async function runLoad3d() {
     updateSelectionSummary();
     setMessage(
       request.append
-        ? 'Storey appended to 3D view. Review selection or add another storey.'
+        ? 'เพิ่มชั้นในมุมมอง 3D แล้ว · ตรวจการคัดเลือก หรือเพิ่มชั้นถัดไป'
         : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"'
     );
     return true;
   } catch (error) {
-    setMessage(`3D load failed: ${error.message}`);
+    setMessage(`โหลดโมเดล 3D ไม่สำเร็จ: ${error.message}`);
     return false;
   } finally {
     load3dBtn.disabled = false;
@@ -394,7 +398,7 @@ resetBtn.addEventListener('click', async () => {
     await api('/api/project/reset', { method: 'POST' });
     window.location.reload();
   } catch (error) {
-    setMessage(`Reset failed: ${error.message}`);
+    setMessage(`เริ่มโครงการใหม่ไม่สำเร็จ: ${error.message}`);
   }
 });
 
@@ -470,7 +474,7 @@ function renderAudit(result) {
   if (!result.warnings?.length) {
     const div = document.createElement('div');
     div.className = 'warning-item ok';
-    div.textContent = 'No IFC audit warnings.';
+    div.textContent = 'ไม่พบข้อควรระวังจากการตรวจ IFC';
     warningList.appendChild(div);
   } else {
     for (const warning of result.warnings) {
@@ -535,8 +539,17 @@ function render3dFilters(geometry) {
   }
 }
 
+function setViewerBadge(mode) {
+  const badge = document.getElementById('viewportIdentLabel');
+  if (!badge) return;
+  badge.innerHTML = mode === 'simulation'
+    ? '3D MODEL SPACE <small> / โมเดลคนเดิน (Viswalk geometry)</small>'
+    : '3D MODEL SPACE <small> / IFC ต้นฉบับ</small>';
+}
+
 document.getElementById('sourceModeBtn').addEventListener('click', () => {
   viewer()?.setMode('source');
+  setViewerBadge('source');
   document.getElementById('sourceModeBtn').classList.add('active');
   document.getElementById('simulationModeBtn').classList.remove('active');
   document.getElementById('stepPreview').classList.remove('done');
@@ -544,16 +557,17 @@ document.getElementById('sourceModeBtn').addEventListener('click', () => {
 
 document.getElementById('simulationModeBtn').addEventListener('click', () => {
   viewer()?.setMode('simulation');
+  setViewerBadge('simulation');
   document.getElementById('simulationModeBtn').classList.add('active');
   document.getElementById('sourceModeBtn').classList.remove('active');
   document.getElementById('stepPreview').classList.add('done');
-  setMessage('Simulation Preview: door leaves hidden as pedestrian openings; windows shown as closure context.');
+  setMessage('โมเดลคนเดิน: แสดงพื้นที่เดิน สิ่งกีดขวาง และบันไดที่จะส่งเข้า Viswalk · ประตูเป็นช่องเปิด หน้าต่างไม่ใช่ทางเดิน');
 });
 
 document.getElementById('fitModelBtn').addEventListener('click', () => viewer()?.fitModel());
 document.getElementById('fitSelectionBtn').addEventListener('click', () => viewer()?.fitSelection());
 document.getElementById('isolateBtn').addEventListener('click', () => {
-  if (!viewer()?.isolateSelected()) setMessage('Select an IFC object before isolating.');
+  if (!viewer()?.isolateSelected()) setMessage('เลือกวัตถุใน 3D ก่อนใช้ Isolate');
 });
 document.getElementById('showAllBtn').addEventListener('click', () => viewer()?.showAll());
 document.getElementById('wireframeBtn').addEventListener('click', event => {
@@ -589,11 +603,11 @@ function renderInspector(item) {
 
   const note = document.getElementById('semanticNote');
   if (item.simulation_role === 'opening') {
-    note.textContent = 'Door semantics: this element becomes a pedestrian opening, not a solid obstacle.';
+    note.textContent = 'ประตู: แปลงเป็นช่องเปิดให้คนเดินผ่าน ไม่ใช่สิ่งกีดขวาง';
   } else if (item.simulation_role === 'wall_closure') {
-    note.textContent = 'Window semantics: excluded as a separate Vissim object, but kept visually as wall-closure context so it is not treated as a pedestrian opening.';
+    note.textContent = 'หน้าต่าง: ไม่ส่งเป็นวัตถุใน Vissim และไม่ถือเป็นทางเดิน แสดงไว้เพื่อให้เห็นแนวผนังเท่านั้น';
   } else {
-    note.textContent = `Simulation mapping: ${item.viswalk_mapping || 'Review required'}`;
+    note.textContent = `การแปลงสำหรับการจำลอง: ${item.viswalk_mapping || 'ต้องตรวจสอบ'}`;
   }
 }
 
@@ -618,11 +632,11 @@ document.querySelectorAll('.status-btn').forEach(button => {
         document.getElementById('stepSemantic').classList.remove('done');
         const enginePath = document.getElementById('semanticEnginePath');
         enginePath.classList.remove('hidden');
-        enginePath.textContent = 'Selection changed. Semantic model is stale; generate it again before using engine output.';
+        enginePath.textContent = 'การคัดเลือกเปลี่ยนแล้ว · โมเดลคนเดินเดิมใช้ไม่ได้ กด "เตรียมโมเดลคนเดิน" อีกครั้ง';
       }
       setMessage(`${selectedElement.ifc_type} ${selectedElement.global_id}: ${status}`);
     } catch (error) {
-      setMessage(`Selection update failed: ${error.message}`);
+      setMessage(`บันทึกการคัดเลือกไม่สำเร็จ: ${error.message}`);
     }
   });
 });
@@ -657,7 +671,7 @@ function renderSemanticSummary(result) {
   if (!warnings.length) {
     const item = document.createElement('div');
     item.className = 'warning-item ok';
-    item.textContent = 'Semantic extraction passed without warnings.';
+    item.textContent = 'เตรียมโมเดลคนเดินโดยไม่มีข้อควรระวัง';
     root.appendChild(item);
   } else {
     for (const warning of warnings) {
@@ -703,7 +717,7 @@ function renderOpeningCandidates(candidates) {
         setMessage('บันทึกการเปิดช่องแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
       } catch (error) {
         input.checked = !input.checked;
-        setMessage(`Could not save opening decision: ${error.message}`);
+        setMessage(`บันทึกการเปิดช่องไม่สำเร็จ: ${error.message}`);
       } finally {
         input.disabled = false;
       }
@@ -738,6 +752,7 @@ generateSemanticBtn.addEventListener('click', async () => {
       }
       if (previewMeshes > 0) {
         v.setMode('simulation');
+        setViewerBadge('simulation');
         document.getElementById('simulationModeBtn').classList.add('active');
         document.getElementById('sourceModeBtn').classList.remove('active');
         document.getElementById('stepPreview').classList.add('done');
@@ -769,13 +784,13 @@ generateSemanticBtn.addEventListener('click', async () => {
 downloadSemanticTopBtn.addEventListener('click', () => {
   if (!currentSemantic) return;
   startDownload('/api/ifc/semantic/download');
-  setMessage('Downloading semantic JSON...');
+  setMessage('กำลังดาวน์โหลด Semantic JSON...');
 });
 
 downloadEngineTopBtn.addEventListener('click', () => {
   if (!currentSemantic) return;
   startDownload('/api/ifc/semantic/engine-download');
-  setMessage('Downloading engine-ready geometry_ifc_v03.json...');
+  setMessage('กำลังดาวน์โหลด geometry_ifc_v03.json สำหรับ Engine...');
 });
 
 exportEngineBtn.addEventListener('click', async () => {
@@ -784,10 +799,10 @@ exportEngineBtn.addEventListener('click', async () => {
     const result = await api('/api/ifc/semantic/export-engine-input', { method: 'POST' });
     const enginePath = document.getElementById('semanticEnginePath');
     enginePath.classList.remove('hidden');
-    enginePath.textContent = `Saved: ${result.path}`;
-    setMessage(result.note || 'Engine input exported.');
+    enginePath.textContent = `บันทึกแล้ว: ${result.path}`;
+    setMessage('ส่งออกไฟล์สำหรับ Engine แล้ว');
   } catch (error) {
-    setMessage(`Engine input export failed: ${error.message}`);
+    setMessage(`ส่งออกไฟล์สำหรับ Engine ไม่สำเร็จ: ${error.message}`);
   } finally {
     exportEngineBtn.disabled = false;
   }
@@ -808,7 +823,7 @@ function renderValidation(result) {
   if (!(result.issues || []).length) {
     const item = document.createElement('div');
     item.className = 'build-issue info';
-    item.textContent = 'Validation passed with no issues.';
+    item.textContent = 'ตรวจสอบผ่าน ไม่พบปัญหา';
     root.appendChild(item);
     return;
   }
@@ -828,26 +843,27 @@ function renderBuildResult(payload) {
   currentBuild = result;
   document.getElementById('buildSection').classList.remove('hidden');
   if (payload.validation) renderValidation(payload.validation);
-  document.getElementById('buildStatus').textContent = 'SUCCESS';
+  document.getElementById('buildStatus').textContent = 'สำเร็จ';
   document.getElementById('buildDuration').textContent = result.duration_sec != null ? `${result.duration_sec}s` : '—';
   const path = document.getElementById('buildOutputPath');
   path.classList.remove('hidden');
-  path.textContent = `Output: ${result.output_path || result.output_filename || 'Viswalk model built'}`;
+  path.textContent = `ไฟล์ผลลัพธ์: ${result.output_path || result.output_filename || 'สร้างโมเดล Viswalk แล้ว'}`;
   setBuildOutputReady(true);
   document.getElementById('stepBuild').classList.add('done');
 }
 
 validateBtn.addEventListener('click', async () => {
   validateBtn.disabled = true;
-  setMessage('Validating semantic geometry with Geometry Engine v0.3...');
+  setMessage('กำลังตรวจโมเดลคนเดินด้วย Geometry Engine v0.3...');
   try {
     const result = await api('/api/validate', { method: 'POST' });
     renderValidation(result);
     buildViswalkBtn.disabled = !result.build_allowed;
     const c = result.severity_counts || {};
-    setMessage(`Validation complete: ${c.error || 0} error(s), ${c.warning || 0} warning(s), ${c.info || 0} info.`);
+    setMessage(`ตรวจสอบโมเดลเสร็จแล้ว · ข้อผิดพลาด ${c.error || 0} · ข้อควรระวัง ${c.warning || 0} · ข้อมูล ${c.info || 0}` +
+      ((c.error || 0) ? ' · ต้องแก้ข้อผิดพลาดก่อนสร้างไฟล์ Viswalk' : ' · ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)'));
   } catch (error) {
-    setMessage(`Validation failed: ${error.message}`);
+    setMessage(`ตรวจสอบโมเดลไม่สำเร็จ: ${error.message}`);
   } finally {
     validateBtn.disabled = false;
   }
@@ -858,16 +874,16 @@ buildViswalkBtn.addEventListener('click', async () => {
   validateBtn.disabled = true;
   setBuildOutputReady(false);
   document.getElementById('buildSection').classList.remove('hidden');
-  document.getElementById('buildStatus').textContent = 'Building...';
+  document.getElementById('buildStatus').textContent = 'กำลังสร้าง...';
   document.getElementById('buildDuration').textContent = '—';
-  setMessage('Building Viswalk model. Vissim 2025 may open briefly; the app will save and close it automatically.');
+  setMessage('กำลังสร้างไฟล์ Viswalk · Vissim 2025 อาจเปิดขึ้นชั่วครู่ แล้วโปรแกรมจะบันทึกและปิดให้เอง');
   try {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
-    setMessage(`BUILD SUCCESS: ${result.result?.output_filename || 'Viswalk .inpx created'}`);
+    setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
   } catch (error) {
-    document.getElementById('buildStatus').textContent = 'FAILED';
-    setMessage(`Build failed: ${error.message}`);
+    document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
+    setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
   } finally {
     buildViswalkBtn.disabled = false;
     validateBtn.disabled = false;
@@ -883,9 +899,9 @@ openBuildFolderBtn.addEventListener('click', async () => {
   openBuildFolderBtn.disabled = true;
   try {
     const result = await api('/api/build/latest/open-folder', { method: 'POST' });
-    setMessage(`Opened output folder: ${result.folder}`);
+    setMessage(`เปิดโฟลเดอร์ผลลัพธ์แล้ว: ${result.folder}`);
   } catch (error) {
-    setMessage(`Could not open output folder: ${error.message}`);
+    setMessage(`เปิดโฟลเดอร์ผลลัพธ์ไม่สำเร็จ: ${error.message}`);
   } finally {
     openBuildFolderBtn.disabled = false;
   }
@@ -903,7 +919,7 @@ async function restoreState() {
       : `Python ${health.python} · IfcOpenShell missing`;
 
     if (!health.three_vendor_ready) {
-      setMessage('Three.js vendor files are missing. Run setup_app.ps1 before loading 3D.');
+      setMessage('ไม่พบไฟล์ Three.js · รัน install.bat ก่อนใช้งานมุมมอง 3D');
     }
 
     selectionState = state.selection || { mode: 'auto', overrides: {} };
@@ -932,7 +948,7 @@ async function restoreState() {
         setExportReady(!state.semantic.stale);
         if (!state.semantic.stale) document.getElementById('stepSemantic').classList.add('done');
       } catch (error) {
-        setMessage(`Semantic restore warning: ${error.message}`);
+        setMessage(`โหลดโมเดลคนเดินเดิมไม่สำเร็จ: ${error.message}`);
       }
     }
 
@@ -944,7 +960,7 @@ async function restoreState() {
       renderBuildResult({ result: state.build.result, validation: state.build.validation });
     }
   } catch (error) {
-    setMessage(`Startup check failed: ${error.message}`);
+    setMessage(`ตรวจความพร้อมตอนเริ่มโปรแกรมไม่สำเร็จ: ${error.message}`);
   }
 }
 
