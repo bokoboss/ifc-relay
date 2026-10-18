@@ -4,6 +4,8 @@ import json
 import time
 from pathlib import Path
 
+from fixture_paths import large_ifc_from_env
+
 from ifc_geometry_service import extract_ifc_geometry
 from ifc_semantic_service import build_semantic_model, write_semantic_model
 from vissim_build_service import validate_engine_input
@@ -16,8 +18,8 @@ RUNTIME = APP_DIR / "runtime" / "large_semantic_regression"
 
 def fixture() -> Path:
     for root in (PROJECT_ROOT, PROJECT_ROOT.parent):
-        preferred = root / "large_fixture.ifc"
-        if preferred.exists():
+        preferred = large_ifc_from_env()
+        if preferred is not None and preferred.exists():
             return preferred
     candidates = []
     for root in (PROJECT_ROOT, PROJECT_ROOT.parent):

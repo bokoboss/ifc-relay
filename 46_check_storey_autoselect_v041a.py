@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from fixture_paths import large_ifc_from_env
 import sys
 
 ROOT = Path(__file__).resolve().parent
@@ -11,8 +13,8 @@ from ifc_service import audit_ifc
 
 
 def find_large_ifc() -> Path:
-    preferred = PROJECT_ROOT / "large_fixture.ifc"
-    if preferred.exists():
+    preferred = large_ifc_from_env()
+    if preferred is not None and preferred.exists():
         return preferred
     candidates = sorted(
         [p for p in PROJECT_ROOT.glob("*.ifc") if p.stat().st_size >= 25 * 1024 * 1024],
