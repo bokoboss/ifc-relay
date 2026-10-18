@@ -393,6 +393,38 @@ def classify_unfilled_opening(width: float, height: float, sill: float) -> str:
     return "not_passage"
 
 
+def split_out_holes(poly: Polygon) -> list[Polygon]:
+    """Split a polygon with interior rings into hole-free pieces.
+
+    Engine obstacles are written from the exterior ring only, so a closed
+    wall loop (one IfcWall around a shaft) would otherwise become a solid
+    block. Each hole is removed by cutting along a vertical line through it.
+    """
+    from shapely.geometry import LineString
+    from shapely.ops import split
+
+    done: list[Polygon] = []
+    queue: list[Polygon] = [poly]
+    guard = 0
+    while queue and guard < 1000:
+        guard += 1
+        current = queue.pop()
+        if not current.interiors:
+            if current.area > EPS:
+                done.append(current)
+            continue
+        hole = Polygon(current.interiors[0])
+        cx = hole.representative_point().x
+        miny, maxy = current.bounds[1], current.bounds[3]
+        cutter = LineString([(cx, miny - 1.0), (cx, maxy + 1.0)])
+        pieces = [g for g in split(current, cutter).geoms if isinstance(g, Polygon)]
+        if len(pieces) < 2:
+            done.append(Polygon(current.exterior))  # cannot split; keep outline
+            continue
+        queue.extend(pieces)
+    return done
+
+
 def wall_footprint_solidity(footprint: Polygon) -> float:
     hull = footprint.convex_hull
     return float(footprint.area / hull.area) if hull.area > EPS else 1.0
@@ -919,7 +951,11 @@ def build_semantic_model(
                     f"Wall {global_id(wall) or wall.id()} is not straight and {len(missing)} of its openings have no footprint; those openings stay closed."
                 )
             geom = footprint.difference(unary_union(cut)) if cut else footprint
-            parts = polygon_components(geom if geom.is_valid else geom.buffer(0))
+            parts = [
+                piece
+                for comp in polygon_components(geom if geom.is_valid else geom.buffer(0))
+                for piece in split_out_holes(comp)
+            ]
             door_openings_applied += len({o["door_global_id"] for o in wall_openings if o.get("door_global_id") and o.get("polygon") is not None})
             name = entity_name(wall, f"IFC Wall {wall.id()}")
             for part_no, part in enumerate(parts, start=1):
@@ -1002,6 +1038,10 @@ def build_semantic_model(
 
     for element in model.by_type("IfcElement"):
         if is_a(element, "IfcWall") or is_a(element, "IfcDoor") or is_a(element, "IfcWindow") or is_a(element, "IfcSlab"):
+            continue
+        if is_a(element, "IfcFeatureElement"):
+            # Openings/projections are handled through their host element;
+            # an included opening GlobalId is a wall-split decision.
             continue
         if is_a(element, "IfcStair") or is_a(element, "IfcStairFlight") or is_a(element, "IfcRamp") or is_a(element, "IfcRampFlight"):
             continue

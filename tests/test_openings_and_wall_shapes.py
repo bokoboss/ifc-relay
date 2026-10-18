@@ -114,3 +114,34 @@ def test_l_shaped_wall_with_opening_is_cut(tmp_path):
     assert len(parts) == 2
     total = sum(Polygon(p["polygon"]).area for p in parts)
     assert math.isclose(total, Polygon(l_pts).area - 1.0 * 0.2, rel_tol=0.02)
+
+
+def _ring_wall(b, storey):
+    """One IfcWall forming a closed loop (e.g. around a shaft)."""
+    boxes = [(1, 1, 5, 1.2), (1, 3.8, 5, 4), (1, 1.2, 1.2, 3.8), (4.8, 1.2, 5, 3.8)]
+    verts, faces = [], []
+    for x0, y0, x1, y1 in boxes:
+        k = len(verts)
+        verts += [(x0, y0, 0), (x1, y0, 0), (x1, y1, 0), (x0, y1, 0),
+                  (x0, y0, 3), (x1, y0, 3), (x1, y1, 3), (x0, y1, 3)]
+        faces += [(k, k + 3, k + 2, k + 1), (k + 4, k + 5, k + 6, k + 7), (k, k + 1, k + 5, k + 4),
+                  (k + 1, k + 2, k + 6, k + 5), (k + 2, k + 3, k + 7, k + 6), (k + 3, k, k + 4, k + 7)]
+    return b.mesh_element("IfcWall", verts, faces, storey=storey)
+
+
+def test_closed_wall_loop_does_not_fill_its_interior(tmp_path):
+    b = _base()
+    _ring_wall(b, b.storeys[0])
+    sem = semantic_for(b.write(tmp_path / "ring.ifc"))
+    parts = [o for o in sem["obstacles"] if o.get("wall_shape") == "polygon"]
+    ring_area = 4.0 * 3.0 - 3.6 * 2.6
+    assert len(parts) >= 2
+    assert math.isclose(sum(Polygon(p["polygon"]).area for p in parts), ring_area, rel_tol=0.01)
+
+
+def test_included_opening_is_not_reported_as_unmapped_element(tmp_path):
+    b = _base()
+    wall = add_wall(b, 0.0, 4.0, 10.0, b.storeys[0])
+    opening = add_opening(b, wall, 4.0, 5.0, 4.0, 0.0, 2.1)
+    ifc = semantic_for(b.write(tmp_path / "o.ifc"), {opening.GlobalId: "include"})["ifc_semantic"]
+    assert not any("no semantic mapping" in w for w in ifc["warnings"])
