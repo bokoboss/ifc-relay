@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from project_paths import BASE_NETWORK_FILE, engine_path
+
 
 _BUILD_LOCK = threading.Lock()
 
@@ -42,6 +44,8 @@ def _run_adapter(
         '--project-root', str(project_root),
         '--input', str(semantic_path),
         '--validation-output', str(validation_path),
+        '--engine', str(engine_path()),
+        '--base-network', str(project_root / BASE_NETWORK_FILE),
     ]
     if validate_only:
         cmd.append('--validate-only')

@@ -18,7 +18,7 @@ from ifc_geometry_service import extract_ifc_geometry
 from ifc_semantic_service import build_semantic_model, write_semantic_model
 from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
-from project_paths import project_root
+from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_build_service import build_vissim_model, validate_engine_input
 
@@ -133,8 +133,9 @@ def health() -> dict[str, Any]:
             vendor_three.exists() and vendor_core.exists() and vendor_orbit.exists()
         ),
         "project_root": str(PROJECT_ROOT),
-        "vissim_engine_found": (PROJECT_ROOT / "05_geometry_engine_v03.py").exists(),
-        "base_network_found": (PROJECT_ROOT / "base_empty.inpx").exists(),
+        "vissim_engine_found": engine_path().exists(),
+        "vissim_engine_path": str(engine_path()),
+        "base_network_found": base_network_path().exists(),
         "build_adapter_found": (APP_DIR / "40_vissim_build_adapter_v04.py").exists(),
     }
 
@@ -645,7 +646,7 @@ def build_readiness() -> dict[str, Any]:
         "manual_overrides": len(overrides),
         "ifc_semantic_mapping_ready": semantic_ready,
         "semantic_summary": semantic.get("summary"),
-        "can_build_current_ifc": semantic_ready and (PROJECT_ROOT / "05_geometry_engine_v03.py").exists() and (PROJECT_ROOT / "base_empty.inpx").exists(),
+        "can_build_current_ifc": semantic_ready and engine_path().exists() and base_network_path().exists(),
         "next_gate": (
             "Validate semantic geometry, then Build Viswalk through Vissim COM 2025."
         ),

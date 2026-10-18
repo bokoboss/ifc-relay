@@ -124,12 +124,14 @@ def main() -> int:
     parser.add_argument('--report')
     parser.add_argument('--validation-output', required=True)
     parser.add_argument('--validate-only', action='store_true')
+    parser.add_argument('--engine', help='engine file (default: <project-root>/05_geometry_engine_v03.py)')
+    parser.add_argument('--base-network', help='base .inpx (default: <project-root>/base_empty.inpx)')
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
     input_path = Path(args.input).resolve()
-    engine_path = project_root / '05_geometry_engine_v03.py'
-    base_network = project_root / 'base_empty.inpx'
+    engine_path = Path(args.engine).resolve() if args.engine else project_root / '05_geometry_engine_v03.py'
+    base_network = Path(args.base_network).resolve() if args.base_network else project_root / 'base_empty.inpx'
     validation_output = Path(args.validation_output).resolve()
     validation_output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -137,7 +139,9 @@ def main() -> int:
         raise FileNotFoundError(f'Geometry Engine v0.3 not found: {engine_path}')
     if not input_path.exists():
         raise FileNotFoundError(f'Engine input not found: {input_path}')
-    if not base_network.exists():
+    if not args.validate_only and not base_network.exists():
+        # Validation does not open Vissim, so the base network is only
+        # required for a real build.
         raise FileNotFoundError(f'Base Vissim network not found: {base_network}')
 
     engine = load_engine(engine_path, args.validate_only)

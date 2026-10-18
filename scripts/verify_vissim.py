@@ -33,7 +33,7 @@ from typing import Any
 APP_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_DIR))
 
-from project_paths import BASE_NETWORK_FILE, ENGINE_FILE, project_root  # noqa: E402
+from project_paths import BASE_NETWORK_FILE, engine_path, project_root  # noqa: E402
 
 PROG_ID = "VISSIM.Vissim.2025"
 
@@ -86,7 +86,7 @@ def check_environment(rep: Report, root: Path) -> dict[str, Any]:
     rep.add("Python packages", "FAIL" if missing else "PASS",
             f"missing: {', '.join(missing)}" if missing else f"Python {env['python']}")
 
-    engine = root / ENGINE_FILE
+    engine = engine_path()
     base = root / BASE_NETWORK_FILE
     env["engine_found"] = engine.exists()
     env["base_network_found"] = base.exists()
@@ -107,7 +107,7 @@ def check_environment(rep: Report, root: Path) -> dict[str, Any]:
 
 def run_pytest(rep: Report, root: Path) -> None:
     env = dict(os.environ)
-    engine = root / ENGINE_FILE
+    engine = engine_path()
     if engine.exists():
         env["VBB_GEOMETRY_ENGINE"] = str(engine)
     proc = subprocess.run(
@@ -238,7 +238,7 @@ def run_vissim_build(rep: Report, root: Path, skip_build: bool) -> None:
             f"{summary['vertical_connections']} vertical, {summary['generated_landing_levels']} landing level, "
             f"{summary['polygon_walls']} polygon walls, {summary['unfilled_openings_applied']} opened door-less opening")
 
-    if not (root / ENGINE_FILE).exists():
+    if not engine_path().exists():
         rep.add("Engine validation", "SKIP", "engine not found")
         rep.add("Vissim COM build", "SKIP", "engine not found")
         return
