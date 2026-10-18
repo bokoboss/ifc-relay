@@ -26,14 +26,19 @@ Checks that produce warnings rather than silent results: non-straight flight foo
 
 Existing engine fields are unchanged (`key, name, type, start_level, end_level, start_z_offset, end_z_offset, polygon, thickness, show_balustrade, steps`). Added traceability fields: `ifc_parent_global_id, geometry_source, polygon_order, bottom_edge, top_edge, z_bottom, z_top, rise, run_length, width, level_match, steps_source`.
 
-## To verify on Windows / Vissim (engine is outside this repo)
+## Engine contract (checked against `05_geometry_engine_v03.py`, validate-only)
 
-| # | Question for `05_geometry_engine_v03.py` | Why it matters |
+| Question | Finding | Handling |
 | --- | --- | --- |
-| 1 | Does it accept extra level/area/connection fields and level keys 901+? | Generated landing levels |
-| 2 | Does it apply `start_z_offset` / `end_z_offset`? | Unmatched ends |
-| 3 | How does it decide the low end of a stairway polygon? | Records are now bottom edge first; the engine may need to read `polygon_order` or `bottom_edge` |
-| 4 | Does it accept `start_level == end_level` with different offsets? | Partial flights |
-| 5 | Does the Vissim build place Areas on generated levels correctly? | Landing areas |
+| Extra fields / level keys 901+ | Ignored / accepted (keys only need to be > 0 and unique) | none needed |
+| `start_z_offset` / `end_z_offset` | Passed to Vissim as `StartZOffset` / `EndZOffset` | used for ends that match no level |
+| `start_level == end_level` | **Rejected** (`ValueError`) | an end between levels is referenced to the nearest *other* level (above, negative offset) |
+| Ramp end must overlap the area of its level | Engine validation warns when a ramp only touches it | polygon extended by `end_overlap` = 0.10 m beyond both ends; `bottom_edge`/`top_edge` keep the true flight edges |
+| Low end of a stairway | Engine passes the polygon WKT unchanged to `Ramps.AddRamp`; direction comes from Vissim's reading of the polygon | records are bottom edge first; **confirm in Vissim** which edge it treats as the start |
 
-Suggested acceptance: a two-storey IFC with one straight stair and one U-stair builds, reopens in Vissim, and pedestrians can route L1 → landing → L2.
+Engine-contract tests (`tests/test_engine_contract_*.py`) run the real engine when `VBB_GEOMETRY_ENGINE` points to a local copy, and are skipped otherwise.
+
+## Still to verify in Vissim
+
+- Which polygon edge Vissim treats as the ramp start, and that negative `EndZOffset` is accepted.
+- A two-storey IFC with one straight stair and one U-stair builds, reopens, and pedestrians route L1 → landing → L2.

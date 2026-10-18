@@ -140,8 +140,10 @@ def test_flight_ending_off_level_uses_offset_and_warns(tmp_path):
     sem = semantic_for(b.write(tmp_path / "offset.ifc"), {flight.GlobalId: "include"})
 
     [conn] = sem["vertical_connections"]
-    assert conn["start_level"] == 1 and conn["end_level"] == 1
-    assert math.isclose(conn["end_z_offset"], 1.2, abs_tol=1e-3)
+    # Engine v0.3 rejects start_level == end_level: the end is referenced to
+    # the level above with a negative offset (1.2 - 3.4 = -2.2 m).
+    assert conn["start_level"] == 1 and conn["end_level"] == 2
+    assert math.isclose(conn["end_z_offset"], 1.2 - STOREY_HEIGHT, abs_tol=1e-3)
     assert conn["level_match"]["end"] == "offset"
     assert any("matches no storey or landing level" in w for w in sem["ifc_semantic"]["warnings"])
 
@@ -168,3 +170,15 @@ def test_storey_elevation_vs_floor_top_mismatch_is_reported(tmp_path):
     b.slab(FLOOR_L1, 0.3, b.storeys[0])
     sem = semantic_for(b.write(tmp_path / "datum.ifc"))
     assert any("differs from floor-slab tops" in w for w in sem["ifc_semantic"]["warnings"])
+
+
+def test_polygon_extends_past_both_ends_for_engine_overlap(tmp_path):
+    b = _two_storey()
+    stair = b.stair(b.storeys[0])
+    b.flight(2.0, 8.0, 1.0, 2.2, 0.0, STOREY_HEIGHT, parent=stair)
+    sem = semantic_for(b.write(tmp_path / "overlap.ifc"), {stair.GlobalId: "include"})
+    [conn] = sem["vertical_connections"]
+    xs = [p[0] for p in conn["polygon"]]
+    assert math.isclose(min(xs), 2.0 - conn["end_overlap"], abs_tol=1e-3)
+    assert math.isclose(max(xs), 8.0 + conn["end_overlap"], abs_tol=1e-3)
+    assert all(math.isclose(p[0], 2.0, abs_tol=1e-3) for p in conn["bottom_edge"])
