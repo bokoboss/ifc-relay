@@ -115,6 +115,44 @@ function disposeObjectTree(root) {
   });
 }
 
+const ARROW_DERIVED = 0x1f8a70;   // up-direction derived from geometry (not yet certified in Vissim)
+const ARROW_REVIEW = 0xd98e04;    // up-direction could not be determined reliably
+
+function stairDirectionArrow(connection, startZ, endZ) {
+  // Arrow from the true bottom edge to the true top edge, drawn just above the
+  // sloped surface. Amber when the direction needs engineering review.
+  const be = connection.bottom_edge;
+  const te = connection.top_edge;
+  if (!Array.isArray(be) || !Array.isArray(te) || be.length < 2 || te.length < 2) return null;
+  const mid = (edge) => [(Number(edge[0][0]) + Number(edge[1][0])) / 2, (Number(edge[0][1]) + Number(edge[1][1])) / 2];
+  const [bx, by] = mid(be);
+  const [tx, ty] = mid(te);
+  const lift = 0.25;
+  const from = new THREE.Vector3(bx, by, startZ + lift);
+  const to = new THREE.Vector3(tx, ty, endZ + lift);
+  const dir = to.clone().sub(from);
+  const length = dir.length();
+  if (length < 0.2) return null;
+  dir.normalize();
+  const review = connection.direction_status !== 'derived_from_geometry';
+  // Solid shaft + cone (WebGL lines are 1 px wide and hard to see).
+  const color = review ? ARROW_REVIEW : ARROW_DERIVED;
+  const material = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
+  const headLength = Math.min(0.9, Math.max(0.4, length * 0.2));
+  const radius = 0.07;
+  const arrow = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length - headLength, 10), material);
+  shaft.position.y = (length - headLength) / 2;
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(radius * 3.2, headLength, 14), material);
+  cone.position.y = length - headLength / 2;
+  arrow.add(shaft, cone);
+  arrow.position.copy(from);
+  arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  arrow.renderOrder = 10;
+  arrow.userData.semantic = { kind: 'stair_direction', source: connection, review };
+  return arrow;
+}
+
 function clearSemantic() {
   for (const child of [...semanticGroup.children]) {
     semanticGroup.remove(child);
@@ -255,6 +293,9 @@ function addSemanticPreview(model) {
     mesh.userData.semantic = { kind: 'vertical_connection', source: connection };
     semanticGroup.add(mesh);
     semanticMeshes.push(mesh);
+
+    const arrow = stairDirectionArrow(connection, startZ, endZ);
+    if (arrow) semanticGroup.add(arrow);
   }
 
   semanticLoaded = semanticMeshes.length > 0;

@@ -475,3 +475,15 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
   html {scroll-behavior:auto;}
   *,*::before,*::after {animation-duration:.01ms!important;transition-duration:.01ms!important;}
 }
+
+/* Stair review (bulk include + confirm) */
+.stair-review .stair-bulk-btn { width: 100%; margin-top: 8px; }
+.stair-confirm { margin-top: 8px; padding: 10px; border: 1px solid #d9b25f; background: #fff8e8; border-radius: 8px; font-size: 12px; }
+.stair-confirm p { margin: 0 0 8px; line-height: 1.5; }
+.stair-confirm-actions { display: flex; gap: 6px; }
+.stair-confirm-actions button { flex: 1; }
+.link-btn { background: none; border: 0; padding: 6px 0 0; color: #5b6b73; font-size: 11px; text-decoration: underline; cursor: pointer; }
+.vertical-row { display: grid; grid-template-columns: auto 1fr; gap: 6px; padding: 5px 0; border-top: 1px solid #edf1f3; font-size: 12px; }
+.vertical-row .dir-badge { font-weight: 600; white-space: nowrap; }
+.dir-ok { color: #1f8a70; font-weight: 600; }
+.dir-review { color: #b87503; font-weight: 600; }
