@@ -20,6 +20,7 @@ from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
+from gate_service import evaluate_gate, gate_message_th, record_ack
 from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
 
 
@@ -56,6 +57,12 @@ class GeometryRequest(BaseModel):
     mode: Literal["simulation_relevant", "full"] = "simulation_relevant"
     storey_ids: list[int] = Field(default_factory=list)
     append: bool = False
+
+class GateAck(BaseModel):
+    id: str
+    acknowledged: bool = True
+    reason: str = ""
+
 
 class SelectionUpdate(BaseModel):
     global_id: str
@@ -315,10 +322,13 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         "triangle_count": result.get("triangle_count", 0),
         "mesh_failures": len(result["mesh_failures"]),
     }
-    state["build"] = {
-        "status": "ifc_3d_review",
-        "message": "Filtered 3D IFC loaded. Review selection before semantic extraction.",
-    }
+    # Loading or adding storeys to the 3D view is viewing only: keep an existing
+    # pedestrian model, its validation and any build result (e.g. after a page reload).
+    if (state.get("semantic") or {}).get("status") != "ready":
+        state["build"] = {
+            "status": "ifc_3d_review",
+            "message": "Filtered 3D IFC loaded. Review selection before semantic extraction.",
+        }
     store.write(state)
     return result
 
@@ -601,6 +611,66 @@ def validate_current_semantic() -> dict[str, Any]:
     return result
 
 
+class GateNotPassed(Exception):
+    def __init__(self, gate: dict[str, Any]):
+        super().__init__("engineering gate not passed")
+        self.gate = gate
+
+
+def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validation: dict[str, Any],
+                         upload: dict[str, Any]) -> None:
+    """Record what was built, under which gate decisions, next to the .inpx."""
+    import hashlib
+    from datetime import datetime as _dt
+
+    out = Path(result["output_path"])
+    source = Path(upload.get("path", ""))
+    sha = hashlib.sha256(source.read_bytes()).hexdigest() if source.is_file() else None
+    manifest = {
+        "built_at": _dt.now().isoformat(timespec="seconds"),
+        "app_version": "0.4.1",
+        "source_ifc": {"name": upload.get("original_name"), "sha256": sha},
+        "output_inpx": out.name,
+        "engine_severity_counts": validation.get("severity_counts"),
+        "engineering_gate": gate,
+        "viswalk_verified": False,
+        "note": "Geometry checks passed and listed items were acknowledged; the model is not verified "
+                "in Viswalk until an engineer checks it there.",
+    }
+    path = out.with_name(out.stem.replace("_viswalk", "") + "_build_manifest.json")
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    result["manifest_path"] = str(path)
+
+
+def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = None) -> dict[str, Any]:
+    semantic_path = current_semantic_path_or_404()
+    semantic_model = json.loads(semantic_path.read_text(encoding="utf-8"))
+    if validation is None:
+        build = state.get("build") or {}
+        validation = build.get("validation") if build.get("status") in ("validated", "success") else None
+    return evaluate_gate(semantic_model, validation, state.get("gate_acks"))
+
+
+@app.get("/api/gate")
+def get_engineering_gate() -> dict[str, Any]:
+    state = store.read()
+    if (state.get("semantic") or {}).get("stale", False):
+        raise HTTPException(status_code=400, detail="โมเดลคนเดินไม่ตรงกับการเลือกล่าสุด · เตรียมโมเดลคนเดินอีกครั้ง")
+    return _current_gate(state)
+
+
+@app.post("/api/gate/ack")
+def acknowledge_gate_item(update: GateAck) -> dict[str, Any]:
+    state = store.read()
+    gate = _current_gate(state)
+    item = next((i for i in gate["items"] if i["id"] == update.id), None)
+    if item is None or item["policy"] != "ack":
+        raise HTTPException(status_code=404, detail="ไม่พบรายการที่ต้องรับทราบนี้ในโมเดลปัจจุบัน")
+    state["gate_acks"] = record_ack(state.get("gate_acks") or {}, item, update.acknowledged, update.reason)
+    store.write(state)
+    return _current_gate(state)
+
+
 @app.post("/api/build-vissim")
 def build_current_semantic_in_vissim() -> dict[str, Any]:
     semantic_path = current_semantic_path_or_404()
@@ -622,9 +692,16 @@ def build_current_semantic_in_vissim() -> dict[str, Any]:
     # Always validate immediately before build; do not trust an older validation state.
     try:
         validation = validate_engine_input(APP_DIR, PROJECT_ROOT, semantic_path)
-        if not validation.get("build_allowed", False):
-            raise RuntimeError("Validation reported blocking errors.")
+        gate = _current_gate(state, validation)
+        if not gate["passed"]:
+            state["build"] = {"status": "validated", "validation": validation,
+                              "message": "Engineering gate not passed."}
+            store.write(state)
+            raise GateNotPassed(gate)
         result = build_vissim_model(APP_DIR, PROJECT_ROOT, semantic_path, source_name)
+        write_build_manifest(result, gate, validation, upload)
+    except GateNotPassed as exc:
+        raise HTTPException(status_code=409, detail="ยังสร้างไฟล์ไม่ได้ · " + gate_message_th(exc.gate))
     except Exception as exc:
         state["build"] = {
             "status": "failed",

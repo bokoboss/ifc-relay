@@ -500,3 +500,18 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .connectivity-note {margin:8px 0;padding:8px 10px;border-radius:4px;font-size:12px;line-height:1.5;}
 .connectivity-note.ok {background:#e6f4ef;color:#1f6b4f;border:1px solid #bfe0d2;}
 .connectivity-note.warn {background:#fbeceb;color:#9b2c22;border:1px solid #f0c4bf;}
+
+.gate-section {margin:12px 0;}
+.gate-list {display:flex;flex-direction:column;gap:6px;}
+.gate-row {border:1px solid #dde5e5;border-left-width:4px;border-radius:4px;padding:7px 9px;display:flex;flex-direction:column;gap:4px;font-size:12px;background:#fbfcfc;}
+.gate-row.block {border-left-color:#c0392b;}
+.gate-row.ack {border-left-color:#d98e04;}
+.gate-row.ack.done {border-left-color:#1f8a70;background:#f3faf7;}
+.gate-row.info {border-left-color:#9aa8aa;}
+.gate-head {display:flex;align-items:center;gap:7px;}
+.gate-row small {color:#5b6b6d;}
+.gate-reason {font-size:12px;padding:4px 6px;border:1px solid #cfdcdc;border-radius:4px;}
+.gate-chip {display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;color:#fff;}
+.gate-chip.block {background:#c0392b;} .gate-chip.ack {background:#d98e04;} .gate-chip.info {background:#8a9696;}
+.gate-summary {margin-top:8px;padding:7px 9px;border-radius:4px;font-size:12px;}
+.gate-summary.ok {background:#e6f4ef;color:#1f6b4f;} .gate-summary.warn {background:#fbeceb;color:#9b2c22;}
