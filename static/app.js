@@ -717,6 +717,7 @@ function renderSemanticSummary(result) {
     result.model?.ifc_semantic?.opening_candidates || result.ifc_semantic?.opening_candidates || [],
   );
   renderVerticalConnections(result.model?.vertical_connections || result.vertical_connections || []);
+  renderOffLevelSlabs(result.model?.ifc_semantic?.off_level_slabs || result.ifc_semantic?.off_level_slabs || []);
 
   const root = document.getElementById('semanticWarningList');
   root.innerHTML = '';
@@ -841,6 +842,47 @@ document.getElementById('stairResetBtn')?.addEventListener('click', async () => 
   }
 });
 
+function renderOffLevelSlabs(slabs) {
+  const section = document.getElementById('offLevelSection');
+  const root = document.getElementById('offLevelList');
+  if (!section || !root) return;
+  root.innerHTML = '';
+  section.classList.toggle('hidden', !slabs.length);
+  for (const slab of slabs) {
+    const row = document.createElement('label');
+    row.className = 'check-row opening-row';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = slab.decision === 'include';
+    input.disabled = !slab.global_id;
+    const text = document.createElement('span');
+    text.textContent = `${slab.name} · ชั้น ${slab.level_key} · ${Number(slab.offset_m) > 0 ? '+' : ''}${Number(slab.offset_m).toFixed(2)} ม. จากพื้นชั้น · ${Number(slab.area_m2).toFixed(1)} ตร.ม.`;
+    const tag = document.createElement('span');
+    tag.className = `tag ${slab.decision === 'include' ? 'include' : 'review'}`;
+    tag.textContent = slab.decision === 'include' ? 'ใช้เป็นพื้นเดิน' : 'รอตรวจ';
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      try {
+        await api('/api/selection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ global_id: slab.global_id, status: input.checked ? 'include' : 'auto' }),
+        });
+        slab.decision = input.checked ? 'include' : 'auto';
+        markSemanticStale();
+        setMessage('บันทึกการใช้แผ่นพื้นแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งก่อนตรวจหรือสร้างไฟล์');
+      } catch (error) {
+        input.checked = !input.checked;
+        setMessage(`บันทึกไม่สำเร็จ: ${error.message}`);
+      } finally {
+        input.disabled = !slab.global_id;
+      }
+    });
+    row.append(input, text, tag);
+    root.appendChild(row);
+  }
+}
+
 function renderOpeningCandidates(candidates) {
   const section = document.getElementById('openingCandidateSection');
   const root = document.getElementById('openingCandidateList');
@@ -857,12 +899,12 @@ function renderOpeningCandidates(candidates) {
     input.checked = c.decision === 'include';
     input.disabled = !c.global_id;
     const text = document.createElement('span');
-    const where = c.host_wall_name || c.host_wall_global_id || 'wall';
-    text.textContent = `${where} · ${Number(c.width).toFixed(2)} × ${Number(c.height).toFixed(2)} m, sill ${Number(c.sill).toFixed(2)} m` +
-      (c.level_key != null ? ` · level ${c.level_key}` : '');
+    const where = c.host_wall_name || c.host_wall_global_id || 'ผนัง';
+    text.textContent = `${where} · กว้าง ${Number(c.width).toFixed(2)} × สูง ${Number(c.height).toFixed(2)} ม. · ขอบล่าง ${Number(c.sill).toFixed(2)} ม.` +
+      (c.level_key != null ? ` · ชั้น ${c.level_key}` : '');
     const tag = document.createElement('span');
     tag.className = `tag ${c.classification === 'passage_candidate' ? 'review' : 'exclude'}`;
-    tag.textContent = c.classification === 'passage_candidate' ? 'passage?' : 'not walkable';
+    tag.textContent = c.classification === 'passage_candidate' ? 'อาจเป็นทางเดิน' : 'ไม่น่าเป็นทางเดิน';
     input.addEventListener('change', async () => {
       input.disabled = true;
       try {

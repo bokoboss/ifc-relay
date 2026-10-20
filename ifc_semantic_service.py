@@ -33,6 +33,11 @@ from ifc_vertical_service import (
 EPS = 1e-8
 # Storey elevation vs. floor-slab top difference that is reported as a datum warning.
 STOREY_DATUM_WARNING = 0.05
+# Non-landing floor slabs within this distance of the storey floor are merged into
+# it with a warning (steps, sunken wet areas, finishes). Further away they are left
+# out of the walkable floor until the engineer includes them (sunscreens, canopies,
+# mezzanines) - IFC predefined type FLOOR alone is not proof that a slab is walkable.
+OFF_LEVEL_MERGE_MAX = 0.40
 # Unfilled wall openings that look like walkable passages (never applied
 # automatically; the engineer includes them by opening GlobalId).
 PASSAGE_MAX_SILL = 0.30
@@ -895,18 +900,41 @@ def build_semantic_model(
             datum = level_z_by_key[key]
         level_datum_by_key[key] = datum
 
-    # Pass 2: route storey floors vs. intermediate landings.
+    # Pass 2: route storey floors vs. intermediate landings vs. off-level slabs.
     intermediate_landings: list[dict[str, Any]] = []
+    off_level_slabs: list[dict[str, Any]] = []
     for cand in slab_candidates:
         level_key = cand["level_key"]
         datum = level_datum_by_key[level_key]
         if cand["is_landing"] and is_intermediate_landing(cand["top_z"], datum):
             intermediate_landings.append(cand)
             continue
-        if not cand["is_landing"] and abs(cand["top_z"] - datum) > INTERMEDIATE_LANDING_THRESHOLD:
+        offset = cand["top_z"] - datum
+        if not cand["is_landing"] and abs(offset) > INTERMEDIATE_LANDING_THRESHOLD:
+            explicit = bool(cand["guid"]) and selection_overrides.get(cand["guid"]) == "include"
+            area = round(sum(c.area for c in cand["components"]), 3)
+            if abs(offset) > OFF_LEVEL_MERGE_MAX and not explicit:
+                # Too far from the floor to be a step or a sunken finish (e.g. sunscreens,
+                # canopies, mezzanines): not walkable until the engineer includes it.
+                off_level_slabs.append({
+                    "global_id": cand["guid"], "level_key": level_key, "top_z": round(cand["top_z"], 3),
+                    "offset_m": round(offset, 3), "area_m2": area,
+                    "name": entity_name(cand["slab"], f"IFC Slab {cand['slab'].id()}"), "decision": "auto",
+                })
+                warnings.append(
+                    f"Floor slab {cand['guid'] or cand['slab'].id()} top ({cand['top_z']:.3f} m) is "
+                    f"{offset:+.3f} m from its storey floor; left out of level {level_key} (not walkable until included in review)."
+                )
+                continue
+            if explicit and abs(offset) > OFF_LEVEL_MERGE_MAX:
+                off_level_slabs.append({
+                    "global_id": cand["guid"], "level_key": level_key, "top_z": round(cand["top_z"], 3),
+                    "offset_m": round(offset, 3), "area_m2": area,
+                    "name": entity_name(cand["slab"], f"IFC Slab {cand['slab'].id()}"), "decision": "include",
+                })
             warnings.append(
                 f"Floor slab {cand['guid'] or cand['slab'].id()} top ({cand['top_z']:.3f} m) is "
-                f"{cand['top_z'] - datum:+.3f} m from its storey floor; merged into level {level_key}. Review whether it is a mezzanine or step."
+                f"{offset:+.3f} m from its storey floor; merged into level {level_key}. Review whether it is a mezzanine or step."
             )
 
         walkable_source_slab_count += 1
@@ -1360,6 +1388,8 @@ def build_semantic_model(
             if v["level_match"][end] != "exact"
         ),
         "generated_landing_levels": len(landing_levels),
+        "off_level_slabs": len(off_level_slabs),
+        "off_level_slabs_excluded": sum(1 for x in off_level_slabs if x["decision"] != "include"),
         "multi_storey_elements": multi_replicated,
         "multi_storey_copies": multi_copies,
         "landing_areas": landing_area_count,
@@ -1403,6 +1433,7 @@ def build_semantic_model(
             "warnings": warnings,
             "excluded_detail_preview": excluded_detail[:100],
             "opening_candidates": opening_candidates[:CANDIDATE_LIST_LIMIT],
+            "off_level_slabs": off_level_slabs,
             "door_logic": {
                 "source_doors": source_door_count,
                 "included_doors": included_door_count,
