@@ -728,19 +728,195 @@ window.addEventListener('plan-measure', event => {
 
 const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน' };
 
-window.addEventListener('plan-rect', async event => {
-  const { tool, level_key, polygon } = event.detail || {};
+// ---- drawing on the plan: preview -> confirm -> save, with undo/redo ----------
+let pendingShape = null;
+const editHistory = { undo: [], redo: [] };
+
+function updateUndoButtons() {
+  document.getElementById('planUndoBtn').disabled = !editHistory.undo.length;
+  document.getElementById('planRedoBtn').disabled = !editHistory.redo.length;
+}
+
+function segmentHitsPolygon(a, b, poly) {
+  const inside = (pt) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  if (inside(a) || inside(b)) return true;
+  const cross = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  for (let i = 0; i < poly.length; i += 1) {
+    const c = poly[i], d = poly[(i + 1) % poly.length];
+    if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return true;
+  }
+  return false;
+}
+
+function shapeArea(poly) {
+  let s = 0;
+  for (let i = 0; i < poly.length; i += 1) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % poly.length];
+    s += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(s) / 2;
+}
+
+function previewSummary(shape) {
+  const area = shapeArea(shape.polygon);
+  const label = EDIT_KIND_TH[shape.tool] || shape.tool;
+  if (shape.tool === 'passage') {
+    const walls = (currentSemantic?.walls || []).filter(w => Number(w.level_key) === Number(shape.level_key)
+      && segmentHitsPolygon(w.start, w.end, shape.polygon)).length;
+    const polys = (currentSemantic?.obstacles || []).filter(o => Number(o.level_key) === Number(shape.level_key)
+      && o.type === 'IfcWall' && o.polygon && o.polygon.some((p, i, arr) => segmentHitsPolygon(p, arr[(i + 1) % arr.length], shape.polygon))).length;
+    const n = walls + polys;
+    return `${label} ${area.toFixed(2)} ตร.ม. · ตัดผนัง ${n} ชิ้น` + (n ? '' : ' (ไม่โดนผนังเลย)');
+  }
+  return `${label} ${shape.polygon.length} มุม · ${area.toFixed(2)} ตร.ม.`;
+}
+
+async function saveEdit(shape, { record = true } = {}) {
+  const result = await api('/api/edits', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: shape.tool, level_key: shape.level_key, polygon: shape.polygon }),
+  });
+  renderEdits(result.edits);
+  markSemanticStale();
+  if (record) {
+    editHistory.undo.push({ type: 'add', edit: result.edit });
+    editHistory.redo = [];
+  }
+  updateUndoButtons();
+  return result.edit;
+}
+
+async function removeEdit(edit, { record = true } = {}) {
+  const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
+  renderEdits(result.edits);
+  markSemanticStale();
+  if (record) {
+    editHistory.undo.push({ type: 'delete', edit });
+    editHistory.redo = [];
+  }
+  updateUndoButtons();
+}
+
+const asShape = edit => ({ tool: edit.kind, level_key: edit.level_key, polygon: edit.polygon });
+
+async function undoEdit() {
+  const step = editHistory.undo.pop();
+  if (!step) return;
   try {
-    const result = await api('/api/edits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: tool, level_key, polygon }),
-    });
-    renderEdits(result.edits);
-    markSemanticStale();
-    setMessage(`บันทึก${EDIT_KIND_TH[tool] || 'การแก้ไข'} ${result.edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
+    if (step.type === 'add') {
+      await removeEdit(step.edit, { record: false });
+      editHistory.redo.push(step);
+    } else {
+      const again = await saveEdit(asShape(step.edit), { record: false });
+      editHistory.redo.push({ type: 'delete', edit: again });
+    }
+    setMessage('ย้อนการแก้ไขแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
+  } catch (error) {
+    setMessage(`ย้อนไม่สำเร็จ: ${error.message}`);
+  }
+  updateUndoButtons();
+}
+
+async function redoEdit() {
+  const step = editHistory.redo.pop();
+  if (!step) return;
+  try {
+    if (step.type === 'add') {
+      const again = await saveEdit(asShape(step.edit), { record: false });
+      editHistory.undo.push({ type: 'add', edit: again });
+    } else {
+      await removeEdit(step.edit, { record: false });
+      editHistory.undo.push({ type: 'delete', edit: step.edit });
+    }
+    setMessage('ทำซ้ำแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
+  } catch (error) {
+    setMessage(`ทำซ้ำไม่สำเร็จ: ${error.message}`);
+  }
+  updateUndoButtons();
+}
+
+function showConfirm(shape) {
+  pendingShape = shape;
+  document.getElementById('planConfirmText').textContent = previewSummary(shape);
+  document.getElementById('planConfirm').classList.remove('hidden');
+}
+
+function hideConfirm() {
+  pendingShape = null;
+  document.getElementById('planConfirm').classList.add('hidden');
+}
+
+window.addEventListener('plan-shape', event => showConfirm(event.detail || {}));
+
+document.getElementById('planConfirmBtn').addEventListener('click', async () => {
+  if (!pendingShape) return;
+  const shape = pendingShape;
+  hideConfirm();
+  try {
+    const edit = await saveEdit(shape);
+    setMessage(`บันทึก${EDIT_KIND_TH[shape.tool] || 'การแก้ไข'} ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
   } catch (error) {
     setMessage(`บันทึกการแก้ไขไม่สำเร็จ: ${error.message}`);
+  }
+});
+document.getElementById('planCancelBtn').addEventListener('click', hideConfirm);
+document.getElementById('planUndoBtn').addEventListener('click', undoEdit);
+document.getElementById('planRedoBtn').addEventListener('click', redoEdit);
+
+document.querySelectorAll('.plan-shape').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('.plan-shape').forEach(b => b.classList.toggle('active', b === button));
+    viewer()?.setPlanShape(button.dataset.shape);
+  });
+});
+
+window.addEventListener('plan-draft', event => {
+  const d = event.detail || {};
+  const parts = [];
+  if (d.shape === 'rect' && d.width != null) parts.push(`${d.width.toFixed(2)} × ${d.depth.toFixed(2)} ม.`);
+  else if (d.segment != null) parts.push(`ด้านนี้ ${d.segment.toFixed(2)} ม.`);
+  if (d.area != null) parts.push(`${d.area.toFixed(2)} ตร.ม.`);
+  if (d.snap) parts.push({ vertex: 'จับมุม', edge: 'จับขอบ', ortho: 'แนวตั้ง/นอน' }[d.snap]);
+  if (d.shape === 'poly' && d.vertices >= 3) parts.push('คลิกจุดแรกหรือ Enter เพื่อปิดรูป');
+  document.getElementById('planHint').textContent = parts.join(' · ');
+});
+
+function planSizeFromInput() {
+  const m = (document.getElementById('planSizeInput').value || '').trim().match(/^([\d.]+)\s*[x×*,]\s*([\d.]+)$/i);
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+document.getElementById('planSizeInput').addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  const size = planSizeFromInput();
+  if (!size) {
+    setMessage('พิมพ์ขนาดเป็น กว้างxยาว เช่น 1.2x2');
+  } else if (!viewer()?.planRectBySize(size[0], size[1])) {
+    setMessage('คลิกมุมแรกบนแปลนก่อน (รูปสี่เหลี่ยม) แล้วพิมพ์ขนาด');
+  }
+  event.preventDefault();
+});
+
+window.addEventListener('keydown', event => {
+  const v = viewer();
+  if (!v?.isPlan?.()) return;
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  const key = event.key.toLowerCase();
+  if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); event.shiftKey ? redoEdit() : undoEdit(); return; }
+  if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); redoEdit(); return; }
+  if (event.key === 'Escape') { v.planCancel(); hideConfirm(); }
+  else if (event.key === 'Backspace') { event.preventDefault(); v.planUndoVertex(); }
+  else if (event.key === 'Enter') {
+    if (pendingShape) document.getElementById('planConfirmBtn').click();
+    else v.planFinish();
   }
 });
 
@@ -767,10 +943,8 @@ function renderEdits(edits) {
     del.textContent = 'ลบ';
     del.addEventListener('click', async () => {
       try {
-        const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
-        renderEdits(result.edits);
-        markSemanticStale();
-        setMessage(`ลบ ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
+        await removeEdit(edit);
+        setMessage(`ลบ ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล (ย้อนได้)`);
       } catch (error) {
         setMessage(`ลบไม่สำเร็จ: ${error.message}`);
       }

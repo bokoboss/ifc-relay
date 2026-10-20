@@ -170,7 +170,21 @@
                 <button data-tool="obstacle" class="plan-tool obstacle" title="คลิกสองมุมเพื่อเพิ่มสิ่งกีดขวาง">+ สิ่งกีดขวาง</button>
                 <button data-tool="passage" class="plan-tool passage" title="คลิกสองมุมคร่อมผนังเพื่อเปิดทางผ่าน (เช่นประตูที่ IFC ไม่ได้ผูก)">เปิดทางผ่าน</button>
               </div>
-              <span id="planHint" class="plan-hint">เลือกเครื่องมือ แล้วคลิกบนแปลน</span>
+              <div class="plan-tools" role="group" aria-label="รูปทรง">
+                <button data-shape="rect" class="plan-shape active" title="คลิกสองมุม">สี่เหลี่ยม</button>
+                <button data-shape="poly" class="plan-shape" title="คลิกทีละมุม ปิดรูปด้วยการคลิกจุดแรก ดับเบิลคลิก หรือ Enter">หลายเหลี่ยม</button>
+              </div>
+              <label class="plan-size" title="หลังคลิกมุมแรก พิมพ์ขนาดแล้วกด Enter เช่น 1.2x2">ขนาด <input id="planSizeInput" type="text" placeholder="กว้างxยาว ม." size="9" /></label>
+              <div class="plan-tools" role="group" aria-label="ย้อนกลับ">
+                <button id="planUndoBtn" class="plan-tool" title="ย้อนรายการแก้ไขล่าสุด (Ctrl+Z)" disabled>↶ ย้อน</button>
+                <button id="planRedoBtn" class="plan-tool" title="ทำซ้ำ (Ctrl+Y)" disabled>↷ ทำซ้ำ</button>
+              </div>
+              <span id="planHint" class="plan-hint">เลือกเครื่องมือ แล้วคลิกบนแปลน · Shift = ล็อกแนวตั้ง/นอน · Esc = ยกเลิก</span>
+              <div id="planConfirm" class="plan-confirm hidden">
+                <span id="planConfirmText"></span>
+                <button id="planConfirmBtn" class="plan-tool walkable">บันทึก</button>
+                <button id="planCancelBtn" class="plan-tool">ยกเลิก</button>
+              </div>
             </div>
             <div class="viewport-ident" aria-hidden="true">
               <span class="viewport-ident-mark"></span>

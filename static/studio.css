@@ -530,3 +530,9 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .version-text {margin-top:6px;font-size:11px;color:#5b6b6d;}
 .app-credit {display:flex;justify-content:center;gap:8px;padding:14px 16px 18px;font-size:11px;letter-spacing:.04em;color:#7a8a8c;}
 .app-credit #creditText {font-weight:600;color:#4d5f61;}
+
+.plan-shape {font-size:12px;padding:4px 8px;border:1px solid #cfdcdc;border-radius:4px;background:#fff;cursor:pointer;}
+.plan-shape.active {background:#e3f0ef;border-color:#16626a;color:#16626a;font-weight:600;}
+.plan-size input {font-size:12px;padding:2px 4px;margin-left:4px;width:80px;}
+.plan-confirm {display:flex;align-items:center;gap:6px;flex-basis:100%;background:#fff8e8;border:1px solid #f0d9a8;border-radius:4px;padding:5px 8px;}
+.plan-tool:disabled {opacity:.45;cursor:not-allowed;}

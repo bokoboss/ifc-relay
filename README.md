@@ -58,7 +58,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 | Off-level slabs | Slabs > 0.40 m from the storey floor wait for review (sunscreens, canopies); included ones become their own level | **Implemented; Revit-sample tested** |
 | Connectivity diagnostic | Geometry-only check for walking zones nobody can reach and stairs that reach no floor | **Implemented; not routing verification** |
 | Engineering gate | Block / acknowledge (with fingerprints and reasons) / info before build; build manifest with hashes | **Implemented ([policy](docs/ENGINEERING_GATE.md))** |
-| 2D plan editor | Per-level plan: measure, add walkable floor / obstacle, open a passage through walls (rectangles) | **Implemented; browser E2E in CI** |
+| 2D plan editor | Per-level plan: measure, add walkable floor / obstacle, open a passage through walls; rectangle or free polygon, vertex/edge snapping, Shift ortho lock, typed size, preview before save, undo/redo | **Implemented; browser E2E in CI** |
 | Source vs pedestrian model | Click pedestrian-model objects, jump to their IFC source, overlay view | **Implemented** |
 | Drawing inputs | Full DXF/PDF interpretation and editable 2D review in the app | **Planned; not supported by the current web workflow** |
 | Pedestrian demand/results | Set origins/destinations, run simulation, summarize KPIs | **Longer-term extension; not implemented** |

@@ -120,17 +120,57 @@ def test_reason_required_then_build_enabled(page, tmp_path):
     assert page.errors == []
 
 
+def _enter_plan(page, level="1"):
+    page.click("#planModeBtn")
+    page.select_option("#planLevelSelect", level)
+    page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
+    # wait until the plan camera has settled (fit happens on the next frames)
+    page.wait_for_function("""(() => { const a = JSON.stringify(window.IFCViewer.planScreenPoint(0, 0));
+        return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() =>
+            r(a === JSON.stringify(window.IFCViewer.planScreenPoint(0, 0)))))); })()""", timeout=10000)
+
+
+def _click_plan(page, x, y):
+    pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+    page.mouse.move(pt["x"], pt["y"])
+    page.mouse.click(pt["x"], pt["y"])
+    page.wait_for_timeout(150)
+
+
+def test_polygon_snap_undo_redo(page, tmp_path):
+    """F-12: free polygon, vertex snapping, preview/confirm, undo/redo."""
+    b, _ = _two_storeys(with_stair=False)
+    _open(page, b.write(tmp_path / "poly.ifc"))
+    page.click("#generateSemanticBtn")
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    _enter_plan(page)
+    page.click(".plan-tool[data-tool=obstacle]")
+    page.click(".plan-shape[data-shape=poly]")
+    for x, y in ((0.03, 0.02), (4, 0), (4, 3), (2, 4.5)):        # first click 3 cm off the floor corner
+        _click_plan(page, x, y)
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#planConfirm:not(.hidden)")
+    assert "4 มุม" in page.text_content("#planConfirmText")
+    page.click("#planConfirmBtn")
+    page.wait_for_selector("#editsList .edit-row")
+    import json as _json
+    edits = _json.loads(urllib.request.urlopen(page.url.rstrip("/") + "/api/edits").read())["edits"]
+    assert edits[0]["polygon"][0] == [0.0, 0.0]                # snapped to the floor corner
+    assert len(edits[0]["polygon"]) == 4
+    page.keyboard.press("Control+z")
+    page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
+    page.keyboard.press("Control+y")
+    page.wait_for_selector("#editsList .edit-row")
+    assert page.errors == []
+
+
 def test_plan_passage_reconnects_room(page, tmp_path):
     b, _ = _two_storeys(with_stair=False)
     _open(page, b.write(tmp_path / "plan.ifc"))
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
-    page.click("#planModeBtn")
-    page.select_option("#planLevelSelect", "1")
-    page.wait_for_timeout(500)
+    _enter_plan(page)
     page.click(".plan-tool[data-tool=passage]")
-    page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
-    page.wait_for_timeout(300)
     hits = []
     for x, y in ((13.5, 7.5), (14.5, 8.5)):
         pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
@@ -139,6 +179,9 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         page.mouse.click(pt["x"], pt["y"])
         page.wait_for_timeout(300)
     try:
+        page.wait_for_selector("#planConfirm:not(.hidden)", timeout=10000)
+        assert "ตัดผนัง 1 ชิ้น" in page.text_content("#planConfirmText")
+        page.click("#planConfirmBtn")
         page.wait_for_selector("#editsList .edit-row", timeout=15000)
     except Exception as exc:
         raise AssertionError(f"no edit saved: hits={hits} hint={page.text_content('#planHint')} "
