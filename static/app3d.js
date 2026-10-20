@@ -246,7 +246,7 @@ function addSemanticPreview(model) {
   for (const zone of model.ifc_semantic?.connectivity?.isolated_zones || []) {
     if (!zone.polygon?.length) continue;
     const geometry = new THREE.ShapeGeometry(shapeFromPolygon(zone.polygon));
-    const mesh = new THREE.Mesh(geometry, semanticMaterial(0xc0392b, 0.7));
+    const mesh = new THREE.Mesh(geometry, semanticMaterial(0xc0392b, 0.38));
     mesh.position.z = (levels.get(Number(zone.level_key)) || 0) + 0.03;
     mesh.userData.semantic = { kind: 'isolated_zone', source: zone };
     semanticGroup.add(mesh);
@@ -609,44 +609,179 @@ function rectPoints(a, b) {
   return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
 }
 
-function drawDraft(cursor) {
+// ---- snapping ---------------------------------------------------------------
+// Vertices and edges of the pedestrian model on the plan level (areas, walls,
+// columns, obstacles, stairs, earlier edits). Cursor snaps to a vertex, else to
+// the nearest point on an edge, within SNAP_PX screen pixels; Shift locks the
+// segment to 0/90 degrees from the previous point.
+const SNAP_PX = 12;
+let planShape = 'rect';
+let planCursor = null;
+let snapVertices = [];
+let snapSegments = [];
+const snapMarker = new THREE.Mesh(new THREE.RingGeometry(0.06, 0.1, 20),
+  new THREE.MeshBasicMaterial({ color: 0xd35400, depthTest: false, side: THREE.DoubleSide }));
+snapMarker.renderOrder = 30;
+snapMarker.visible = false;
+planOverlay.add(snapMarker);
+
+function rebuildSnapTargets() {
+  snapVertices = [];
+  snapSegments = [];
+  if (!planActive) return;
+  const ring = pts => {
+    for (let i = 0; i < pts.length; i += 1) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      snapVertices.push([Number(a[0]), Number(a[1])]);
+      snapSegments.push([[Number(a[0]), Number(a[1])], [Number(b[0]), Number(b[1])]]);
+    }
+  };
+  for (const child of semanticGroup.children) {
+    const info = child.userData?.semantic;
+    if (!info || !child.visible) continue;
+    const src = info.source || {};
+    if (src.polygon) ring(src.polygon);
+    if (src.start && src.end) {
+      snapVertices.push(src.start, src.end);
+      snapSegments.push([src.start, src.end]);
+    }
+    if (src.center) snapVertices.push(src.center);
+  }
+  for (const edit of manualEdits) if (Number(edit.level_key) === planLevelKey) ring(edit.polygon);
+}
+
+function metresPerPixel() {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return ((orthoCamera.top - orthoCamera.bottom) / orthoCamera.zoom) / Math.max(rect.height, 1);
+}
+
+function snapPoint(raw, event) {
+  if (!raw) return { point: null, kind: null };
+  let p = raw;
+  const tol = SNAP_PX * metresPerPixel();
+  const last = planPoints[planPoints.length - 1];
+  if (event?.shiftKey && last) {
+    p = Math.abs(raw[0] - last[0]) >= Math.abs(raw[1] - last[1]) ? [raw[0], last[1]] : [last[0], raw[1]];
+    return { point: p, kind: 'ortho' };
+  }
+  let best = null;
+  let bestD = tol;
+  for (const v of snapVertices) {
+    const d = Math.hypot(v[0] - p[0], v[1] - p[1]);
+    if (d < bestD) { best = [Number(v[0]), Number(v[1])]; bestD = d; }
+  }
+  if (best) return { point: best, kind: 'vertex' };
+  for (const [a, b] of snapSegments) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9) continue;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
+    const q = [a[0] + t * dx, a[1] + t * dy];
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (d < bestD) { best = q; bestD = d; }
+  }
+  if (best) return { point: [Math.round(best[0] * 1000) / 1000, Math.round(best[1] * 1000) / 1000], kind: 'edge' };
+  return { point: p, kind: null };
+}
+
+function polygonArea(pts) {
+  let a = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length];
+    a += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a) / 2;
+}
+
+function currentShape(cursor) {
+  if (!planPoints.length || !cursor) return null;
+  if (planTool === 'measure') return [planPoints[0], cursor];
+  if (planShape === 'rect') return rectPoints(planPoints[0], cursor);
+  return [...planPoints, cursor];
+}
+
+function emitDraft(cursor, snapKind) {
+  const last = planPoints[planPoints.length - 1];
+  const shape = currentShape(cursor);
+  window.dispatchEvent(new CustomEvent('plan-draft', {
+    detail: {
+      tool: planTool,
+      shape: planShape,
+      snap: snapKind,
+      vertices: planPoints.length,
+      segment: last && cursor ? Math.hypot(cursor[0] - last[0], cursor[1] - last[1]) : null,
+      width: planShape === 'rect' && last && cursor ? Math.abs(cursor[0] - planPoints[0][0]) : null,
+      depth: planShape === 'rect' && last && cursor ? Math.abs(cursor[1] - planPoints[0][1]) : null,
+      area: shape && shape.length >= 3 ? polygonArea(shape) : null,
+    },
+  }));
+}
+
+function drawDraft(cursor, snapKind = null) {
   clearGroup(draftGroup);
-  if (!planPoints.length || !cursor) return;
   const z = levelZ(planLevelKey) + 0.08;
-  if (planTool === 'measure') {
-    const pts = [planPoints[0], cursor].map(p => new THREE.Vector3(p[0], p[1], z));
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: EDIT_COLORS.measure, depthTest: false }));
+  snapMarker.visible = !!(cursor && snapKind && snapKind !== 'ortho');
+  if (snapMarker.visible) snapMarker.position.set(cursor[0], cursor[1], z + 0.01);
+  if (!planPoints.length || !cursor) return;
+  const color = planTool === 'measure' ? EDIT_COLORS.measure : (EDIT_COLORS[planTool] || 0x888888);
+  const shape = currentShape(cursor);
+  if (planTool === 'measure' || (planShape === 'poly' && shape.length < 3)) {
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(shape.map(p => new THREE.Vector3(p[0], p[1], z))),
+      new THREE.LineBasicMaterial({ color, depthTest: false }));
     line.renderOrder = 21;
     draftGroup.add(line);
+  } else {
+    draftGroup.add(outline(shape, z, color, 0.18));
+  }
+  if (planTool === 'measure') {
     window.dispatchEvent(new CustomEvent('plan-measure', {
       detail: { distance: Math.hypot(cursor[0] - planPoints[0][0], cursor[1] - planPoints[0][1]), final: false },
     }));
   } else {
-    draftGroup.add(outline(rectPoints(planPoints[0], cursor), z, EDIT_COLORS[planTool] || 0x888888, 0.18));
+    emitDraft(cursor, snapKind);
   }
 }
 
-function planClick(event) {
-  const p = groundPoint(event);
-  if (!p) return;
-  if (!planPoints.length) {
-    planPoints = [p];
-    return;
-  }
-  const a = planPoints[0];
+function finishShape(polygon) {
   planPoints = [];
   clearGroup(draftGroup);
-  if (planTool === 'measure') {
-    window.dispatchEvent(new CustomEvent('plan-measure', {
-      detail: { distance: Math.hypot(p[0] - a[0], p[1] - a[1]), final: true, from: a, to: p },
-    }));
+  if (!polygon || polygon.length < 3 || polygonArea(polygon) < 0.01) return;
+  window.dispatchEvent(new CustomEvent('plan-shape', {
+    detail: { tool: planTool, level_key: planLevelKey, polygon },
+  }));
+}
+
+function planClick(event) {
+  const { point: p } = snapPoint(groundPoint(event), event);
+  if (!p) return;
+  if (planTool === 'measure' || planShape === 'rect') {
+    if (!planPoints.length) {
+      planPoints = [p];
+      return;
+    }
+    const a = planPoints[0];
+    if (planTool === 'measure') {
+      planPoints = [];
+      clearGroup(draftGroup);
+      window.dispatchEvent(new CustomEvent('plan-measure', {
+        detail: { distance: Math.hypot(p[0] - a[0], p[1] - a[1]), final: true, from: a, to: p },
+      }));
+      return;
+    }
+    if (Math.abs(p[0] - a[0]) < 0.05 || Math.abs(p[1] - a[1]) < 0.05) return;
+    finishShape(rectPoints(a, p));
     return;
   }
-  if (Math.abs(p[0] - a[0]) < 0.05 || Math.abs(p[1] - a[1]) < 0.05) return;
-  window.dispatchEvent(new CustomEvent('plan-rect', {
-    detail: { tool: planTool, level_key: planLevelKey, polygon: rectPoints(a, p) },
-  }));
+  // free polygon: clicking the first vertex again closes it
+  if (planPoints.length >= 3) {
+    const first = planPoints[0];
+    if (Math.hypot(p[0] - first[0], p[1] - first[1]) <= SNAP_PX * metresPerPixel()) {
+      finishShape([...planPoints]);
+      return;
+    }
+  }
+  planPoints.push(p);
+  drawDraft(p);
 }
 
 function fitPlan() {
@@ -764,7 +899,13 @@ renderer.domElement.addEventListener('pointerup', event => {
   pointerSelect(event);
 });
 renderer.domElement.addEventListener('pointermove', event => {
-  if (planActive && planTool !== 'select' && planPoints.length) drawDraft(groundPoint(event));
+  if (!planActive || planTool === 'select') return;
+  const { point, kind } = snapPoint(groundPoint(event), event);
+  planCursor = point;
+  drawDraft(point, kind);
+});
+renderer.domElement.addEventListener('dblclick', () => {
+  if (planActive && planShape === 'poly' && planPoints.length >= 3) finishShape([...planPoints]);
 });
 window.addEventListener('resize', resize);
 
@@ -855,6 +996,7 @@ window.IFCViewer = {
 
   loadSemantic(model) {
     addSemanticPreview(model || {});
+    if (planActive) requestAnimationFrame(() => rebuildSnapTargets());
     if (mode === 'simulation' || mode === 'overlay') {
       modelGroup.visible = mode === 'overlay';
       semanticGroup.visible = semanticLoaded;
@@ -890,6 +1032,7 @@ window.IFCViewer = {
     this.setMode('simulation');
     applyVisibility();
     drawEdits();
+    rebuildSnapTargets();
     requestAnimationFrame(() => fitPlan());
     return true;
   },
@@ -911,6 +1054,7 @@ window.IFCViewer = {
     clearGroup(draftGroup);
     applyVisibility();
     drawEdits();
+    rebuildSnapTargets();
     requestAnimationFrame(() => fitPlan());
   },
 
@@ -918,11 +1062,46 @@ window.IFCViewer = {
     planTool = tool || 'select';
     planPoints = [];
     clearGroup(draftGroup);
+    snapMarker.visible = false;
+    rebuildSnapTargets();
+  },
+
+  setPlanShape(shape) {
+    planShape = shape === 'poly' ? 'poly' : 'rect';
+    planPoints = [];
+    clearGroup(draftGroup);
+  },
+
+  // Keyboard helpers for drawing.
+  planCancel() {
+    planPoints = [];
+    clearGroup(draftGroup);
+  },
+  planUndoVertex() {
+    planPoints.pop();
+    drawDraft(planCursor);
+  },
+  planFinish() {
+    if (planShape === 'poly' && planPoints.length >= 3) finishShape([...planPoints]);
+  },
+  // Rectangle from the first corner with typed dimensions, towards the cursor.
+  planRectBySize(width, depth) {
+    if (planShape !== 'rect' || !planPoints.length || !(width > 0) || !(depth > 0)) return false;
+    const a = planPoints[0];
+    const c = planCursor || [a[0] + 1, a[1] + 1];
+    const sx = c[0] >= a[0] ? 1 : -1;
+    const sy = c[1] >= a[1] ? 1 : -1;
+    finishShape(rectPoints(a, [a[0] + sx * width, a[1] + sy * depth]));
+    return true;
+  },
+  planHasFirstPoint() {
+    return planPoints.length > 0;
   },
 
   setManualEdits(edits) {
     manualEdits = Array.isArray(edits) ? edits : [];
     drawEdits();
+    rebuildSnapTargets();
   },
 
   isPlan() {
