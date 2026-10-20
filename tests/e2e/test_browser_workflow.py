@@ -130,8 +130,27 @@ def _enter_plan(page, level="1"):
             r(a === JSON.stringify(window.IFCViewer.planScreenPoint(0, 0)))))); })()""", timeout=10000)
 
 
+def _plan_point(page, x, y):
+    """Viewport point of plan coordinate (x, y), on screen and stable for two frames.
+
+    Panels below the viewer fill in asynchronously (gate, connectivity), which can
+    scroll the page after _enter_plan; a stale point then lands off the canvas.
+    """
+    page.wait_for_function(f"""(() => {{
+        document.getElementById('viewerCanvasHost').scrollIntoView({{block: 'center'}});
+        const a = JSON.stringify(window.IFCViewer.planScreenPoint({x}, {y}));
+        return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
+            const p = window.IFCViewer.planScreenPoint({x}, {y});
+            const rc = document.getElementById('viewerCanvasHost').getBoundingClientRect();
+            r(a === JSON.stringify(p) && p.y >= Math.max(rc.top, 0) && p.y <= Math.min(rc.bottom, innerHeight)
+              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth));
+        }})));
+    }})()""", timeout=10000)
+    return page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+
+
 def _click_plan(page, x, y):
-    pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+    pt = _plan_point(page, x, y)
     page.mouse.move(pt["x"], pt["y"])
     page.mouse.click(pt["x"], pt["y"])
     page.wait_for_timeout(150)
@@ -173,7 +192,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.click(".plan-tool[data-tool=passage]")
     hits = []
     for x, y in ((13.5, 7.5), (14.5, 8.5)):
-        pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+        pt = _plan_point(page, x, y)
         hits.append(page.evaluate(f"(() => {{ const e = document.elementFromPoint({pt['x']}, {pt['y']}); "
                                   f"return [{pt['x']:.0f}, {pt['y']:.0f}, e ? e.tagName + '#' + e.id + '.' + e.className : null]; }})()"))
         page.mouse.click(pt["x"], pt["y"])
