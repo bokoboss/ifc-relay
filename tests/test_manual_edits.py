@@ -79,3 +79,51 @@ def test_edits_api_marks_model_stale_and_is_used_on_regenerate(client, tmp_path)
     assert not sem["ifc_semantic"]["connectivity"]["isolated_zones"]
     assert client.delete("/api/edits/E1").status_code == 200
     assert client.get("/api/edits").json()["edits"] == []
+
+
+def test_edit_rebinds_by_height_or_is_reported_skipped():
+    from manual_edits import apply_manual_edits
+    sq = [[0, 0], [2, 0], [2, 2], [0, 2]]
+    edits = [
+        {"id": "E1", "kind": "obstacle", "level_key": 901, "level_z": 1.9, "polygon": sq},   # landing renumbered
+        {"id": "E2", "kind": "obstacle", "level_key": 902, "level_z": 5.7, "polygon": sq},   # landing gone
+        {"id": "E3", "kind": "obstacle", "level_key": 1, "level_z": 0.0, "polygon": sq},
+    ]
+    obstacles, warnings, status = [], [], {}
+    applied = apply_manual_edits(edits, areas=[], walls=[], obstacles=obstacles,
+                                 level_z={1: 0.0, 2: 3.8, 903: 1.9}, warnings=warnings, status=status)
+    assert status["E1"] == {"applied": True, "level_key": 903, "note": "re-bound from level 901 to level 903 by height 1.90 m"}
+    assert status["E2"]["applied"] is False and "no level at 5.70 m" in status["E2"]["reason"]
+    assert status["E3"]["applied"] is True and applied["skipped"] == 1
+    assert sorted(o["level_key"] for o in obstacles) == [1, 903]
+
+
+def test_invalid_polygons_are_rejected():
+    from manual_edits import validate_edit
+    assert validate_edit({"kind": "walkable", "polygon": [[0, 0], [1, 1], [1, 0], [0, 1]]}) == "polygon is self-intersecting"
+    assert validate_edit({"kind": "walkable", "polygon": [[0, 0], [float("nan"), 0], [1, 1]]}) == "polygon has invalid coordinates"
+
+
+def test_stale_model_cannot_be_exported(client, tmp_path):
+    """F-03 / E2E-05: after an edit the old model is not handed out for the engine."""
+    b, ov = _two_storeys(with_stair=True)
+    path = b.write(tmp_path / "stale.ifc")
+    with open(path, "rb") as fh:
+        client.post("/api/import", files={"file": (path.name, fh)})
+    client.post("/api/analyze")
+    client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []})
+    client.post("/api/ifc/semantic")
+    assert client.get("/api/ifc/semantic/download").status_code == 200
+    client.post("/api/edits", json={"kind": "obstacle", "level_key": 1, "polygon": [[3, 5], [5, 5], [5, 6], [3, 6]]})
+    for url in ("/api/ifc/semantic", "/api/ifc/semantic/download", "/api/ifc/semantic/engine-download"):
+        assert client.get(url).status_code == 409, url
+    assert client.post("/api/ifc/semantic/export-engine-input").status_code == 409
+    draft = client.get("/api/ifc/semantic?draft=1")
+    assert draft.status_code == 200 and draft.json()["stale"] is True
+
+
+def test_upload_size_limit(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("VBB_MAX_UPLOAD_MB", "0.001")
+    r = client.post("/api/import", files={"file": ("big.ifc", b"x" * 5000)})
+    assert r.status_code == 413
+    assert not any(p.name.endswith("big.ifc") for p in (tmp_path / "UPLOAD_DIR").iterdir())

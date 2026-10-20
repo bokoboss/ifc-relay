@@ -170,6 +170,8 @@ function stairDirectionArrow(connection, startZ, endZ) {
 
 function clearSemantic() {
   clearSemanticSelection();
+  selectedSemantic = null;
+  isolatedSemantic = null;
   for (const child of [...semanticGroup.children]) {
     semanticGroup.remove(child);
     disposeObjectTree(child);
@@ -434,7 +436,11 @@ function applyVisibility() {
 
   for (const child of semanticGroup.children) {
     if (child === semanticHelper) continue;
-    if (child.userData?.semantic) child.visible = semanticPassesFilters(child);
+    if (child.userData?.semantic) {
+      child.visible = semanticPassesFilters(child) && (!isolatedSemantic || child === isolatedSemantic);
+      const mat = child.material;
+      if (mat && 'wireframe' in mat) mat.wireframe = wireframe;
+    }
   }
 
   if (selectionHelper) {
@@ -497,7 +503,18 @@ function fitModel() {
   if (any) fitBox(box, 1.35);
 }
 
+// The active selection follows the view: a pedestrian-model object while that
+// model is shown, otherwise the source IFC element.
+function activeSemanticSelection() {
+  return semanticGroup.visible && selectedSemantic && selectedSemantic.parent === semanticGroup ? selectedSemantic : null;
+}
+
 function fitSelection() {
+  const sem = activeSemanticSelection();
+  if (sem) {
+    fitBox(new THREE.Box3().setFromObject(sem), 2.1);
+    return;
+  }
   const mesh = selectedGuid ? meshes.get(selectedGuid) : null;
   if (!mesh) return;
   fitBox(new THREE.Box3().setFromObject(mesh), 2.1);
@@ -670,8 +687,12 @@ function semanticSourceGuids(info) {
   return guids;
 }
 
+let selectedSemantic = null;
+let isolatedSemantic = null;
+
 function selectSemantic(object) {
   clearSemanticSelection();
+  selectedSemantic = object || null;
   if (!object) return;
   semanticHelper = new THREE.BoxHelper(object, 0xd98e04);
   scene.add(semanticHelper);
@@ -929,6 +950,13 @@ window.IFCViewer = {
   fitSelection,
 
   isolateSelected() {
+    const sem = activeSemanticSelection();
+    if (sem) {
+      isolatedSemantic = sem;
+      applyVisibility();
+      fitSelection();
+      return true;
+    }
     if (!selectedGuid) return false;
     isolatedGuid = selectedGuid;
     applyVisibility();
@@ -938,6 +966,7 @@ window.IFCViewer = {
 
   showAll() {
     isolatedGuid = null;
+    isolatedSemantic = null;
     applyVisibility();
     fitModel();
   },

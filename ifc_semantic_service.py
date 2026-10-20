@@ -1521,9 +1521,11 @@ def build_semantic_model(
 
     # Engineer's manual plan edits (added floor / obstacles / passages).
     from manual_edits import apply_manual_edits
+    manual_status: dict[str, dict[str, Any]] = {}
     manual_applied = apply_manual_edits(
         manual_edits or [], areas=areas, walls=walls, obstacles=obstacles,
-        level_keys={int(lv["key"]) for lv in levels}, warnings=warnings,
+        level_z={int(lv["key"]): float(lv["z"]) for lv in levels}, warnings=warnings,
+        status=manual_status,
     )
     if any(manual_applied[k] for k in ("walkable", "obstacle", "passage")):
         warnings.append(
@@ -1633,6 +1635,7 @@ def build_semantic_model(
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
             "manual_edits_applied": manual_applied,
+            "manual_edits_status": manual_status,
             "door_logic": {
                 "source_doors": source_door_count,
                 "included_doors": included_door_count,

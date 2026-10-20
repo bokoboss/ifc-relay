@@ -29,3 +29,39 @@ jobs:
           python checks/42_check_walkable_merge_v041.py
           python checks/44_check_local_web_app_v041_static.py
           python checks/38_check_export_ui_v031.py
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt playwright
+          python -m playwright install --with-deps chromium
+      - name: Three.js runtime (same files install.bat downloads)
+        run: |
+          V=0.186.1
+          mkdir -p static/vendor/jsm/controls
+          curl -fsSL -o static/vendor/three.module.js https://cdn.jsdelivr.net/npm/three@$V/build/three.module.js
+          curl -fsSL -o static/vendor/three.core.js https://cdn.jsdelivr.net/npm/three@$V/build/three.core.js
+          curl -fsSL -o static/vendor/jsm/controls/OrbitControls.js https://cdn.jsdelivr.net/npm/three@$V/examples/jsm/controls/OrbitControls.js
+          # same rewrite as scripts/install.ps1: bare 'three' import -> local module
+          sed -i "s#from 'three';#from '../../three.module.js';#; s#from \"three\";#from \"../../three.module.js\";#" static/vendor/jsm/controls/OrbitControls.js
+          grep -q "three.module.js" static/vendor/jsm/controls/OrbitControls.js
+      - name: Browser end-to-end (Chromium, software WebGL)
+        env:
+          VBB_E2E: "1"
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/e2e 2>&1 | tee e2e.log
+          # surface failures as annotations (readable without the raw log)
+      - name: Report E2E failures
+        if: failure()
+        run: grep -E "^(E  |FAILED|ERROR)" e2e.log | head -40 | sed 's/^/::error::/' || true
