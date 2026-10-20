@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -221,12 +222,23 @@ async def import_file(
 
     token = uuid.uuid4().hex[:10]
     target = UPLOAD_DIR / f"{token}_{original}"
-    content = await file.read()
-
-    if not content:
+    limit = int(float(os.environ.get("VBB_MAX_UPLOAD_MB", "2048")) * 1024 * 1024)
+    size = 0
+    try:
+        with open(target, "wb") as fh:
+            while chunk := await file.read(4 * 1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(status_code=413,
+                                        detail=f"ไฟล์ใหญ่เกิน {limit // (1024 * 1024)} MB (ตั้งค่า VBB_MAX_UPLOAD_MB ได้)")
+                fh.write(chunk)
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    if size == 0:
+        target.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="ไฟล์ที่นำเข้าว่างเปล่า")
-
-    target.write_bytes(content)
+    content_size = size
 
     # Carry review decisions from the previous IFC import (matched by GlobalId
     # during Analyze). The previous upload file is kept for the revision diff.
@@ -246,7 +258,7 @@ async def import_file(
             "original_name": original,
             "path": str(target),
             "extension": suffix,
-            "size_bytes": len(content),
+            "size_bytes": content_size,
         },
         "analysis": None,
         "geometry": None,
@@ -360,6 +372,7 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
             detail=f"IFC geometry extraction failed: {type(exc).__name__}: {exc}",
         )
 
+    state = reread_state_for(path)
     previous_loaded = set((state.get("geometry") or {}).get("loaded_storey_ids", []))
     requested = {int(v) for v in request.storey_ids}
     loaded_storeys = sorted(previous_loaded | requested) if request.append else sorted(requested)
@@ -556,9 +569,15 @@ def generate_ifc_semantic() -> dict[str, Any]:
     summary = semantic["ifc_semantic"]["summary"]
     warnings = semantic["ifc_semantic"]["warnings"]
 
+    used_overrides, used_edits = dict(overrides), list(state.get("manual_edits") or [])
+    state = reread_state_for(path)
+    changed_meanwhile = (dict((state.get("selection") or {}).get("overrides", {})) != used_overrides
+                         or list(state.get("manual_edits") or []) != used_edits)
+
     state["semantic"] = {
         "status": "ready",
-        "stale": False,
+        # Selection or plan edits changed while this model was being generated.
+        "stale": changed_meanwhile,
         "path": str(output_path),
         "summary": summary,
         "warnings": warnings,
@@ -581,15 +600,32 @@ def generate_ifc_semantic() -> dict[str, Any]:
     }
 
 
-@app.get("/api/ifc/semantic")
-def get_ifc_semantic() -> dict[str, Any]:
+def current_semantic_path_not_stale() -> Path:
+    """Engine-facing exports never hand out a model that no longer matches the
+    selection or plan edits (F-03)."""
     path = current_semantic_path_or_404()
-    return json.loads(path.read_text(encoding="utf-8"))
+    if (store.read().get("semantic") or {}).get("stale", False):
+        raise HTTPException(
+            status_code=409,
+            detail="โมเดลคนเดินไม่ตรงกับการเลือก/การแก้ไขล่าสุด · กด \"เตรียมโมเดลคนเดิน\" อีกครั้งก่อนดาวน์โหลดหรือส่งออก",
+        )
+    return path
+
+
+@app.get("/api/ifc/semantic")
+def get_ifc_semantic(draft: bool = False) -> dict[str, Any]:
+    """The current pedestrian model. A stale model is returned only with
+    ``draft=1`` (the UI showing what is on screen) and is then marked stale."""
+    path = current_semantic_path_or_404() if draft else current_semantic_path_not_stale()
+    model = json.loads(path.read_text(encoding="utf-8"))
+    if draft and (store.read().get("semantic") or {}).get("stale", False):
+        model["stale"] = True
+    return model
 
 
 @app.get("/api/ifc/semantic/download")
 def download_ifc_semantic() -> FileResponse:
-    path = current_semantic_path_or_404()
+    path = current_semantic_path_not_stale()
     return FileResponse(
         path,
         media_type="application/json",
@@ -599,7 +635,7 @@ def download_ifc_semantic() -> FileResponse:
 
 @app.get("/api/ifc/semantic/engine-download")
 def download_engine_input() -> FileResponse:
-    source = current_semantic_path_or_404()
+    source = current_semantic_path_not_stale()
     return FileResponse(
         source,
         media_type="application/json",
@@ -609,7 +645,7 @@ def download_engine_input() -> FileResponse:
 
 @app.post("/api/ifc/semantic/export-engine-input")
 def export_engine_input() -> dict[str, Any]:
-    source = current_semantic_path_or_404()
+    source = current_semantic_path_not_stale()
     target = PROJECT_ROOT / "geometry_ifc_v03.json"
     shutil.copyfile(source, target)
 
@@ -667,6 +703,15 @@ def validate_current_semantic() -> dict[str, Any]:
     return result
 
 
+def reread_state_for(path: Path) -> dict[str, Any]:
+    """Fresh project state after a long job, refusing to write results for a file
+    that is no longer the current upload (another import happened meanwhile)."""
+    state = store.read()
+    if str((state.get("upload") or {}).get("path")) != str(path):
+        raise HTTPException(status_code=409, detail="ไฟล์ IFC ถูกเปลี่ยนระหว่างประมวลผล · ผลนี้ถูกยกเลิก")
+    return state
+
+
 def _mark_semantic_stale(state: dict[str, Any], message: str) -> None:
     if state.get("semantic"):
         state["semantic"]["stale"] = True
@@ -689,6 +734,15 @@ def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
     if problem:
         raise HTTPException(status_code=400, detail=f"แก้ไขบนแปลนไม่ได้: {problem}")
     state = store.read()
+    try:
+        levels = json.loads(current_semantic_path_or_404().read_text(encoding="utf-8")).get("levels", [])
+    except HTTPException:
+        levels = []
+    level = next((lv for lv in levels if int(lv["key"]) == int(data["level_key"])), None)
+    if level is None:
+        raise HTTPException(status_code=400, detail="ไม่พบระดับนี้ในโมเดลคนเดินปัจจุบัน · เตรียมโมเดลคนเดินก่อน")
+    data["level_z"] = float(level["z"])
+    data["level_name"] = level.get("name")
     edits = state.setdefault("manual_edits", [])
     next_no = max([int(str(e.get("id", "E0"))[1:] or 0) for e in edits] + [0]) + 1
     data["id"] = f"E{next_no}"
@@ -727,8 +781,20 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
     out = Path(result["output_path"])
     source = Path(upload.get("path", ""))
     sha = hashlib.sha256(source.read_bytes()).hexdigest() if source.is_file() else None
+    def _sha(p: Path | None) -> str | None:
+        return hashlib.sha256(p.read_bytes()).hexdigest() if p is not None and p.is_file() else None
+
+    semantic_file = current_semantic_path_or_404()
+    semantic_model = json.loads(semantic_file.read_text(encoding="utf-8"))
+    info = semantic_model.get("ifc_semantic", {})
     manifest = {
         "built_at": _dt.now().isoformat(timespec="seconds"),
+        "semantic_model": {"file": semantic_file.name, "sha256": _sha(semantic_file),
+                           "schema_version": info.get("schema_version") or semantic_model.get("schema_version")},
+        "output_inpx_sha256": _sha(out),
+        "geometry_engine": {"file": engine_path().name, "sha256": _sha(engine_path())},
+        "manual_edits": [{**e, "status": (info.get("manual_edits_status") or {}).get(str(e.get("id")))}
+                         for e in info.get("manual_edits", [])],
         "app_version": "0.4.1",
         "source_ifc": {"name": upload.get("original_name"), "sha256": sha},
         "output_inpx": out.name,
@@ -741,6 +807,13 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
     path = out.with_name(out.stem.replace("_viswalk", "") + "_build_manifest.json")
     path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     result["manifest_path"] = str(path)
+
+
+def _gate_passed_quiet(state: dict[str, Any]) -> bool:
+    try:
+        return bool(_current_gate(state)["passed"])
+    except Exception:
+        return False
 
 
 def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -767,7 +840,10 @@ def acknowledge_gate_item(update: GateAck) -> dict[str, Any]:
     item = next((i for i in gate["items"] if i["id"] == update.id), None)
     if item is None or item["policy"] != "ack":
         raise HTTPException(status_code=404, detail="ไม่พบรายการที่ต้องรับทราบนี้ในโมเดลปัจจุบัน")
-    state["gate_acks"] = record_ack(state.get("gate_acks") or {}, item, update.acknowledged, update.reason)
+    try:
+        state["gate_acks"] = record_ack(state.get("gate_acks") or {}, item, update.acknowledged, update.reason)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="รายการนี้ต้องระบุเหตุผลก่อนกดรับทราบ")
     store.write(state)
     return _current_gate(state)
 
@@ -901,7 +977,13 @@ def build_readiness() -> dict[str, Any]:
         "manual_overrides": len(overrides),
         "ifc_semantic_mapping_ready": semantic_ready,
         "semantic_summary": semantic.get("summary"),
-        "can_build_current_ifc": semantic_ready and engine_path().exists() and base_network_path().exists(),
+        # Prerequisites only. Whether a build is allowed is decided by
+        # engineering_gate_passed + build preflight at build time.
+        "build_prerequisites_found": semantic_ready and engine_path().exists() and base_network_path().exists(),
+        "validation_done": (state.get("build") or {}).get("status") in ("validated", "success"),
+        "engineering_gate_passed": _gate_passed_quiet(state) if semantic_ready else False,
+        "can_build_current_ifc": (semantic_ready and engine_path().exists() and base_network_path().exists()
+                                  and _gate_passed_quiet(state)),
         "next_gate": (
             "Validate semantic geometry, then Build Viswalk through Vissim COM 2025."
         ),

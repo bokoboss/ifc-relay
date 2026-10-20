@@ -35,7 +35,7 @@ def test_closed_room_and_missing_stair_are_reported(tmp_path):
     # main network is the bigger floor; the other floor and the closed room are isolated
     assert con["networks"] == 3
     assert len(con["isolated_zones"]) == 2 and 1 in levels
-    assert any(w.startswith("Connectivity: 2 walking zone(s)") for w in sem["ifc_semantic"]["warnings"])
+    assert any(w.startswith("Connectivity (geometry-only): 2 walking zone(s)") for w in sem["ifc_semantic"]["warnings"])
 
 
 def test_stair_links_floors_and_door_opens_room(tmp_path):
@@ -52,4 +52,4 @@ def test_stair_links_floors_and_door_opens_room(tmp_path):
     sem2 = semantic_for(b2.write(tmp_path / "c.ifc"), ov2)
     con2 = sem2["ifc_semantic"]["connectivity"]
     assert con2["networks"] == 1 and not con2["isolated_zones"]
-    assert not any(w.startswith("Connectivity:") for w in sem2["ifc_semantic"]["warnings"])
+    assert not any(w.startswith("Connectivity") for w in sem2["ifc_semantic"]["warnings"])

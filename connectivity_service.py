@@ -1,4 +1,8 @@
-"""Pedestrian connectivity check on the semantic model (P1-04).
+"""Pedestrian connectivity diagnostic on the semantic model - geometry only (P1-04).
+
+This is a pre-flight diagnostic, not routing verification: it does not know
+origins, exits, clear widths or Viswalk's route choice. "Connected" here means
+the free walking space touches; it does not mean every person can reach an exit.
 
 Geometry can be valid while people still cannot get anywhere: a room whose door
 was not converted, a floor reached by no stair. This builds a graph:
@@ -153,14 +157,14 @@ def connectivity_warnings(result: dict[str, Any]) -> list[str]:
         top = ", ".join(f"level {z['level_key']} {z['area_m2']:.1f} m2 at ({z['centroid'][0]:.1f}, {z['centroid'][1]:.1f})"
                         for z in iso[:5])
         out.append(
-            f"Connectivity: {len(iso)} walking zone(s) ({result['isolated_area_m2']:.1f} m2) cannot be reached from the "
+            f"Connectivity (geometry-only): {len(iso)} walking zone(s) ({result['isolated_area_m2']:.1f} m2) cannot be reached from the "
             f"main pedestrian network (levels {result['main_network_levels']}). Largest: {top}. "
             "Check for missing doors/openings or stairs."
         )
     for d in result["stairs_not_linked"]:
         side = "bottom" if not d["bottom_connected"] else "top"
         out.append(
-            f"Connectivity: stair/ramp {d['ifc_global_id'] or d['key']} ({d['start_level']} -> {d['end_level']}) "
+            f"Connectivity (geometry-only): stair/ramp {d['ifc_global_id'] or d['key']} ({d['start_level']} -> {d['end_level']}) "
             f"{side} end does not reach free walking space (blocked by a wall/obstacle or no floor)."
         )
     return out

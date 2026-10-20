@@ -265,6 +265,7 @@ uploadBtn.addEventListener('click', () => openSelectedFile());
 
 async function openSelectedFile() {
   if (!selectedFile) return;
+  geometryLoadSeq += 1;          // any background load of the previous file is now stale
   uploadBtn.disabled = true;
   setMessage('กำลังนำเข้าไฟล์ต้นฉบับ...');
   try {
@@ -372,6 +373,7 @@ async function loadReviewTier(baseRequest, seq) {
 async function runLoad3d() {
   load3dBtn.disabled = true;
   const request = geometryRequestFromControls();
+  const seq = ++geometryLoadSeq;
   const subsetLabel = request.storey_ids.length
     ? `ชั้น ${geometryStoreySelect?.selectedOptions?.[0]?.textContent?.split(' · ')[0] || request.storey_ids[0]}`
     : 'ทั้งอาคาร';
@@ -387,6 +389,7 @@ async function runLoad3d() {
       api('/api/selection'),
     ]);
 
+    if (seq !== geometryLoadSeq) return false;     // a newer load/import replaced this one
     if ((geometry.element_count || 0) === 0) {
       const selectedOption = geometryStoreySelect?.selectedOptions?.[0];
       const selectedLabel = selectedOption?.textContent || subsetLabel;
@@ -428,7 +431,7 @@ async function runLoad3d() {
     document.getElementById('stepExplore').classList.add('done');
     document.getElementById('stepSelect').classList.add('done');
     generateSemanticBtn.disabled = false;
-    if (request.tier === 'core') loadReviewTier(request, ++geometryLoadSeq);
+    if (request.tier === 'core') loadReviewTier(request, seq);
     updateSelectionSummary();
     refreshStairOverview();
     setMessage(
@@ -805,12 +808,12 @@ document.getElementById('simulationModeBtn').addEventListener('click', () => {
 document.getElementById('fitModelBtn').addEventListener('click', () => viewer()?.fitModel());
 document.getElementById('fitSelectionBtn').addEventListener('click', () => viewer()?.fitSelection());
 document.getElementById('isolateBtn').addEventListener('click', () => {
-  if (!viewer()?.isolateSelected()) setMessage('เลือกวัตถุใน 3D ก่อนใช้ Isolate');
+  if (!viewer()?.isolateSelected()) setMessage('เลือกวัตถุใน 3D ก่อนใช้ "แยกแสดง"');
 });
 document.getElementById('showAllBtn').addEventListener('click', () => viewer()?.showAll());
 document.getElementById('wireframeBtn').addEventListener('click', event => {
   const enabled = viewer()?.toggleWireframe();
-  event.currentTarget.textContent = enabled ? 'Solid' : 'Wireframe';
+  event.currentTarget.textContent = enabled ? 'ผิวทึบ' : 'โครงลวด';
 });
 
 window.addEventListener('ifc-element-selected', event => {
@@ -1103,8 +1106,9 @@ document.getElementById('stairResetBtn')?.addEventListener('click', async () => 
 function renderConnectivity(con) {
   const note = document.getElementById('connectivityNote');
   if (!note) return;
-  if (!con || con.error) {
-    note.className = 'connectivity-note hidden';
+  if (!con || con.error || !('zones' in con)) {
+    note.className = 'connectivity-note warn';
+    note.textContent = `ตรวจการเชื่อมต่อไม่สำเร็จ${con?.error ? ` (${con.error})` : ''} · ยังไม่รู้ว่าพื้นที่เดินต่อถึงกันหรือไม่ · สร้างไฟล์ไม่ได้จนกว่าจะตรวจได้`;
     return;
   }
   const iso = con.isolated_zones || [];
@@ -1112,8 +1116,8 @@ function renderConnectivity(con) {
   const ok = !iso.length && !loose.length;
   note.className = `connectivity-note ${ok ? 'ok' : 'warn'}`;
   note.textContent = ok
-    ? `การเชื่อมต่อ: พื้นที่เดินทั้งหมดเดินถึงกันได้ · บันไดเชื่อม ${con.stairs_linked} ตัว`
-    : `การเชื่อมต่อ: พื้นที่ที่เดินไปไม่ถึง ${iso.length} แห่ง (${Number(con.isolated_area_m2).toFixed(1)} ตร.ม., แสดงเป็นสีแดงใน 3D)` +
+    ? `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่เดินต่อถึงกันหมด · บันไดเชื่อม ${con.stairs_linked} ตัว (ยังไม่ใช่การตรวจเส้นทางเดินใน Viswalk)`
+    : `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่ที่เดินไปไม่ถึง ${iso.length} แห่ง (${Number(con.isolated_area_m2).toFixed(1)} ตร.ม., แสดงเป็นสีแดงใน 3D)` +
       (loose.length ? ` · บันไดที่ปลายไม่ถึงพื้นที่เดิน ${loose.length} ตัว` : '') +
       ` · บันไดเชื่อมแล้ว ${con.stairs_linked} ตัว`;
 }
@@ -1290,6 +1294,8 @@ exportEngineBtn.addEventListener('click', async () => {
 
 
 let currentGate = null;
+let validationBusy = false;
+let buildBusy = false;
 
 async function refreshGate() {
   try {
@@ -1331,7 +1337,9 @@ function renderGate(gate) {
       const reason = document.createElement('input');
       reason.type = 'text';
       reason.className = 'gate-reason';
-      reason.placeholder = 'เหตุผล (ไม่บังคับ) เช่น ช่องท่อ ไม่ใช่ห้อง';
+      reason.placeholder = item.reason_required
+        ? 'ต้องระบุเหตุผล เช่น ช่องท่อ ไม่ใช่ห้อง'
+        : 'เหตุผล (ไม่บังคับ)';
       reason.value = item.reason || '';
       box.addEventListener('change', async () => {
         box.disabled = true;
@@ -1364,7 +1372,7 @@ function renderGate(gate) {
   summary.textContent = gate.passed
     ? 'ผ่านด่านตรวจแล้ว · สร้างไฟล์ Viswalk ได้ (ยังต้องตรวจผลใน Viswalk)'
     : `ยังสร้างไฟล์ไม่ได้ · ต้องแก้ ${blocked} รายการ · รอรับทราบ ${pending} รายการ`;
-  buildViswalkBtn.disabled = !gate.passed || validateBtn.disabled;
+  buildViswalkBtn.disabled = !gate.passed || validationBusy || buildBusy;
 }
 
 function renderValidation(result) {
@@ -1412,6 +1420,7 @@ function renderBuildResult(payload) {
 
 validateBtn.addEventListener('click', async () => {
   validateBtn.disabled = true;
+  validationBusy = true;
   setMessage('กำลังตรวจโมเดลคนเดินด้วย Geometry Engine v0.3...');
   try {
     const result = await api('/api/validate', { method: 'POST' });
@@ -1425,11 +1434,14 @@ validateBtn.addEventListener('click', async () => {
   } catch (error) {
     setMessage(`ตรวจสอบโมเดลไม่สำเร็จ: ${error.message}`);
   } finally {
+    validationBusy = false;
     validateBtn.disabled = false;
+    buildViswalkBtn.disabled = !(currentGate && currentGate.passed) || buildBusy;
   }
 });
 
 buildViswalkBtn.addEventListener('click', async () => {
+  buildBusy = true;
   buildViswalkBtn.disabled = true;
   validateBtn.disabled = true;
   setBuildOutputReady(false);
@@ -1445,6 +1457,7 @@ buildViswalkBtn.addEventListener('click', async () => {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
     setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
   } finally {
+    buildBusy = false;
     validateBtn.disabled = false;
     buildViswalkBtn.disabled = !(currentGate && currentGate.passed);
   }
@@ -1503,7 +1516,7 @@ async function restoreState() {
 
     if (state.semantic?.status === 'ready') {
       try {
-        currentSemantic = await api('/api/ifc/semantic');
+        currentSemantic = await api('/api/ifc/semantic?draft=1');
         renderSemanticSummary(currentSemantic);
         setExportReady(!state.semantic.stale);
         if (!state.semantic.stale) document.getElementById('stepSemantic').classList.add('done');

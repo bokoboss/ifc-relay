@@ -13,9 +13,29 @@ def _ids(gate, policy):
     return {i["id"] for i in gate["items"] if i["policy"] == policy}
 
 
+CLEAN_CONNECTIVITY = {"zones": 1, "isolated_zones": [], "stairs_not_linked": []}
+
+
 def test_not_validated_blocks():
-    gate = evaluate_gate({"ifc_semantic": {"summary": {}, "warnings": []}}, None, {})
+    gate = evaluate_gate({"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": CLEAN_CONNECTIVITY}}, None, {})
     assert gate["blocked"] == ["not_validated"] and not gate["passed"]
+
+
+def test_failed_or_missing_connectivity_blocks():
+    """F-02 / E2E-03: a diagnostic that failed is never read as 'all connected'."""
+    for con in ({"error": "ValueError: boom"}, None):
+        gate = evaluate_gate({"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": con}},
+                             {"issues": [], "severity_counts": {}, "build_allowed": True}, {})
+        assert "connectivity_failed" in gate["blocked"] and not gate["passed"]
+
+
+def test_skipped_manual_edit_blocks():
+    """F-05: an edit the engineer drew but the model does not contain blocks the build."""
+    sem = {"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": CLEAN_CONNECTIVITY,
+                            "manual_edits": [{"id": "E1", "kind": "walkable"}],
+                            "manual_edits_status": {"E1": {"applied": False, "reason": "no level at 1.90 m"}}}}
+    gate = evaluate_gate(sem, {"issues": [], "severity_counts": {}, "build_allowed": True}, {})
+    assert "manual_edits_skipped" in gate["blocked"]
 
 
 @requires_engine
@@ -28,13 +48,41 @@ def test_isolated_room_needs_acknowledgement_and_ack_is_tied_to_count(tmp_path):
     assert not gate["blocked"] and gate["pending_acknowledgement"] == ["isolated_zones"]
     assert not gate["passed"]
 
-    ok = evaluate_gate(sem, validation, {"isolated_zones": {"count": 1, "reason": "shaft"}})
+    from gate_service import record_ack
+    item = next(i for i in gate["items"] if i["id"] == "isolated_zones")
+    with pytest.raises(ValueError):
+        record_ack({}, item, True, "")                     # reason required for this item
+    acks = record_ack({}, item, True, "shaft")
+    ok = evaluate_gate(sem, validation, acks)
     assert ok["passed"]
-    item = next(i for i in ok["items"] if i["id"] == "isolated_zones")
-    assert item["acknowledged"] and item["reason"] == "shaft"
+    done = next(i for i in ok["items"] if i["id"] == "isolated_zones")
+    assert done["acknowledged"] and done["reason"] == "shaft"
 
-    stale = evaluate_gate(sem, validation, {"isolated_zones": {"count": 2}})   # count changed -> re-ack
-    assert not stale["passed"]
+
+@requires_engine
+def test_ack_does_not_carry_over_to_a_different_problem_with_the_same_count(tmp_path):
+    """F-01 / E2E-02: room A acknowledged; A fixed but room B appears -> pending again."""
+    from gate_service import record_ack
+    from tests.ifc_factory import add_wall
+
+    b, ov = _two_storeys(with_stair=True)                    # closed room A in the L1 corner
+    sem_a = semantic_for(b.write(tmp_path / "a.ifc"), ov)
+    (tmp_path / "va").mkdir()
+    val_a = engine_validate(sem_a, tmp_path / "va")
+    gate_a = evaluate_gate(sem_a, val_a, {})
+    acks = record_ack({}, next(i for i in gate_a["items"] if i["id"] == "isolated_zones"), True, "store room")
+    assert evaluate_gate(sem_a, val_a, acks)["passed"]
+
+    b2, ov2 = _two_storeys(with_stair=True, room_door=True)  # room A opened ...
+    l1 = b2.storeys[0]
+    add_wall(b2, 0.0, 6.0, 6.0, l1)                          # ... closed room B elsewhere
+    b2.box("IfcWall", 5.9, 6.0, 6.1, 10.0, 0.0, 3.0, l1)
+    sem_b = semantic_for(b2.write(tmp_path / "b.ifc"), ov2)
+    assert len(sem_b["ifc_semantic"]["connectivity"]["isolated_zones"]) == 1   # same count as before
+    (tmp_path / "vb").mkdir()
+    val_b = engine_validate(sem_b, tmp_path / "vb")
+    gate_b = evaluate_gate(sem_b, val_b, acks)
+    assert "isolated_zones" in gate_b["pending_acknowledgement"] and not gate_b["passed"]
 
 
 @pytest.fixture()
@@ -70,6 +118,7 @@ def test_build_refused_until_acknowledged(client, tmp_path):
     assert client.post("/api/validate").status_code == 200
     gate = client.get("/api/gate").json()
     assert gate["pending_acknowledgement"] == ["isolated_zones"]
+    assert client.post("/api/gate/ack", json={"id": "isolated_zones"}).status_code == 400   # reason required
     gate = client.post("/api/gate/ack", json={"id": "isolated_zones", "reason": "closed room"}).json()
     assert gate["passed"]
 
@@ -90,7 +139,7 @@ def test_reloading_3d_keeps_validation_and_acks(client, tmp_path):
     client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []})
     client.post("/api/ifc/semantic")
     client.post("/api/validate")
-    client.post("/api/gate/ack", json={"id": "isolated_zones"})
+    client.post("/api/gate/ack", json={"id": "isolated_zones", "reason": "closed room"})
     # page reload re-requests the 3D view
     assert client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []}).status_code == 200
     assert client.get("/api/gate").json()["passed"]
