@@ -51,9 +51,10 @@ def page(server):
 
     urllib.request.urlopen(urllib.request.Request(server + "/api/project/reset", method="POST"))
     exe = "/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else None
+    args = (["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist"] if exe
+            else ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe,
-                                    args=["--use-gl=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist"])
+        browser = p.chromium.launch(executable_path=exe, args=args)
         pg = browser.new_page(viewport={"width": 1366, "height": 768})
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))

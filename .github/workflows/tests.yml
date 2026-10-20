@@ -55,4 +55,10 @@ jobs:
       - name: Browser end-to-end (Chromium, software WebGL)
         env:
           VBB_E2E: "1"
-        run: python -m pytest -q tests/e2e
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/e2e 2>&1 | tee e2e.log
+          # surface failures as annotations (readable without the raw log)
+      - name: Report E2E failures
+        if: failure()
+        run: grep -E "^(E  |FAILED|ERROR)" e2e.log | head -40 | sed 's/^/::error::/' || true
