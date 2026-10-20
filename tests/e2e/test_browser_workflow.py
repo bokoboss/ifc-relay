@@ -131,11 +131,18 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.click(".plan-tool[data-tool=passage]")
     page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
     page.wait_for_timeout(300)
+    hits = []
     for x, y in ((13.5, 7.5), (14.5, 8.5)):
         pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+        hits.append(page.evaluate(f"(() => {{ const e = document.elementFromPoint({pt['x']}, {pt['y']}); "
+                                  f"return [{pt['x']:.0f}, {pt['y']:.0f}, e ? e.tagName + '#' + e.id + '.' + e.className : null]; }})()"))
         page.mouse.click(pt["x"], pt["y"])
-        page.wait_for_timeout(200)
-    page.wait_for_selector("#editsList .edit-row")
+        page.wait_for_timeout(300)
+    try:
+        page.wait_for_selector("#editsList .edit-row", timeout=15000)
+    except Exception as exc:
+        raise AssertionError(f"no edit saved: hits={hits} hint={page.text_content('#planHint')} "
+                             f"plan={page.evaluate('window.IFCViewer.isPlan()')} {_diag(page)}") from exc
     assert page.is_disabled("#validateBtn")
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
