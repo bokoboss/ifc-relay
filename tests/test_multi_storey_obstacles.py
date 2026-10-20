@@ -45,7 +45,24 @@ def test_full_height_wall_and_column_are_copied_to_each_storey(tmp_path):
     assert len(keys) == len(set(keys))
     assert sem["ifc_semantic"]["summary"]["multi_storey_elements"] == 2
     assert any("span several storeys" in w for w in sem["ifc_semantic"]["warnings"])
-    assert any("without door gaps" in w for w in sem["ifc_semantic"]["warnings"])
+    assert not any("without door gaps" in w for w in sem["ifc_semantic"]["warnings"])
+
+
+def test_each_storey_gets_only_its_own_doors(tmp_path):
+    b, (l1, l2, l3) = _three_storeys()
+    wall = add_wall(b, 1.0, 5.0, 12.0, l1, height=3 * H)
+    g1 = add_opening(b, wall, 4.0, 5.0, 5.0, 0.0, 2.1)              # L1 door
+    g2 = add_opening(b, wall, 8.0, 9.0, 5.0, H, H + 2.1)            # L2 door
+    win = add_opening(b, wall, 2.0, 3.0, 5.0, 2 * H + 1.2, 2 * H + 2.2)   # L3 window (sill 1.2 m)
+    sem = semantic_for(b.write(tmp_path / "doors.ifc"),
+                       {g.GlobalId: "include" for g in (g1, g2, win)})
+    spans = {}
+    for w in sem["walls"]:
+        if w["logical_wall_global_id"] == wall.GlobalId:
+            spans.setdefault(w["level_key"], []).append((w["start"][0], w["end"][0]))
+    assert sorted(spans[1]) == [(1.0, 4.0), (5.0, 13.0)]       # only the L1 door
+    assert sorted(spans[2]) == [(1.0, 8.0), (9.0, 13.0)]       # only the L2 door
+    assert sorted(spans[3]) == [(1.0, 13.0)]                   # window above 1 m does not open L3
 
 
 @requires_engine

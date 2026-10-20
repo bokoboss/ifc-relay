@@ -172,15 +172,22 @@ def test_storey_elevation_vs_floor_top_mismatch_is_reported(tmp_path):
     assert any("differs from floor-slab tops" in w for w in sem["ifc_semantic"]["warnings"])
 
 
-def test_polygon_extends_past_both_ends_for_engine_overlap(tmp_path):
-    b = _two_storey()
+def test_polygon_extends_only_where_the_floor_does_not_reach(tmp_path):
+    """Bottom end stands on the L1 floor (already overlaps): no extension, so the
+    Vissim run keeps the IFC length. Top end meets the L2 slab edge: +0.10 m."""
+    b = Building([0.0, STOREY_HEIGHT])
+    b.slab(FLOOR_L1, 0.0, b.storeys[0])
+    for poly in ([(0, 0), (20, 0), (20, 1), (0, 1)], [(0, 2.2), (20, 2.2), (20, 10), (0, 10)],
+                 [(0, 1), (2, 1), (2, 2.2), (0, 2.2)], [(8, 1), (20, 1), (20, 2.2), (8, 2.2)]):
+        b.slab(poly, STOREY_HEIGHT, b.storeys[1])                 # stair hole 2..8 x 1..2.2
     stair = b.stair(b.storeys[0])
     b.flight(2.0, 8.0, 1.0, 2.2, 0.0, STOREY_HEIGHT, parent=stair)
     sem = semantic_for(b.write(tmp_path / "overlap.ifc"), {stair.GlobalId: "include"})
     [conn] = sem["vertical_connections"]
     xs = [p[0] for p in conn["polygon"]]
-    assert math.isclose(min(xs), 2.0 - conn["end_overlap"], abs_tol=1e-3)
-    assert math.isclose(max(xs), 8.0 + conn["end_overlap"], abs_tol=1e-3)
+    assert conn["end_overlap"] == {"bottom": 0.0, "top": 0.1}
+    assert math.isclose(min(xs), 2.0, abs_tol=1e-3)
+    assert math.isclose(max(xs), 8.1, abs_tol=1e-3)
     assert all(math.isclose(p[0], 2.0, abs_tol=1e-3) for p in conn["bottom_edge"])
 
 

@@ -522,6 +522,88 @@ def _farthest_pair(points: list[list[float]]) -> tuple[list[float], list[float]]
     return best
 
 
+
+def wall_storey_bands(bottom: float, top: float, base_level: int,
+                      storey_z: list[tuple[float, int]]) -> list[tuple[int, float, float]]:
+    """(level, z_from, z_to) pieces of a wall: its own storey plus every storey it
+    rises at least STOREY_CONTINUATION_MIN above. One band for ordinary walls."""
+    crossed = [(z, k) for z, k in storey_z
+               if k != base_level and z > bottom + 0.5 and top - z >= STOREY_CONTINUATION_MIN]
+    if not crossed:
+        return [(base_level, bottom, top)]
+    cuts = [bottom] + [z for z, _ in crossed] + [top]
+    levels = [base_level] + [k for _, k in crossed]
+    return [(levels[i], cuts[i], cuts[i + 1]) for i in range(len(levels))]
+
+
+def opening_at_walking_height(opening: dict[str, Any], floor_z: float, is_base: bool) -> bool:
+    """True when the opening is open 1 m above this storey's floor (door/passage height).
+    Openings without height information only cut the wall's own (base) storey."""
+    z_min, z_max = opening.get("z_min"), opening.get("z_max")
+    if z_min is None or z_max is None:
+        return is_base
+    probe = floor_z + 1.0
+    return z_min < probe < z_max
+
+
+def trim_ramp_end_overlaps(vertical_connections: list[dict[str, Any]],
+                           areas: list[dict[str, Any]], obstacles: list[dict[str, Any]] | None = None,
+                           overlap: float = 0.10) -> int:
+    """Extend a ramp beyond its true flight only at ends whose level area does not
+    already lie under that end.
+
+    The Engine needs each ramp end to overlap its level's walkable area. A flight
+    starting on a floor already overlaps it (the floor continues under the stair);
+    only an end meeting a slab edge (top of the stair, landing edge) needs the
+    extension. Extending both ends made the Vissim run 0.20 m longer than the IFC
+    flight. Returns the number of ends no longer extended.
+    """
+    from shapely.geometry import Polygon as _P
+
+    by_level: dict[int, Any] = {}
+    for a in areas:
+        poly = _P(a["polygon"])
+        by_level[int(a["level_key"])] = unary_union([by_level[int(a["level_key"])], poly]) \
+            if int(a["level_key"]) in by_level else poly
+    # Areas are exported without holes; floor openings (stair wells) are blocked by
+    # generated void-mask obstacles instead, so they do not count as floor here.
+    for o in obstacles or []:
+        if o.get("type") == "walkable_void_mask" and int(o["level_key"]) in by_level and o.get("polygon"):
+            by_level[int(o["level_key"])] = by_level[int(o["level_key"])].difference(_P(o["polygon"]))
+    trimmed = 0
+    for vc in vertical_connections:
+        be, te = vc.get("bottom_edge"), vc.get("top_edge")
+        if not be or not te or vc.get("polygon_order") != "bottom_edge_first":
+            continue
+        bc = ((be[0][0] + be[1][0]) / 2, (be[0][1] + be[1][1]) / 2)
+        tc = ((te[0][0] + te[1][0]) / 2, (te[0][1] + te[1][1]) / 2)
+        length = math.dist(bc, tc)
+        if length <= 1e-6:
+            continue
+        ux, uy = (tc[0] - bc[0]) / length, (tc[1] - bc[1]) / length
+        depth = min(overlap, length / 4)
+
+        def covered(edge, sign, level):
+            area = by_level.get(int(level))
+            if area is None:
+                return False
+            a, b = edge
+            strip = _P([a, b, (b[0] + sign * ux * depth, b[1] + sign * uy * depth),
+                        (a[0] + sign * ux * depth, a[1] + sign * uy * depth)])
+            return strip.area > 0 and strip.intersection(area).area >= 0.9 * strip.area
+
+        ob = 0.0 if covered(be, +1, vc["start_level"]) else overlap
+        ot = 0.0 if covered(te, -1, vc["end_level"]) else overlap
+        trimmed += (ob == 0.0) + (ot == 0.0)
+        vc["polygon"] = [
+            [round(be[0][0] - ux * ob, 5), round(be[0][1] - uy * ob, 5)],
+            [round(be[1][0] - ux * ob, 5), round(be[1][1] - uy * ob, 5)],
+            [round(te[0][0] + ux * ot, 5), round(te[0][1] + uy * ot, 5)],
+            [round(te[1][0] + ux * ot, 5), round(te[1][1] + uy * ot, 5)],
+        ]
+        vc["end_overlap"] = {"bottom": ob, "top": ot}
+    return trimmed
+
 def replicate_across_storeys(
     walls: list[dict[str, Any]],
     columns: list[dict[str, Any]],
@@ -556,6 +638,8 @@ def replicate_across_storeys(
         groups[(w.get("logical_wall_global_id") or id(w), int(w["level_key"]))].append(w)
     new_walls: list[dict[str, Any]] = []
     for (logical, base_key), segs in groups.items():
+        if any(seg.get("storey_split") for seg in segs):
+            continue
         targets = crossed(segs[0])
         if not targets:
             continue
@@ -582,7 +666,7 @@ def replicate_across_storeys(
     for collection in (columns, obstacles):
         extra: list[dict[str, Any]] = []
         for rec in collection:
-            if rec.get("generated") or rec.get("type") == "walkable_void_mask":
+            if rec.get("generated") or rec.get("type") == "walkable_void_mask" or rec.get("storey_split"):
                 continue
             targets = crossed(rec)
             if not targets:
@@ -685,8 +769,16 @@ def build_semantic_model(
             )
             continue
 
-        opening_poly = _opening_shape_polygon(model, opening)
+        opening_shape = _opening_shape(model, opening)
+        opening_poly = opening_shape[0] if opening_shape else None
         door_mesh = mesh_by_id.get(int(door.id()))
+        if opening_shape:
+            door_z = (opening_shape[1], opening_shape[2])
+        elif door_mesh is not None:
+            _dmin, _dmax = mesh_bounds(door_mesh)
+            door_z = (_dmin[2], _dmax[2])
+        else:
+            door_z = (None, None)
 
         if opening_poly is not None:
             center = [float(opening_poly.centroid.x), float(opening_poly.centroid.y)]
@@ -724,6 +816,8 @@ def build_semantic_model(
                 "center": center,
                 "width": width,
                 "polygon": opening_poly,
+                "z_min": door_z[0],
+                "z_max": door_z[1],
             }
         )
 
@@ -792,6 +886,8 @@ def build_semantic_model(
                     "width": width,
                     "polygon": opening_poly,
                     "unfilled": True,
+                    "z_min": z_min,
+                    "z_max": z_max,
                 }
             )
 
@@ -927,11 +1023,22 @@ def build_semantic_model(
                 )
                 continue
             if explicit and abs(offset) > OFF_LEVEL_MERGE_MAX:
+                # Included by the engineer: a mezzanine / raised floor gets a level of
+                # its own at its real height (like an intermediate landing) instead of
+                # being flattened onto the storey floor.
                 off_level_slabs.append({
                     "global_id": cand["guid"], "level_key": level_key, "top_z": round(cand["top_z"], 3),
                     "offset_m": round(offset, 3), "area_m2": area,
                     "name": entity_name(cand["slab"], f"IFC Slab {cand['slab'].id()}"), "decision": "include",
                 })
+                cand["is_mezzanine"] = True
+                intermediate_landings.append(cand)
+                warnings.append(
+                    f"Floor slab {cand['guid'] or cand['slab'].id()} top ({cand['top_z']:.3f} m) is "
+                    f"{offset:+.3f} m from its storey floor; included as its own level (mezzanine). "
+                    "Connect it with a stair/ramp or it will be unreachable."
+                )
+                continue
             warnings.append(
                 f"Floor slab {cand['guid'] or cand['slab'].id()} top ({cand['top_z']:.3f} m) is "
                 f"{offset:+.3f} m from its storey floor; merged into level {level_key}. Review whether it is a mezzanine or step."
@@ -1021,6 +1128,8 @@ def build_semantic_model(
             c for c in intermediate_landings
             if abs(c["top_z"] - float(landing_level["z"])) <= LEVEL_SNAP_TOLERANCE
         ]
+        if members and all(m.get("is_mezzanine") for m in members):
+            landing_level["name"] = landing_level["name"].replace("Landing", "Mezzanine", 1)
         # Express the landing in the same frame as its storey's output level.
         base_key = members[0]["level_key"]
         shift = level_datum_by_key[base_key] - level_z_by_key[base_key]
@@ -1038,7 +1147,7 @@ def build_semantic_model(
             )
             continue
         for region_no, region in enumerate(regions, start=1):
-            name = f"Landing - {landing_level['name']}"
+            name = f"{'Mezzanine' if all(m.get('is_mezzanine') for m in members) else 'Landing'} - {landing_level['name']}"
             if len(regions) > 1:
                 name += f" [region {region_no}/{len(regions)}]"
             if region.interiors:
@@ -1069,6 +1178,8 @@ def build_semantic_model(
     polygon_wall_count = 0
     logical_wall_count = 0
     wall_key = 1101
+    storey_z = sorted((level_z_by_key[int(lv["key"])], int(lv["key"]))
+                      for lv in levels if not lv.get("generated") and int(lv["key"]) in level_z_by_key)
 
     for wall in model.by_type("IfcWall"):
         if effective_status(wall, selection_overrides) != "include":
@@ -1095,87 +1206,111 @@ def build_semantic_model(
             z_offset = 0.0
 
         logical_wall_count += 1
-        wall_openings = openings_by_wall_id.get(int(wall.id()), [])
+        all_openings = openings_by_wall_id.get(int(wall.id()), [])
 
-        solidity = wall_footprint_solidity(footprint)
-        if solidity < WALL_POLYGON_SOLIDITY:
-            # L/T/curved wall: a single centreline would block the corner.
-            # Keep the true footprint and cut openings out of it.
-            cut = [o["polygon"].buffer(0.001) for o in wall_openings if o.get("polygon") is not None]
-            missing = [o for o in wall_openings if o.get("polygon") is None]
-            if missing:
-                warnings.append(
-                    f"Wall {global_id(wall) or wall.id()} is not straight and {len(missing)} of its openings have no footprint; those openings stay closed."
-                )
-            geom = footprint.difference(unary_union(cut)) if cut else footprint
-            parts = [
-                piece
-                for comp in polygon_components(geom if geom.is_valid else geom.buffer(0))
-                for piece in split_out_holes(comp)
-            ]
-            door_openings_applied += len({o["door_global_id"] for o in wall_openings if o.get("door_global_id") and o.get("polygon") is not None})
-            name = entity_name(wall, f"IFC Wall {wall.id()}")
-            for part_no, part in enumerate(parts, start=1):
-                polygon_wall_obstacles.append({
-                    "name": name if len(parts) == 1 else f"{name} [part {part_no}/{len(parts)}]",
-                    "type": "IfcWall",
-                    "level_key": level_key,
-                    "height": round(height, 5),
-                    "z_offset": round(z_offset, 5),
-                    "polygon": polygon_points(part),
-                    "ifc_global_id": global_id(wall),
-                    "ifc_entity_id": int(wall.id()),
-                    "logical_wall_global_id": global_id(wall),
-                    "wall_shape": "polygon",
-                    "footprint_solidity": round(solidity, 4),
-                })
-            polygon_wall_count += 1
-            continue
+        # A wall modelled once over several storeys is exported per storey, each
+        # storey cut only by the openings at its own walking height (a ground-floor
+        # door must not open the wall upstairs).
+        bands = wall_storey_bands(bbmin[2], bbmax[2], level_key, storey_z)
+        for band_no, (band_level, band_bottom, band_top) in enumerate(bands):
+            if len(bands) == 1:
+                wall_openings = all_openings
+                band_suffix = ""
+            else:
+                floor_z = level_z_by_key[band_level]
+                wall_openings = [o for o in all_openings if opening_at_walking_height(o, floor_z, band_no == 0)]
+                band_suffix = "" if band_no == 0 else f" [continues on {level_name_by_key.get(band_level, band_level)}]"
+            level_key = band_level
+            height = max(band_top - band_bottom, 0.05)
+            z_offset = band_bottom - level_z_by_key[band_level]
+            if abs(z_offset) < 1e-5:
+                z_offset = 0.0
 
-        physical_segments, normalized_openings = split_wall_axis(
-            axis["start"], axis["end"], wall_openings
-        )
+            solidity = wall_footprint_solidity(footprint)
+            if solidity < WALL_POLYGON_SOLIDITY:
+                # L/T/curved wall: a single centreline would block the corner.
+                # Keep the true footprint and cut openings out of it.
+                cut = [o["polygon"].buffer(0.001) for o in wall_openings if o.get("polygon") is not None]
+                missing = [o for o in wall_openings if o.get("polygon") is None]
+                if missing:
+                    warnings.append(
+                        f"Wall {global_id(wall) or wall.id()} is not straight and {len(missing)} of its openings have no footprint; those openings stay closed."
+                    )
+                geom = footprint.difference(unary_union(cut)) if cut else footprint
+                parts = [
+                    piece
+                    for comp in polygon_components(geom if geom.is_valid else geom.buffer(0))
+                    for piece in split_out_holes(comp)
+                ]
+                door_openings_applied += len({o["door_global_id"] for o in wall_openings if o.get("door_global_id") and o.get("polygon") is not None})
+                name = entity_name(wall, f"IFC Wall {wall.id()}")
+                for part_no, part in enumerate(parts, start=1):
+                    polygon_wall_obstacles.append({
+                        "name": (name if len(parts) == 1 else f"{name} [part {part_no}/{len(parts)}]") + band_suffix,
+                        "storey_split": len(bands) > 1,
+                        **({"replicated_from_level": bands[0][0]} if band_no else {}),
+                        "type": "IfcWall",
+                        "level_key": level_key,
+                        "height": round(height, 5),
+                        "z_offset": round(z_offset, 5),
+                        "polygon": polygon_points(part),
+                        "ifc_global_id": global_id(wall),
+                        "ifc_entity_id": int(wall.id()),
+                        "logical_wall_global_id": global_id(wall),
+                        "wall_shape": "polygon",
+                        "footprint_solidity": round(solidity, 4),
+                    })
+                if band_no == 0:
+                    polygon_wall_count += 1
+                continue
 
-        # Sanity-check opening centers against the inferred wall axis.
-        valid_opening_guids = set()
-        for opening_info in normalized_openings:
-            label = opening_info.get("door_global_id") or opening_info.get("opening_global_id")
-            if opening_info["perpendicular_distance"] > max(axis["thickness"] * 1.5, 0.35):
-                warnings.append(
-                    f"{'Door' if opening_info.get('door_global_id') else 'Opening'} {label} is {opening_info['perpendicular_distance']:.3f} m from inferred wall axis; verify this opening in 3D review."
-                )
-            valid_opening_guids.add(opening_info.get("door_global_id"))
-        door_openings_applied += len([g for g in valid_opening_guids if g])
-
-        if not physical_segments:
-            warnings.append(
-                f"Wall {global_id(wall) or wall.id()} has no remaining physical segment after door splitting."
+            physical_segments, normalized_openings = split_wall_axis(
+                axis["start"], axis["end"], wall_openings
             )
-            continue
 
-        total_parts = len(physical_segments)
-        for part_no, seg in enumerate(physical_segments, start=1):
-            name = entity_name(wall, f"IFC Wall {wall.id()}")
-            if total_parts > 1:
-                name = f"{name} [segment {part_no}/{total_parts}]"
+            # Sanity-check opening centers against the inferred wall axis.
+            valid_opening_guids = set()
+            for opening_info in normalized_openings:
+                label = opening_info.get("door_global_id") or opening_info.get("opening_global_id")
+                if opening_info["perpendicular_distance"] > max(axis["thickness"] * 1.5, 0.35):
+                    warnings.append(
+                        f"{'Door' if opening_info.get('door_global_id') else 'Opening'} {label} is {opening_info['perpendicular_distance']:.3f} m from inferred wall axis; verify this opening in 3D review."
+                    )
+                valid_opening_guids.add(opening_info.get("door_global_id"))
+            door_openings_applied += len([g for g in valid_opening_guids if g])
 
-            walls.append(
-                {
-                    "key": wall_key,
-                    "name": name,
-                    "level_key": level_key,
-                    "start": [round(seg["start"][0], 5), round(seg["start"][1], 5)],
-                    "end": [round(seg["end"][0], 5), round(seg["end"][1], 5)],
-                    "thickness": round(axis["thickness"], 5),
-                    "height": round(height, 5),
-                    "z_offset": round(z_offset, 5),
-                    "ifc_global_id": global_id(wall),
-                    "ifc_entity_id": int(wall.id()),
-                    "logical_wall_global_id": global_id(wall),
-                    "physical_segment": True,
-                }
-            )
-            wall_key += 1
+            if not physical_segments:
+                warnings.append(
+                    f"Wall {global_id(wall) or wall.id()} has no remaining physical segment after door splitting."
+                )
+                continue
+
+            total_parts = len(physical_segments)
+            for part_no, seg in enumerate(physical_segments, start=1):
+                name = entity_name(wall, f"IFC Wall {wall.id()}")
+                if total_parts > 1:
+                    name = f"{name} [segment {part_no}/{total_parts}]"
+                name += band_suffix
+
+                walls.append(
+                    {
+                        "key": wall_key,
+                        "name": name,
+                        "level_key": level_key,
+                        "start": [round(seg["start"][0], 5), round(seg["start"][1], 5)],
+                        "end": [round(seg["end"][0], 5), round(seg["end"][1], 5)],
+                        "thickness": round(axis["thickness"], 5),
+                        "height": round(height, 5),
+                        "z_offset": round(z_offset, 5),
+                        "ifc_global_id": global_id(wall),
+                        "ifc_entity_id": int(wall.id()),
+                        "logical_wall_global_id": global_id(wall),
+                        "physical_segment": True,
+                        "storey_split": len(bands) > 1,
+                        **({"replicated_from_level": bands[0][0]} if band_no else {}),
+                    }
+                )
+                wall_key += 1
 
     # ---------------------------------------------------------
     # Columns and generic movement obstacles
@@ -1327,6 +1462,7 @@ def build_semantic_model(
         all_levels=match_levels,
     )
     warnings.extend(vertical_warnings)
+    trim_ramp_end_overlaps(vertical_connections, areas, obstacles)
 
     for element in model.by_type("IfcTransportElement"):
         if _included(element):
@@ -1338,10 +1474,15 @@ def build_semantic_model(
     storey_levels = [lv for lv in levels if not lv.get("generated")]
     multi_replicated, multi_copies, multi_closed = replicate_across_storeys(
         walls, columns, obstacles, storey_levels, level_z_by_key)
+    # Walls already exported per storey (with openings at each storey's height).
+    split_walls = [w for w in walls + obstacles if w.get("storey_split")]
+    multi_replicated += len({w.get("logical_wall_global_id") or w.get("ifc_global_id") for w in split_walls})
+    multi_copies += sum(1 for w in split_walls if w.get("replicated_from_level"))
     if multi_replicated:
         warnings.append(
             f"{multi_replicated} wall/column/obstacle element(s) span several storeys; copied onto each storey "
-            f"they cross ({multi_copies} copies) because Vissim obstacles act only on their own level."
+            f"they cross ({multi_copies} copies) because Vissim obstacles act only on their own level. "
+            "Walls are cut on each storey only by the openings at that storey's walking height."
         )
     if multi_closed:
         warnings.append(
