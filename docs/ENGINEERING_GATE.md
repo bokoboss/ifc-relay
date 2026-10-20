@@ -25,6 +25,8 @@ An acknowledgement stores the item's **fingerprint** (policy version + the ident
 
 The connectivity check is a geometry-only diagnostic (free walking space touching); it is not routing verification and says nothing about origins, exits or clear widths.
 
+Plan edits are listed with what the last pedestrian-model run did with each one: `ใช้แล้ว` (applied as drawn), `ย้ายระดับ` (its level was renumbered and it was re-bound by height), `ไม่มีผล` (a passage that crossed no wall), `ใช้ไม่ได้` (skipped; blocks the build) and `รอเตรียมใหม่` (added since the last run). The list header counts the edits that need a look, so after an IFC revision the engineer works through it as a review queue.
+
 Every successful build writes `<name>_build_manifest.json` next to the `.inpx`: source IFC name and SHA-256, pedestrian-model file SHA-256, output `.inpx` SHA-256, Geometry Engine file SHA-256, manual edits with apply status, Engine severity counts, the full gate result with fingerprints, acknowledgements and reasons, and `viswalk_verified: false` - the model is not verified until an engineer checks it in Viswalk.
 
 ## Manual plan edits

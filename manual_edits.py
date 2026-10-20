@@ -139,7 +139,32 @@ def apply_manual_edits(edits: list[dict[str, Any]], *, areas: list[dict[str, Any
                         obstacles.append({**obs, "polygon": _pts(piece),
                                           "name": f"{obs['name']} [cut by passage {edit.get('id')}]",
                                           "manual_edit_id": edit.get("id")})
+            status[str(edit.get("id"))]["walls_cut"] = cut
             if not cut:
                 warnings.append(f"Manual passage {edit.get('id')} on level {level} crosses no wall.")
             applied["passage"] += 1
     return applied
+
+
+EDIT_STATES = ("applied", "rebound", "no_effect", "skipped", "pending")
+
+
+def edit_review_state(edit: dict[str, Any], status: dict[str, Any] | None) -> dict[str, Any]:
+    """What the last pedestrian-model run did with one plan edit (F-19 review queue).
+
+    ``pending``: added after the last run (``status`` is None). ``skipped``: could not be placed; blocks the build.
+    ``rebound``: placed on another level found by height. ``no_effect``: a passage
+    that crossed no wall. ``applied``: placed as drawn.
+    """
+    if not status:
+        return {"state": "pending", "detail": "ยังไม่ได้ใช้ · กด \"เตรียมโมเดลคนเดิน\""}
+    if status.get("applied") is False:
+        return {"state": "skipped", "detail": str(status.get("reason") or "ใช้ไม่ได้")}
+    if edit.get("kind") == "passage" and status.get("walls_cut") == 0:
+        return {"state": "no_effect", "detail": "ไม่ตัดผนังใดเลย"}
+    if status.get("note"):
+        z = edit.get("level_z")
+        where = f"ที่ความสูง {float(z):.2f} ม. " if z is not None else ""
+        return {"state": "rebound", "level_key": status.get("level_key"),
+                "detail": f"ระดับเดิมไม่มีในโมเดลนี้ · ใช้ระดับ{where}แทน ({status['note']})"}
+    return {"state": "applied", "detail": ""}
