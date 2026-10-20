@@ -33,7 +33,7 @@ def engine_validate(semantic: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
     val_path = tmp_path / "validation.json"
     write_semantic_model(sem_path, semantic)
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "40_vissim_build_adapter_v04.py"),
+        [sys.executable, str(ROOT / "vissim_build_adapter.py"),
          "--project-root", str(project), "--input", str(sem_path),
          "--validation-output", str(val_path), "--validate-only", "--engine", str(ENGINE)],
         capture_output=True, text=True,

@@ -136,7 +136,7 @@ def health() -> dict[str, Any]:
         "vissim_engine_found": engine_path().exists(),
         "vissim_engine_path": str(engine_path()),
         "base_network_found": base_network_path().exists(),
-        "build_adapter_found": (APP_DIR / "40_vissim_build_adapter_v04.py").exists(),
+        "build_adapter_found": (APP_DIR / "vissim_build_adapter.py").exists(),
     }
 
 
@@ -229,7 +229,7 @@ def analyze() -> dict[str, Any]:
         except ImportError as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"IfcOpenShell is not installed. Run setup_app.ps1 first. Details: {exc}",
+                detail=f"IfcOpenShell is not installed. Run install.bat first. Details: {exc}",
             )
         except Exception as exc:
             raise HTTPException(
