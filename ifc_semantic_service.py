@@ -1357,6 +1357,18 @@ def build_semantic_model(
         "vertical_connections": vertical_connections,
     })
 
+    # Pedestrian connectivity (graph of free walking space + stairs). Diagnostic only.
+    from connectivity_service import analyze_connectivity, connectivity_warnings
+    try:
+        connectivity = analyze_connectivity({
+            "levels": levels + [lv for lv in landing_levels],
+            "areas": areas, "walls": walls, "columns": columns, "obstacles": obstacles,
+            "vertical_connections": vertical_connections,
+        })
+        warnings.extend(connectivity_warnings(connectivity))
+    except Exception as exc:  # noqa: BLE001 - never block conversion on a diagnostic
+        connectivity = {"error": f"{type(exc).__name__}: {exc}"}
+
     # ---------------------------------------------------------
     # Summary / audit metadata
     # ---------------------------------------------------------
@@ -1390,6 +1402,8 @@ def build_semantic_model(
         "generated_landing_levels": len(landing_levels),
         "off_level_slabs": len(off_level_slabs),
         "off_level_slabs_excluded": sum(1 for x in off_level_slabs if x["decision"] != "include"),
+        "isolated_zones": len(connectivity.get("isolated_zones", [])) if isinstance(connectivity, dict) else 0,
+        "stairs_not_linked": len(connectivity.get("stairs_not_linked", [])) if isinstance(connectivity, dict) else 0,
         "multi_storey_elements": multi_replicated,
         "multi_storey_copies": multi_copies,
         "landing_areas": landing_area_count,
@@ -1434,6 +1448,7 @@ def build_semantic_model(
             "excluded_detail_preview": excluded_detail[:100],
             "opening_candidates": opening_candidates[:CANDIDATE_LIST_LIMIT],
             "off_level_slabs": off_level_slabs,
+            "connectivity": connectivity,
             "door_logic": {
                 "source_doors": source_door_count,
                 "included_doors": included_door_count,

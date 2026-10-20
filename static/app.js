@@ -639,6 +639,7 @@ const SEMANTIC_KIND_TH = {
   obstacle: 'สิ่งกีดขวาง (Obstacle)',
   vertical_connection: 'บันได / ทางลาด (Ramp)',
   stair_direction: 'บันได / ทางลาด (Ramp)',
+  isolated_zone: 'พื้นที่ที่เดินไปไม่ถึง (ตรวจการเชื่อมต่อ)',
 };
 
 // A pedestrian-model object was clicked: show what Viswalk gets and where it came
@@ -671,9 +672,11 @@ window.addEventListener('semantic-element-selected', event => {
     button.disabled = !single;
     button.classList.toggle('active', !!single && button.dataset.status === override);
   });
-  document.getElementById('semanticNote').textContent = src.generated
-    ? 'สร้างโดยระบบ (เช่นช่องว่างในพื้น) · ไม่มีชิ้นใน IFC'
-    : 'วัตถุในโมเดลคนเดิน · กดชื่อด้านล่างเพื่อไปที่ชิ้นต้นฉบับใน IFC';
+  document.getElementById('semanticNote').textContent = kind === 'isolated_zone'
+    ? `พื้นที่ ${Number(src.area_m2).toFixed(1)} ตร.ม. ที่คนเดินจากเครือข่ายหลักไปไม่ถึง · ตรวจประตู/ช่องเปิดหรือบันไดที่ขาด`
+    : (src.generated
+      ? 'สร้างโดยระบบ (เช่นช่องว่างในพื้น) · ไม่มีชิ้นใน IFC'
+      : 'วัตถุในโมเดลคนเดิน · กดชื่อด้านล่างเพื่อไปที่ชิ้นต้นฉบับใน IFC');
 
   const box = document.getElementById('semanticSourceBox');
   const list = document.getElementById('semanticSourceList');
@@ -785,6 +788,7 @@ function renderSemanticSummary(result) {
   );
   renderVerticalConnections(result.model?.vertical_connections || result.vertical_connections || []);
   renderOffLevelSlabs(result.model?.ifc_semantic?.off_level_slabs || result.ifc_semantic?.off_level_slabs || []);
+  renderConnectivity(result.model?.ifc_semantic?.connectivity || result.ifc_semantic?.connectivity || null);
 
   const root = document.getElementById('semanticWarningList');
   root.innerHTML = '';
@@ -908,6 +912,24 @@ document.getElementById('stairResetBtn')?.addEventListener('click', async () => 
     setMessage(`คืนสถานะบันไดไม่สำเร็จ: ${error.message}`);
   }
 });
+
+function renderConnectivity(con) {
+  const note = document.getElementById('connectivityNote');
+  if (!note) return;
+  if (!con || con.error) {
+    note.className = 'connectivity-note hidden';
+    return;
+  }
+  const iso = con.isolated_zones || [];
+  const loose = con.stairs_not_linked || [];
+  const ok = !iso.length && !loose.length;
+  note.className = `connectivity-note ${ok ? 'ok' : 'warn'}`;
+  note.textContent = ok
+    ? `การเชื่อมต่อ: พื้นที่เดินทั้งหมดเดินถึงกันได้ · บันไดเชื่อม ${con.stairs_linked} ตัว`
+    : `การเชื่อมต่อ: พื้นที่ที่เดินไปไม่ถึง ${iso.length} แห่ง (${Number(con.isolated_area_m2).toFixed(1)} ตร.ม., แสดงเป็นสีแดงใน 3D)` +
+      (loose.length ? ` · บันไดที่ปลายไม่ถึงพื้นที่เดิน ${loose.length} ตัว` : '') +
+      ` · บันไดเชื่อมแล้ว ${con.stairs_linked} ตัว`;
+}
 
 function renderOffLevelSlabs(slabs) {
   const section = document.getElementById('offLevelSection');

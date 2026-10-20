@@ -214,6 +214,17 @@ function addSemanticPreview(model) {
       .map(level => [Number(level.key), level.name]),
   );
 
+  // Walking zones nobody can reach (connectivity check) - drawn red above the floor.
+  for (const zone of model.ifc_semantic?.connectivity?.isolated_zones || []) {
+    if (!zone.polygon?.length) continue;
+    const geometry = new THREE.ShapeGeometry(shapeFromPolygon(zone.polygon));
+    const mesh = new THREE.Mesh(geometry, semanticMaterial(0xc0392b, 0.7));
+    mesh.position.z = (levels.get(Number(zone.level_key)) || 0) + 0.03;
+    mesh.userData.semantic = { kind: 'isolated_zone', source: zone };
+    semanticGroup.add(mesh);
+    semanticMeshes.push(mesh);
+  }
+
   for (const area of model.areas || []) {
     if (!area.polygon?.length) continue;
     const geometry = new THREE.ShapeGeometry(shapeFromPolygon(area.polygon));

@@ -496,3 +496,7 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .source-link:hover:not(:disabled) {background:#e3f0ef;}
 .source-link:disabled {color:#8a9696;cursor:default;}
 .status-btn:disabled {opacity:.45;cursor:not-allowed;}
+
+.connectivity-note {margin:8px 0;padding:8px 10px;border-radius:4px;font-size:12px;line-height:1.5;}
+.connectivity-note.ok {background:#e6f4ef;color:#1f6b4f;border:1px solid #bfe0d2;}
+.connectivity-note.warn {background:#fbeceb;color:#9b2c22;border:1px solid #f0c4bf;}
