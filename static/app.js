@@ -628,11 +628,78 @@ document.getElementById('wireframeBtn').addEventListener('click', event => {
 
 window.addEventListener('ifc-element-selected', event => {
   selectedElement = event.detail;
+  document.getElementById('semanticSourceBox')?.classList.add('hidden');
   renderInspector(selectedElement);
+});
+
+const SEMANTIC_KIND_TH = {
+  area: 'พื้นที่เดิน (Area)',
+  wall: 'ผนัง (Obstacle)',
+  column: 'เสา (Obstacle)',
+  obstacle: 'สิ่งกีดขวาง (Obstacle)',
+  vertical_connection: 'บันได / ทางลาด (Ramp)',
+  stair_direction: 'บันได / ทางลาด (Ramp)',
+};
+
+// A pedestrian-model object was clicked: show what Viswalk gets and where it came
+// from. Status buttons act on the source IFC element when there is exactly one.
+window.addEventListener('semantic-element-selected', event => {
+  const { kind, source, sourceGuids, sourceItems } = event.detail || {};
+  const src = source || {};
+  const single = sourceItems?.length === 1 && sourceGuids?.length === 1 ? sourceItems[0] : null;
+  selectedElement = single;
+  document.getElementById('emptyInspector').classList.add('hidden');
+  document.getElementById('inspectorContent').classList.remove('hidden');
+  document.getElementById('selectedName').textContent = src.name || SEMANTIC_KIND_TH[kind] || kind;
+  document.getElementById('selectedType').textContent =
+    `${SEMANTIC_KIND_TH[kind] || kind}${single ? ` ← ${single.ifc_type}` : ''}`;
+  const level = (currentSemantic?.levels || []).find(l => Number(l.key) === Number(src.level_key ?? src.start_level));
+  document.getElementById('selectedStorey').textContent = kind === 'vertical_connection' || kind === 'stair_direction'
+    ? `ระดับ ${src.start_level} → ${src.end_level}`
+    : (level?.name || `ระดับ ${src.level_key ?? '—'}`);
+  document.getElementById('selectedGuid').textContent = sourceGuids?.length ? sourceGuids[0] : '— (สร้างโดยระบบ)';
+  document.getElementById('selectedAuto').textContent = single ? (single.recommendation || 'review') : '—';
+  document.getElementById('selectedMapping').textContent = `Key ${src.key ?? '—'}${src.type ? ` · ${src.type}` : ''}`;
+  document.getElementById('selectedRole').textContent = src.height != null
+    ? `สูง ${Number(src.height).toFixed(2)} ม.${src.replicated_from_level ? ` · คัดลอกจากระดับ ${src.replicated_from_level}` : ''}`
+    : (src.rise != null ? `สูงขึ้น ${Number(src.rise).toFixed(2)} ม. · ${src.steps ?? '?'} ขั้น` : '—');
+  const override = single ? (selectionState.overrides?.[single.global_id] || 'auto') : null;
+  document.getElementById('effectiveStatus').textContent = single
+    ? `กำหนดเอง: ${override} · ผลจริง: ${effectiveStatus(single)}`
+    : (sourceGuids?.length > 1 ? `รวมจาก ${sourceGuids.length} ชิ้น · เปลี่ยนสถานะได้ที่ชิ้นต้นฉบับ` : 'สร้างโดยระบบ ไม่มีชิ้นต้นฉบับ');
+  document.querySelectorAll('.status-btn').forEach(button => {
+    button.disabled = !single;
+    button.classList.toggle('active', !!single && button.dataset.status === override);
+  });
+  document.getElementById('semanticNote').textContent = src.generated
+    ? 'สร้างโดยระบบ (เช่นช่องว่างในพื้น) · ไม่มีชิ้นใน IFC'
+    : 'วัตถุในโมเดลคนเดิน · กดชื่อด้านล่างเพื่อไปที่ชิ้นต้นฉบับใน IFC';
+
+  const box = document.getElementById('semanticSourceBox');
+  const list = document.getElementById('semanticSourceList');
+  list.innerHTML = '';
+  box.classList.toggle('hidden', !sourceGuids?.length);
+  for (const guid of (sourceGuids || []).slice(0, 30)) {
+    const item = (sourceItems || []).find(i => i.global_id === guid);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'source-link';
+    button.textContent = item ? `${item.ifc_type} · ${item.name || guid}` : `${guid} (ยังไม่โหลดใน 3D)`;
+    button.disabled = !item;
+    button.addEventListener('click', () => {
+      if (viewer()?.showSource(guid)) {
+        setViewerBadge('source');
+        document.getElementById('sourceModeBtn').classList.add('active');
+        document.getElementById('simulationModeBtn').classList.remove('active');
+      }
+    });
+    list.appendChild(button);
+  }
 });
 
 function renderInspector(item) {
   if (!item) return;
+  document.querySelectorAll('.status-btn').forEach(button => { button.disabled = false; });
   document.getElementById('emptyInspector').classList.add('hidden');
   document.getElementById('inspectorContent').classList.remove('hidden');
   document.getElementById('selectedName').textContent = item.name || item.ifc_type;
