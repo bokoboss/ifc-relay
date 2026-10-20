@@ -146,3 +146,13 @@ def test_report_breaks_down_engine_warnings_and_groups_slab_offsets(tmp_path):
     assert "| 2 | -0.270 |" in text            # grouped slab-offset row, not one line per slab
     assert "Floor slab " not in text
     assert "Ifc[redacted]" not in text        # factory building is named "Building"
+
+
+def test_slab_offset_grouping_accepts_both_signs():
+    from ifc_dry_run import group_semantic_warnings
+    ws = [f"Floor slab A{i} top (2.550 m) is +2.550 m from its storey floor; merged into level 1. Review whether it is a mezzanine or step."
+          for i in range(4)]
+    ws.append("Floor slab B top (1.730 m) is -0.270 m from its storey floor; merged into level 4. Review whether it is a mezzanine or step.")
+    groups, rest = group_semantic_warnings(ws + ["other"])
+    assert [(g["level"], g["offset_m"], g["slabs"]) for g in groups] == [(1, 2.55, 4), (4, -0.27, 1)]
+    assert rest == ["other"]

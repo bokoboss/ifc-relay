@@ -454,7 +454,7 @@ def _table(rows: list[tuple[Any, ...]], header: tuple[str, ...]) -> list[str]:
 
 OUTSIDE_BANDS = ((0.10, "< 10 % (edge contact)"), (0.90, "10-90 % (straddles floor edge)"),
                  (1.01, "> 90 % (outside floor / no slab)"))
-SLAB_OFFSET_RE = re.compile(r"Floor slab \S+ top \(([-\d.]+) m\) is ([-\d.]+) m from its storey floor; merged into level (\d+)")
+SLAB_OFFSET_RE = re.compile(r"Floor slab \S+ top \(([-\d.]+) m\) is ([-+\d.]+) m from its storey floor; merged into level (\d+)")
 
 
 def _obstacle_index(sem: dict[str, Any]) -> dict[int, dict[str, Any]]:
