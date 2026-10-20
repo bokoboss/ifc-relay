@@ -486,6 +486,20 @@ def _mesh_item_map(geometry_payload: dict[str, Any]) -> dict[int, dict[str, Any]
     }
 
 
+
+def area_weighted_median(values: list[tuple[float, float]]) -> float:
+    """Median of z values weighted by footprint area; plain median if all areas are zero."""
+    values = sorted(values)
+    total = sum(max(a, 0.0) for _, a in values)
+    if total <= 0:
+        return values[len(values) // 2][0]
+    acc = 0.0
+    for z, a in values:
+        acc += max(a, 0.0)
+        if acc >= total / 2:
+            return z
+    return values[-1][0]
+
 def build_semantic_model(
     path: Path,
     geometry_payload: dict[str, Any],
@@ -756,20 +770,23 @@ def build_semantic_model(
             "is_landing": is_landing,
         })
 
-    # Walking datum per storey: median top of included non-landing slabs.
+    # Walking datum per storey: footprint-area-weighted median top of included
+    # non-landing slabs. Weighting by area keeps many small FLOOR-typed pieces
+    # (sunscreens, louvres, sunken wet areas) from outvoting the main floor plate.
     # Storey Elevation stays the output level z (regression-stable); the datum
     # is used to classify landings and to snap stair ends.
-    floor_tops_by_level: dict[int, list[float]] = defaultdict(list)
+    floor_tops_by_level: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for cand in slab_candidates:
         if not cand["is_landing"]:
-            floor_tops_by_level[cand["level_key"]].append(cand["top_z"])
+            area = sum(c.area for c in cand["components"])
+            floor_tops_by_level[cand["level_key"]].append((cand["top_z"], area))
 
     level_datum_by_key: dict[int, float] = {}
     for level in levels:
         key = int(level["key"])
         tops = sorted(floor_tops_by_level.get(key, []))
         if tops:
-            datum = tops[len(tops) // 2]
+            datum = area_weighted_median(tops)
             shift = datum - level_z_by_key[key]
             if abs(shift) > STOREY_DATUM_WARNING:
                 warnings.append(
