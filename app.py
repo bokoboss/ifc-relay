@@ -24,7 +24,7 @@ from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
 from version import APP_VERSION, PROJECT_STATE_VERSION, versions
-from gate_service import evaluate_gate, gate_message_th, record_ack
+from gate_service import checklist_markdown, evaluate_gate, gate_message_th
 from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
 
 
@@ -85,12 +85,6 @@ class ManualEdit(BaseModel):
     level_key: int
     polygon: list[list[float]]
     note: str = ""
-
-
-class GateAck(BaseModel):
-    id: str
-    acknowledged: bool = True
-    reason: str = ""
 
 
 class SelectionUpdate(BaseModel):
@@ -873,13 +867,20 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
         "output_inpx": out.name,
         "engine_severity_counts": validation.get("severity_counts"),
         "engineering_gate": gate,
+        "check_in_viswalk": [{"id": i["id"], "title": i["title"], "count": i["count"]}
+                             for i in gate["items"] if i["policy"] == "check"],
         "viswalk_verified": False,
-        "note": "Geometry checks passed and listed items were acknowledged; the model is not verified "
-                "in Viswalk until an engineer checks it there.",
+        "note": "The converter built this file; items in check_in_viswalk were known at build time. "
+                "The model is not verified until an engineer checks it in Viswalk.",
     }
-    path = out.with_name(out.stem.replace("_viswalk", "") + "_build_manifest.json")
+    stem = out.stem.replace("_viswalk", "")
+    path = out.with_name(stem + "_build_manifest.json")
     path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     result["manifest_path"] = str(path)
+    checklist = out.with_name(stem + "_viswalk_checklist.md")
+    checklist.write_text(checklist_markdown(gate, str(upload.get("original_name")), out.name, manifest["built_at"]),
+                         encoding="utf-8")
+    result["checklist_path"] = str(checklist)
 
 
 def _gate_passed_quiet(state: dict[str, Any]) -> bool:
@@ -895,7 +896,7 @@ def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = Non
     if validation is None:
         build = state.get("build") or {}
         validation = build.get("validation") if build.get("status") in ("validated", "success") else None
-    return evaluate_gate(semantic_model, validation, state.get("gate_acks"))
+    return evaluate_gate(semantic_model, validation)
 
 
 @app.get("/api/gate")
@@ -903,22 +904,6 @@ def get_engineering_gate() -> dict[str, Any]:
     state = store.read()
     if (state.get("semantic") or {}).get("stale", False):
         raise HTTPException(status_code=400, detail="โมเดลคนเดินไม่ตรงกับการเลือกล่าสุด · เตรียมโมเดลคนเดินอีกครั้ง")
-    return _current_gate(state)
-
-
-@app.post("/api/gate/ack")
-@state_transaction
-def acknowledge_gate_item(update: GateAck) -> dict[str, Any]:
-    state = store.read()
-    gate = _current_gate(state)
-    item = next((i for i in gate["items"] if i["id"] == update.id), None)
-    if item is None or item["policy"] != "ack":
-        raise HTTPException(status_code=404, detail="ไม่พบรายการที่ต้องรับทราบนี้ในโมเดลปัจจุบัน")
-    try:
-        state["gate_acks"] = record_ack(state.get("gate_acks") or {}, item, update.acknowledged, update.reason)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="รายการนี้ต้องระบุเหตุผลก่อนกดรับทราบ")
-    store.write(state)
     return _current_gate(state)
 
 

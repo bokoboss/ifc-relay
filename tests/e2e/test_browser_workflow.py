@@ -1,8 +1,8 @@
 """Browser end-to-end checks (Playwright + Chromium). Run with VBB_E2E=1.
 
 Covers the review's acceptance scenarios that need a real browser:
-E2E-01 clean model -> gate passed -> Build enabled; acknowledgement with a
-required reason; plan passage -> regenerate -> zone reachable.
+E2E-01 clean model -> Build enabled; a model with Viswalk checks still builds
+(listed, one confirmation); plan passage -> regenerate -> zone reachable.
 """
 from __future__ import annotations
 
@@ -100,23 +100,25 @@ def test_clean_model_enables_build_without_acknowledgement(page, tmp_path):
     b.slab([(0, 0), (12, 0), (12, 8), (0, 8)], 0.0, b.storeys[0])
     _open(page, b.write(tmp_path / "clean.ifc"))
     _prepare_and_validate(page)
-    assert "ผ่านด่านตรวจแล้ว" in page.text_content("#gateSummary")
+    assert "สร้างไฟล์ได้" in page.text_content("#gateSummary")
     assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
 
 
-def test_reason_required_then_build_enabled(page, tmp_path):
-    b, _ = _two_storeys(with_stair=False)          # closed room -> isolated zone (reason required)
+def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
+    b, _ = _two_storeys(with_stair=False)          # closed room -> isolated zone: a Viswalk check, not a stop
     _open(page, b.write(tmp_path / "room.ifc"))
     _prepare_and_validate(page)
-    assert not page.is_enabled("#buildViswalkBtn")
-    row = page.locator("#gateList .gate-row.ack", has_text="พื้นที่ที่เดินไปไม่ถึง")
-    row.locator("input[type=checkbox]").click()                   # the server refuses: no reason
-    page.wait_for_function("!document.querySelector('#gateList .gate-row.ack input').checked", timeout=10000)
-    assert not page.is_enabled("#buildViswalkBtn")
-    row.locator(".gate-reason").fill("ช่องท่อ")
-    row.locator("input[type=checkbox]").check()
-    page.wait_for_function("!document.getElementById('buildViswalkBtn').disabled", timeout=10000)
+    assert page.locator("#gateList .gate-row.check", has_text="พื้นที่ที่เดินไปไม่ถึง").count() == 1
+    assert page.locator("#gateList input").count() == 0           # nothing to tick
+    assert "ต้องตรวจ/แก้ใน Viswalk" in page.text_content("#gateSummary")
+    assert page.is_enabled("#buildViswalkBtn")
+    messages = []
+    page.once("dialog", lambda d: (messages.append(d.message), d.dismiss()))   # cancel: no build
+    page.click("#buildViswalkBtn")
+    page.wait_for_timeout(300)
+    assert messages and "พื้นที่ที่เดินไปไม่ถึง" in messages[0]
+    assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
 
 

@@ -87,7 +87,7 @@ function setExportReady(ready) {
   downloadSemanticTopBtn.disabled = !ready;
   downloadEngineTopBtn.disabled = !ready;
   validateBtn.disabled = !ready;
-  // Build also needs the engineering gate (validated + acknowledged).
+  // Build is refused only when the Engine cannot build the model.
   buildViswalkBtn.disabled = !ready || !(currentGate && currentGate.passed);
   if (!ready) {
     currentGate = null;
@@ -1519,64 +1519,30 @@ function renderGate(gate) {
   section.classList.toggle('hidden', !gate);
   root.innerHTML = '';
   if (!gate) return;
-  const order = { block: 0, ack: 1, info: 2 };
+  const order = { block: 0, check: 1, info: 2 };
   for (const item of [...gate.items].sort((a, b) => order[a.policy] - order[b.policy])) {
     const row = document.createElement('div');
-    row.className = `gate-row ${item.policy}${item.acknowledged ? ' done' : ''}`;
-    const head = document.createElement('label');
+    row.className = `gate-row ${item.policy}`;
+    const head = document.createElement('div');
     head.className = 'gate-head';
     const chip = document.createElement('span');
     chip.className = `gate-chip ${item.policy}`;
-    chip.textContent = { block: 'ต้องแก้', ack: 'ต้องรับทราบ', info: 'ข้อมูล' }[item.policy];
+    chip.textContent = { block: 'ต้องแก้', check: 'ตรวจใน Viswalk', info: 'ข้อมูล' }[item.policy];
     const title = document.createElement('strong');
     title.textContent = `${item.title} · ${item.count}`;
     head.append(chip, title);
     const detail = document.createElement('small');
     detail.textContent = item.detail;
     row.append(head, detail);
-    if (item.policy === 'ack') {
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.checked = !!item.acknowledged;
-      head.prepend(box);
-      const reason = document.createElement('input');
-      reason.type = 'text';
-      reason.className = 'gate-reason';
-      reason.placeholder = item.reason_required
-        ? 'ต้องระบุเหตุผล เช่น ช่องท่อ ไม่ใช่ห้อง'
-        : 'เหตุผล (ไม่บังคับ)';
-      reason.value = item.reason || '';
-      box.addEventListener('change', async () => {
-        box.disabled = true;
-        try {
-          const gateNow = await api('/api/gate/ack', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: item.id, acknowledged: box.checked, reason: reason.value }),
-          });
-          currentGate = gateNow;
-          renderGate(gateNow);
-        } catch (error) {
-          box.checked = !box.checked;
-          setMessage(`บันทึกการรับทราบไม่สำเร็จ: ${error.message}`);
-        } finally {
-          box.disabled = false;
-        }
-      });
-      reason.addEventListener('change', () => {
-        if (box.checked) box.dispatchEvent(new Event('change'));   // re-save with the new reason
-      });
-      row.append(reason);
-    }
     root.appendChild(row);
   }
   const summary = document.getElementById('gateSummary');
-  const blocked = gate.blocked.length;
-  const pending = gate.pending_acknowledgement.length;
   summary.className = `gate-summary ${gate.passed ? 'ok' : 'warn'}`;
-  summary.textContent = gate.passed
-    ? 'ผ่านด่านตรวจแล้ว · สร้างไฟล์ Viswalk ได้ (ยังต้องตรวจผลใน Viswalk)'
-    : `ยังสร้างไฟล์ไม่ได้ · ต้องแก้ ${blocked} รายการ · รอรับทราบ ${pending} รายการ`;
+  summary.textContent = !gate.passed
+    ? `สร้างไฟล์ไม่ได้ · Geometry Engine สร้างไฟล์จากโมเดลนี้ไม่ได้ (${gate.blocked.length} รายการ)`
+    : gate.to_check.length
+      ? `สร้างไฟล์ได้ · มี ${gate.to_check.length} เรื่องที่ต้องตรวจ/แก้ใน Viswalk (บันทึกเป็น checklist ข้างไฟล์ .inpx)`
+      : 'สร้างไฟล์ได้ · ยังต้องตรวจผลใน Viswalk ก่อนใช้งาน';
   buildViswalkBtn.disabled = !gate.passed || validationBusy || buildBusy;
 }
 
@@ -1635,7 +1601,7 @@ validateBtn.addEventListener('click', async () => {
     const c = result.severity_counts || {};
     setMessage(`ตรวจสอบโมเดลเสร็จแล้ว · ข้อผิดพลาด ${c.error || 0} · ข้อควรระวัง ${c.warning || 0} · ข้อมูล ${c.info || 0}` +
       ((c.error || 0) ? ' · ต้องแก้ข้อผิดพลาดก่อนสร้างไฟล์ Viswalk' : ' · ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)') +
-      (gate && !gate.passed ? ' · ดูรายการในด่านตรวจก่อนสร้างไฟล์' : ''));
+      (gate && gate.to_check?.length ? ` · มี ${gate.to_check.length} เรื่องที่ต้องตรวจใน Viswalk` : ''));
   } catch (error) {
     setMessage(`ตรวจสอบโมเดลไม่สำเร็จ: ${error.message}`);
   } finally {
@@ -1646,6 +1612,11 @@ validateBtn.addEventListener('click', async () => {
 });
 
 buildViswalkBtn.addEventListener('click', async () => {
+  const checks = (currentGate?.items || []).filter(i => i.policy === 'check');
+  if (checks.length && !window.confirm(
+    `มี ${checks.length} เรื่องที่ต้องตรวจ/แก้ใน Viswalk หลังสร้างไฟล์:\n` +
+    checks.map(i => `• ${i.title} (${i.count})`).join('\n') +
+    '\n\nรายการนี้จะบันทึกเป็น checklist ข้างไฟล์ .inpx · สร้างไฟล์เลยไหม?')) return;
   buildBusy = true;
   buildViswalkBtn.disabled = true;
   validateBtn.disabled = true;
