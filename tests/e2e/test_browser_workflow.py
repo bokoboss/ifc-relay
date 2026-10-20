@@ -64,14 +64,31 @@ def page(server):
         browser.close()
 
 
+def _diag(page) -> str:
+    js = ("JSON.stringify({viewer: document.getElementById('viewerStatus')?.textContent,"
+          " message: document.querySelector('.message-panel')?.innerText,"
+          " webgl: !!document.createElement('canvas').getContext('webgl2') || !!document.createElement('canvas').getContext('webgl'),"
+          " diag: window.IFCViewerDiagnostics || null})")
+    try:
+        return page.evaluate(js) + f" errors={page.errors}"
+    except Exception as exc:  # noqa: BLE001
+        return f"diag failed: {exc}"
+
+
 def _open(page, path: Path):
     page.set_input_files("#fileInput", str(path))
-    page.wait_for_function(LOADED, timeout=120000)
+    try:
+        page.wait_for_function(LOADED, timeout=120000)
+    except Exception as exc:
+        raise AssertionError(f"model did not open: {_diag(page)}") from exc
 
 
 def _prepare_and_validate(page):
     page.click("#generateSemanticBtn")
-    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    try:
+        page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    except Exception as exc:
+        raise AssertionError(f"pedestrian model not ready: {_diag(page)}") from exc
     page.click("#validateBtn")
     page.wait_for_selector("#gateSection:not(.hidden)", timeout=120000)
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
