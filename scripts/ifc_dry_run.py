@@ -338,6 +338,11 @@ class DryRun:
             "issues_by_type": [{"severity": s, "type": t, "count": n} for (s, t), n in by_type.most_common()],
             "issue_samples": issues[:30],
         }
+        try:
+            sem = json.loads(sem_path.read_text(encoding="utf-8"))
+            self.data["engine_validation"]["breakdown"] = engine_issue_breakdown(issues, sem)
+        except Exception as exc:  # noqa: BLE001 - report must still be written
+            self.data["engine_validation"]["breakdown_error"] = str(exc)
         if not result.get("build_allowed", False) or counts.get("error", 0):
             step.status = "FAIL"
         elif counts.get("warning", 0):
@@ -390,9 +395,18 @@ class DryRun:
         secrets = sorted({s for s in self.secrets if s and len(s) >= 3}, key=len, reverse=True)
 
         def scrub_text(text: str) -> str:
+            # Keep IFC class names intact (a building called "Building" must not turn
+            # IfcBuildingStorey into Ifc[redacted]Storey).
+            kept: list[str] = []
+
+            def keep(m: re.Match) -> str:
+                kept.append(m.group(0))
+                return f"\x00{len(kept) - 1}\x00"
+
+            text = re.sub(r"\bIfc[A-Z][A-Za-z]*", keep, text)
             for secret in secrets:
                 text = text.replace(secret, "[redacted]")
-            return text
+            return re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
 
         if isinstance(obj, str):
             return scrub_text(obj)
@@ -436,6 +450,95 @@ def _table(rows: list[tuple[Any, ...]], header: tuple[str, ...]) -> list[str]:
     for r in rows:
         out.append("| " + " | ".join(str(c).replace("|", "/").replace("\n", " ") for c in r) + " |")
     return out
+
+
+OUTSIDE_BANDS = ((0.10, "< 10 % (edge contact)"), (0.90, "10-90 % (straddles floor edge)"),
+                 (1.01, "> 90 % (outside floor / no slab)"))
+SLAB_OFFSET_RE = re.compile(r"Floor slab \S+ top \(([-\d.]+) m\) is ([-\d.]+) m from its storey floor; merged into level (\d+)")
+
+
+def _obstacle_index(sem: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    """key -> {kind, global_id, level, area} for every obstacle the engine sees (no names: safe to redact)."""
+    import math
+
+    from shapely.geometry import Polygon
+
+    index: dict[int, dict[str, Any]] = {}
+    for kind, items in (("wall", sem.get("walls", [])), ("column", sem.get("columns", [])),
+                        ("obstacle", sem.get("obstacles", []))):
+        for rec in items:
+            area = None
+            try:
+                if rec.get("polygon"):
+                    area = Polygon(rec["polygon"]).area
+                elif rec.get("start") and rec.get("end"):
+                    area = math.dist(rec["start"], rec["end"]) * float(rec.get("thickness") or 0)
+                elif rec.get("shape") == "circle":
+                    area = math.pi * (float(rec.get("diameter") or 0) / 2) ** 2
+                elif rec.get("width") is not None:
+                    area = float(rec["width"]) * float(rec.get("depth") or 0)
+            except Exception:  # noqa: BLE001 - diagnostics only
+                area = None
+            label = rec.get("type") if kind == "obstacle" else kind
+            index[int(rec["key"])] = {"kind": label, "global_id": rec.get("ifc_global_id"),
+                                      "level": rec.get("level_key"), "area": area}
+    return index
+
+
+def engine_issue_breakdown(issues: list[dict[str, Any]], sem: dict[str, Any], samples: int = 25) -> dict[str, Any]:
+    """Group engine warnings by obstacle kind, level and how much lies outside the walkable floor."""
+    idx = _obstacle_index(sem)
+    outside = [i for i in issues if i.get("type") == "obstacle_outside_walkable"]
+    by_band: Counter = Counter()
+    by_kind_band: Counter = Counter()
+    by_level: Counter = Counter()
+    rows = []
+    for i in outside:
+        o = idx.get(int(i.get("key", -1)), {})
+        area = o.get("area") or 0.0
+        frac = min(1.0, float(i.get("outside_area_m2") or 0) / area) if area > 0 else None
+        band = next((b for lim, b in OUTSIDE_BANDS if frac is not None and frac < lim), "unknown")
+        by_band[band] += 1
+        by_kind_band[(o.get("kind", "?"), band)] += 1
+        by_level[i.get("level_key")] += 1
+        rows.append({"severity": i.get("severity"), "kind": o.get("kind"), "global_id": o.get("global_id"),
+                     "level": i.get("level_key"), "outside_m2": round(float(i.get("outside_area_m2") or 0), 3),
+                     "outside_pct": None if frac is None else round(frac * 100)})
+    rows.sort(key=lambda r: (-(r["outside_pct"] or 0), -r["outside_m2"]))
+    overlaps = [i for i in issues if i.get("type") == "obstacle_overlap"]
+    by_pair: Counter = Counter()
+    pair_rows = []
+    for i in overlaps:
+        objs = [idx.get(int(k), {}) for k in i.get("objects", [])]
+        pair = " + ".join(sorted(str(o.get("kind", "?")) for o in objs))
+        by_pair[pair] += 1
+        pair_rows.append({"pair": pair, "level": i.get("level_key"),
+                          "global_ids": [o.get("global_id") for o in objs],
+                          "overlap_m2": round(float(i.get("overlap_area_m2") or i.get("area_m2") or 0), 3)})
+    return {
+        "outside_by_band": dict(by_band),
+        "outside_by_kind": [{"kind": k, "band": b, "count": n} for (k, b), n in sorted(by_kind_band.items(), key=lambda kv: (str(kv[0][0]), kv[0][1]))],
+        "outside_by_level": dict(sorted(by_level.items(), key=lambda kv: (kv[0] is None, kv[0]))),
+        "outside_samples": rows[:samples],
+        "overlap_by_pair": dict(by_pair.most_common()),
+        "overlap_samples": pair_rows[:samples],
+    }
+
+
+def group_semantic_warnings(warnings: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Collapse repeated slab-offset warnings into one row per level/offset; return (groups, remaining)."""
+    groups: dict[tuple[int, str], dict[str, Any]] = {}
+    rest = []
+    for w in warnings:
+        m = SLAB_OFFSET_RE.search(w)
+        if not m:
+            rest.append(w)
+            continue
+        key = (int(m.group(3)), m.group(2))
+        g = groups.setdefault(key, {"level": key[0], "offset_m": float(m.group(2)), "slab_top_m": float(m.group(1)),
+                                    "slabs": 0})
+        g["slabs"] += 1
+    return sorted(groups.values(), key=lambda g: (g["level"], g["offset_m"])), rest
 
 
 def render_markdown(p: dict[str, Any]) -> str:
@@ -501,7 +604,15 @@ def render_markdown(p: dict[str, Any]) -> str:
                         ("Key", "Type", "Levels", "Offsets (m)", "Rise (m)", "Steps", "Level match"))
             L += ["", "Stair direction is derived from geometry and is **not certified** until checked in Vissim."]
         if sem.get("warnings"):
-            L += ["", f"### All semantic warnings ({len(sem['warnings'])})", ""] + [f"- {w}" for w in sem["warnings"]]
+            groups, rest = group_semantic_warnings(sem["warnings"])
+            L += ["", f"### All semantic warnings ({len(sem['warnings'])})", ""]
+            if groups:
+                L += [f"Floor slabs whose top differs from the storey floor ({sum(g['slabs'] for g in groups)} slabs, "
+                      "merged into the storey level; typical of sunken wet areas or finishes - review):", ""]
+                L += _table([(g["level"], f"{g['offset_m']:+.3f}", g["slab_top_m"], g["slabs"]) for g in groups],
+                            ("Level", "Offset (m)", "Slab top (m)", "Slabs"))
+                L += [""]
+            L += [f"- {w}" for w in rest]
     if eng:
         sc = eng.get("severity_counts", {})
         L += ["", "## Geometry Engine validation", "",
@@ -512,6 +623,29 @@ def render_markdown(p: dict[str, Any]) -> str:
             L += ["", "### Issues by type", ""]
             L += _table([(i["severity"], i["type"], i["count"]) for i in eng["issues_by_type"]],
                         ("Severity", "Type", "Count"))
+        bd = eng.get("breakdown") or {}
+        if bd.get("outside_by_band"):
+            L += ["", "### Obstacles outside the walkable floor", "",
+                  "Share of each obstacle's footprint that lies outside the walkable area of its own level. "
+                  "Small shares are usually walls/columns on the slab edge; large shares mean the obstacle "
+                  "sits where that level has no floor (wrong level, shaft, or missing slab).", ""]
+            L += _table([(r["kind"], r["band"], r["count"]) for r in bd["outside_by_kind"]],
+                        ("Obstacle", "Outside share", "Count"))
+            L += ["", "By level: " + ", ".join(f"L{k}: {v}" for k, v in bd["outside_by_level"].items()), "",
+                  f"Largest {len(bd['outside_samples'])} (IFC GlobalId, for lookup in the viewer):", ""]
+            L += _table([(r["kind"], r["global_id"], r["level"], r["outside_m2"],
+                          "?" if r["outside_pct"] is None else f"{r['outside_pct']} %")
+                         for r in bd["outside_samples"]],
+                        ("Obstacle", "GlobalId", "Level", "Outside (m2)", "Outside share"))
+        if bd.get("overlap_by_pair"):
+            L += ["", "### Overlapping obstacles", ""]
+            L += _table(list(bd["overlap_by_pair"].items()), ("Pair", "Count"))
+            L += ["", f"First {len(bd['overlap_samples'])}:", ""]
+            L += _table([(r["pair"], r["level"], ", ".join(str(g) for g in r["global_ids"]), r["overlap_m2"])
+                         for r in bd["overlap_samples"]],
+                        ("Pair", "Level", "GlobalIds", "Overlap (m2)"))
+        if eng.get("breakdown_error"):
+            L += ["", f"(Warning breakdown unavailable: {eng['breakdown_error']})"]
     env = p.get("environment", {})
     if env:
         L += ["", "## Environment", "",
