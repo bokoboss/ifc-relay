@@ -87,7 +87,12 @@ function setExportReady(ready) {
   downloadSemanticTopBtn.disabled = !ready;
   downloadEngineTopBtn.disabled = !ready;
   validateBtn.disabled = !ready;
-  buildViswalkBtn.disabled = !ready;
+  // Build also needs the engineering gate (validated + acknowledged).
+  buildViswalkBtn.disabled = !ready || !(currentGate && currentGate.passed);
+  if (!ready) {
+    currentGate = null;
+    document.getElementById('gateSection')?.classList.add('hidden');
+  }
   if (!ready) setBuildOutputReady(false);
 }
 
@@ -1099,6 +1104,84 @@ exportEngineBtn.addEventListener('click', async () => {
 });
 
 
+let currentGate = null;
+
+async function refreshGate() {
+  try {
+    currentGate = await api('/api/gate');
+  } catch (error) {
+    currentGate = null;
+  }
+  renderGate(currentGate);
+  return currentGate;
+}
+
+function renderGate(gate) {
+  const section = document.getElementById('gateSection');
+  const root = document.getElementById('gateList');
+  if (!section || !root) return;
+  section.classList.toggle('hidden', !gate);
+  root.innerHTML = '';
+  if (!gate) return;
+  const order = { block: 0, ack: 1, info: 2 };
+  for (const item of [...gate.items].sort((a, b) => order[a.policy] - order[b.policy])) {
+    const row = document.createElement('div');
+    row.className = `gate-row ${item.policy}${item.acknowledged ? ' done' : ''}`;
+    const head = document.createElement('label');
+    head.className = 'gate-head';
+    const chip = document.createElement('span');
+    chip.className = `gate-chip ${item.policy}`;
+    chip.textContent = { block: 'ต้องแก้', ack: 'ต้องรับทราบ', info: 'ข้อมูล' }[item.policy];
+    const title = document.createElement('strong');
+    title.textContent = `${item.title} · ${item.count}`;
+    head.append(chip, title);
+    const detail = document.createElement('small');
+    detail.textContent = item.detail;
+    row.append(head, detail);
+    if (item.policy === 'ack') {
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!item.acknowledged;
+      head.prepend(box);
+      const reason = document.createElement('input');
+      reason.type = 'text';
+      reason.className = 'gate-reason';
+      reason.placeholder = 'เหตุผล (ไม่บังคับ) เช่น ช่องท่อ ไม่ใช่ห้อง';
+      reason.value = item.reason || '';
+      box.addEventListener('change', async () => {
+        box.disabled = true;
+        try {
+          const gateNow = await api('/api/gate/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: item.id, acknowledged: box.checked, reason: reason.value }),
+          });
+          currentGate = gateNow;
+          renderGate(gateNow);
+        } catch (error) {
+          box.checked = !box.checked;
+          setMessage(`บันทึกการรับทราบไม่สำเร็จ: ${error.message}`);
+        } finally {
+          box.disabled = false;
+        }
+      });
+      reason.addEventListener('change', () => {
+        if (box.checked) box.dispatchEvent(new Event('change'));   // re-save with the new reason
+      });
+      row.append(reason);
+    }
+    root.appendChild(row);
+  }
+  const summary = document.getElementById('gateSummary');
+  const blocked = gate.blocked.length;
+  const pending = gate.pending_acknowledgement.length;
+  summary.className = `gate-summary ${gate.passed ? 'ok' : 'warn'}`;
+  summary.textContent = gate.passed
+    ? 'ผ่านด่านตรวจแล้ว · สร้างไฟล์ Viswalk ได้ (ยังต้องตรวจผลใน Viswalk)'
+    : `ยังสร้างไฟล์ไม่ได้ · ต้องแก้ ${blocked} รายการ · รอรับทราบ ${pending} รายการ`;
+  buildViswalkBtn.disabled = !gate.passed || validateBtn.disabled;
+}
+
 function renderValidation(result) {
   currentValidation = result;
   document.getElementById('buildSection').classList.remove('hidden');
@@ -1148,10 +1231,12 @@ validateBtn.addEventListener('click', async () => {
   try {
     const result = await api('/api/validate', { method: 'POST' });
     renderValidation(result);
-    buildViswalkBtn.disabled = !result.build_allowed;
+    const gate = await refreshGate();
+    buildViswalkBtn.disabled = !(gate && gate.passed);
     const c = result.severity_counts || {};
     setMessage(`ตรวจสอบโมเดลเสร็จแล้ว · ข้อผิดพลาด ${c.error || 0} · ข้อควรระวัง ${c.warning || 0} · ข้อมูล ${c.info || 0}` +
-      ((c.error || 0) ? ' · ต้องแก้ข้อผิดพลาดก่อนสร้างไฟล์ Viswalk' : ' · ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)'));
+      ((c.error || 0) ? ' · ต้องแก้ข้อผิดพลาดก่อนสร้างไฟล์ Viswalk' : ' · ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)') +
+      (gate && !gate.passed ? ' · ดูรายการในด่านตรวจก่อนสร้างไฟล์' : ''));
   } catch (error) {
     setMessage(`ตรวจสอบโมเดลไม่สำเร็จ: ${error.message}`);
   } finally {
@@ -1175,8 +1260,8 @@ buildViswalkBtn.addEventListener('click', async () => {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
     setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
   } finally {
-    buildViswalkBtn.disabled = false;
     validateBtn.disabled = false;
+    buildViswalkBtn.disabled = !(currentGate && currentGate.passed);
   }
 });
 
@@ -1265,6 +1350,7 @@ async function restoreState() {
 
     if (state.build?.validation) {
       renderValidation(state.build.validation);
+      if (state.semantic?.status === 'ready' && !state.semantic.stale) await refreshGate();
     }
     if (state.build?.status === 'success' && state.build?.result) {
       renderBuildResult({ result: state.build.result, validation: state.build.validation });
