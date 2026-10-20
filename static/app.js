@@ -91,6 +91,13 @@ function setExportReady(ready) {
   if (!ready) setBuildOutputReady(false);
 }
 
+// The pedestrian model no longer matches the selection: block validate/build and
+// exports until it is regenerated (the server enforces the same rule).
+function markSemanticStale() {
+  setExportReady(false);
+  document.getElementById('stepSemantic')?.classList.remove('done');
+}
+
 function setBuildOutputReady(ready) {
   downloadInpxTopBtn.disabled = !ready;
   downloadInpxBtn.disabled = !ready;
@@ -237,15 +244,18 @@ function updateLargeLoadControlState() {
 
 geometryLoadMode?.addEventListener('change', updateLargeLoadControlState);
 
+// Choosing a file opens it straight away (import -> audit -> 3D), like a BIM viewer.
 fileInput.addEventListener('change', () => {
   selectedFile = fileInput.files?.[0] || null;
-  uploadBtn.disabled = !selectedFile;
   document.getElementById('fileMeta').textContent = selectedFile
     ? `${selectedFile.name} · ${formatBytes(selectedFile.size)}`
-    : 'No file imported';
+    : 'ยังไม่ได้เลือกไฟล์';
+  if (selectedFile) openSelectedFile();
 });
 
-uploadBtn.addEventListener('click', async () => {
+uploadBtn.addEventListener('click', () => openSelectedFile());
+
+async function openSelectedFile() {
   if (!selectedFile) return;
   uploadBtn.disabled = true;
   setMessage('กำลังนำเข้าไฟล์ต้นฉบับ...');
@@ -255,7 +265,7 @@ uploadBtn.addEventListener('click', async () => {
     form.append('carry_selection', document.getElementById('carrySelectionCheck')?.checked ? 'true' : 'false');
     const result = await api('/api/import', { method: 'POST', body: form });
     document.getElementById('fileMeta').textContent =
-      `${result.upload.original_name} · ${formatBytes(result.upload.size_bytes)} · imported`;
+      `${result.upload.original_name} · ${formatBytes(result.upload.size_bytes)} · นำเข้าแล้ว`;
     analyzeBtn.disabled = false;
     load3dBtn.disabled = true;
     generateSemanticBtn.disabled = true;
@@ -272,7 +282,7 @@ uploadBtn.addEventListener('click', async () => {
       if (audit) {
         const loaded = await runLoad3d();
         if (loaded) {
-          const large = audit.large_model?.detected;
+          const large = audit.large_model?.recommended_load_mode === 'simulation_storey';
           setMessage(large
             ? 'IFC ขนาดใหญ่: โหลดชั้นแรกที่มี Geometry แล้ว · เลือกชั้นอื่นหรือเพิ่มชั้นได้จากแผงโหลดโมเดล'
             : 'เปิดโมเดลแล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"');
@@ -285,8 +295,10 @@ uploadBtn.addEventListener('click', async () => {
     setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`);
   } finally {
     uploadBtn.disabled = false;
+    // Allow choosing the same file again (e.g. after editing it in Revit).
+    fileInput.value = '';
   }
-});
+}
 
 async function runAnalyze() {
   analyzeBtn.disabled = true;
@@ -394,6 +406,18 @@ async function runLoad3d() {
 
 load3dBtn.addEventListener('click', () => runLoad3d());
 
+// Add one storey to the current 3D view (used by the storey filter list).
+async function loadStoreyIntoView(storeyId, name) {
+  if (!geometryLoadMode || !geometryStoreySelect) return false;
+  const full = (geometryLoadMode.value || '').startsWith('full_');
+  geometryLoadMode.value = full ? 'full_storey' : 'simulation_storey';
+  geometryStoreySelect.value = String(storeyId);
+  appendStoreyCheck.checked = !!currentGeometry;
+  updateLargeLoadControlState();
+  setMessage(`กำลังโหลดชั้น ${name} เพิ่มในมุมมอง 3D...`);
+  return runLoad3d();
+}
+
 resetBtn.addEventListener('click', async () => {
   try {
     await api('/api/project/reset', { method: 'POST' });
@@ -410,7 +434,7 @@ function renderLargeModelPanel(result) {
 
   const large = result.large_model || {};
   const counts = large.simulation_counts || {};
-  document.getElementById('largeModelBadge').textContent = large.detected ? 'Large IFC detected' : 'Standard IFC';
+  document.getElementById('largeModelBadge').textContent = large.detected ? 'IFC ขนาดใหญ่' : 'IFC ขนาดปกติ';
   document.getElementById('largeFileSize').textContent = `${Number(large.file_size_mb || 0).toFixed(1)} MB`;
   document.getElementById('largeWalls').textContent = counts.walls ?? 0;
   document.getElementById('largeSlabs').textContent = counts.slabs ?? 0;
@@ -420,11 +444,11 @@ function renderLargeModelPanel(result) {
     (counts.stairs ?? 0) + (counts.stair_flights ?? 0);
 
   document.getElementById('largeModelProfile').textContent = large.structural_like
-    ? 'Structural-heavy IFC detected'
-    : (large.detected ? 'Large multidisciplinary IFC' : 'Standard-size IFC');
+    ? 'IFC งานโครงสร้าง (ไม่มีประตู/หน้าต่าง)'
+    : (large.detected ? 'IFC ขนาดใหญ่หลายระบบ' : 'IFC ขนาดปกติ');
   document.getElementById('largeModelNote').textContent = large.structural_like
-    ? 'No architectural doors/windows were detected. Review openings before simulation. Beams stay excluded; floor slabs will be consolidated per storey.'
-    : 'Browser loading can be filtered independently from the authoritative semantic build.';
+    ? 'ไม่พบประตู/หน้าต่างงานสถาปัตยกรรม ต้องตรวจช่องเปิดก่อนจำลอง · คานไม่ถูกนำเข้า · แผ่นพื้นจะรวมเป็นพื้นที่เดินรายชั้น'
+    : 'การโหลด 3D เลือกเฉพาะบางชั้นได้ ไม่มีผลกับโมเดลคนเดินที่สร้างจากทุกชั้น';
 
   const storeys = result.spatial?.storeys || [];
   geometryStoreySelect.innerHTML = '';
@@ -436,8 +460,8 @@ function renderLargeModelPanel(result) {
     const meshCount = Number(storey.simulation_mesh_count || 0);
     option.dataset.meshCount = String(meshCount);
     option.textContent = meshCount > 0
-      ? `${storey.name} · ${z} · ${meshCount} sim meshes`
-      : `${storey.name} · ${z} · no simulation geometry`;
+      ? `${storey.name} · ${z} · ${meshCount} ชิ้น`
+      : `${storey.name} · ${z} · ไม่มีชิ้นส่วนสำหรับจำลอง`;
     // Do not disable empty storeys completely: engineers may still inspect them
     // with Full IFC mode. But never auto-select an empty storey in simulation mode.
     if (firstMeshableStoreyId == null && meshCount > 0) {
@@ -523,8 +547,34 @@ function render3dFilters(geometry) {
 
   const storeyRoot = document.getElementById('storeyFilters');
   storeyRoot.innerHTML = '';
-  for (const [name, count] of Object.entries(geometry.storeys || {})) {
-    storeyRoot.appendChild(makeCheckRow(name, count, true, checked => {
+  const loaded = geometry.storeys || {};
+  // Every storey of the IFC is listed, in elevation order; storeys not yet in the
+  // 3D view are unticked and load (appended) when ticked.
+  const auditStoreys = currentAudit?.spatial?.storeys || [];
+  const listed = new Set();
+  for (const storey of auditStoreys) {
+    const name = storey.name;
+    if (listed.has(name)) continue;
+    listed.add(name);
+    if (name in loaded) {
+      storeyRoot.appendChild(makeCheckRow(name, loaded[name], true, checked => {
+        checked ? activeStoreys.add(name) : activeStoreys.delete(name);
+        applyViewerFilters();
+      }));
+    } else {
+      const meshCount = Number(storey.simulation_mesh_count || 0);
+      const row = makeCheckRow(name, meshCount ? `ยังไม่โหลด · ${meshCount}` : 'ไม่มีชิ้นส่วน', false, async checked => {
+        if (!checked) return;
+        await loadStoreyIntoView(storey.entity_id, name);
+      });
+      row.classList.add('not-loaded');
+      if (!meshCount) row.querySelector('input').disabled = true;
+      storeyRoot.appendChild(row);
+    }
+  }
+  for (const [name, count] of Object.entries(loaded)) {
+    if (listed.has(name)) continue;
+    storeyRoot.appendChild(makeCheckRow(name === 'Unassigned' ? 'ไม่ระบุชั้น' : name, count, true, checked => {
       checked ? activeStoreys.add(name) : activeStoreys.delete(name);
       applyViewerFilters();
     }));
@@ -659,9 +709,9 @@ function renderSemanticSummary(result) {
   document.getElementById('semanticVertical').textContent = summary.vertical_connections ?? 0;
   document.getElementById('semanticWarnings').textContent = summary.warnings ?? warnings.length;
   document.getElementById('doorLogicText').textContent =
-    `${summary.included_doors ?? 0} included door(s) → ${summary.door_openings_applied ?? 0} physical wall opening(s); ` +
-    `openings without a door: ${summary.unfilled_openings_applied ?? 0} opened of ${summary.unfilled_openings ?? 0}; ` +
-    `windows used as openings: ${summary.windows_used_as_openings ?? 0}.`;
+    `ประตูที่เลือก ${summary.included_doors ?? 0} บาน → ตัดช่องในผนังได้ ${summary.door_openings_applied ?? 0} ช่อง · ` +
+    `ช่องเปิดไม่มีประตู เปิดใช้ ${summary.unfilled_openings_applied ?? 0} จาก ${summary.unfilled_openings ?? 0} ช่อง · ` +
+    `ใช้หน้าต่างเป็นช่องเปิด ${summary.windows_used_as_openings ?? 0}`;
 
   renderOpeningCandidates(
     result.model?.ifc_semantic?.opening_candidates || result.ifc_semantic?.opening_candidates || [],
@@ -822,7 +872,8 @@ function renderOpeningCandidates(candidates) {
           body: JSON.stringify({ global_id: c.global_id, status: input.checked ? 'include' : 'auto' }),
         });
         c.decision = input.checked ? 'include' : 'auto';
-        setMessage('บันทึกการเปิดช่องแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
+        markSemanticStale();
+        setMessage('บันทึกการเปิดช่องแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งก่อนตรวจหรือสร้างไฟล์');
       } catch (error) {
         input.checked = !input.checked;
         setMessage(`บันทึกการเปิดช่องไม่สำเร็จ: ${error.message}`);
@@ -1035,7 +1086,7 @@ async function restoreState() {
     if (state.upload) {
       analyzeBtn.disabled = false;
       document.getElementById('fileMeta').textContent =
-        `${state.upload.original_name} · ${formatBytes(state.upload.size_bytes)} · imported`;
+        `${state.upload.original_name} · ${formatBytes(state.upload.size_bytes)} · นำเข้าแล้ว`;
     }
 
     if (state.analysis?.kind === 'ifc') {
@@ -1060,6 +1111,26 @@ async function restoreState() {
       }
     }
 
+
+    // Reopen the 3D workspace the way it was left: source model, then the
+    // pedestrian-model preview if a current (non-stale) one exists.
+    if (currentAudit && health.three_vendor_ready && state.geometry?.status === 'loaded') {
+      const loaded = await runLoad3d();
+      if (loaded && currentSemantic && state.semantic?.status === 'ready' && !state.semantic.stale) {
+        try {
+          const v = await waitForViewer();
+          if (typeof v.loadSemantic === 'function' && Number(v.loadSemantic(currentSemantic) || 0) > 0) {
+            v.setMode('simulation');
+            setViewerBadge('simulation');
+            document.getElementById('simulationModeBtn').classList.add('active');
+            document.getElementById('sourceModeBtn').classList.remove('active');
+          }
+        } catch (error) {
+          // The preview is a convenience on reload; the model itself is restored.
+        }
+      }
+      if (loaded) setMessage('เปิดโครงการเดิมแล้ว · โหลดโมเดล 3D กลับมาตามสถานะล่าสุด');
+    }
 
     if (state.build?.validation) {
       renderValidation(state.build.validation);

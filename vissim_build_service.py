@@ -89,6 +89,56 @@ def validate_engine_input(app_dir: Path, project_root: Path, semantic_path: Path
 
 
 
+
+# Known Vissim COM failures -> what the engineer should do (Thai, shown in the app).
+COM_ERROR_HINTS = {
+    "-2146959355": "Vissim เปิดขึ้นมาแต่ไม่ตอบการเชื่อมต่อ (Server execution failed): ปิด Vissim ที่เปิดค้างอยู่ทุกหน้าต่าง "
+                   "(ดูใน Task Manager ว่าไม่มี VISSIM*.exe), เปิดแอปและ Vissim แบบปกติทั้งคู่ (ไม่ใช่ Run as administrator) "
+                   "และปิดหน้าต่างถามตอนเปิด Vissim (เช่นเลือก license) ด้วยการติ๊กไม่ต้องแสดงอีก",
+    "-2147221005": "Windows ไม่พบ Vissim 2025 ใน COM (Invalid class string): เปิด Vissim 2025 แบบ Run as administrator หนึ่งครั้งเพื่อลงทะเบียน COM",
+    "-2147221021": None,  # 'Operation unavailable' = no running instance; normal first attempt
+}
+
+
+def com_error_hint(text: str) -> str | None:
+    for code, hint in COM_ERROR_HINTS.items():
+        if hint and code in text:
+            return hint
+    return None
+
+
+def running_vissim_processes() -> list[str]:
+    """Names of running Vissim processes (Windows only; empty elsewhere or on error)."""
+    if os.name != 'nt':
+        return []
+    try:
+        out = subprocess.run(['tasklist', '/FO', 'CSV', '/NH'], capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return []
+    names = []
+    for line in out.splitlines():
+        name = line.split('","')[0].strip('"')
+        if name.lower().startswith('vissim'):
+            names.append(name)
+    return names
+
+
+def build_preflight(base_network: Path) -> list[str]:
+    """Problems that would make the COM build fail, in Thai, before Vissim is started."""
+    problems = []
+    if not base_network.exists():
+        problems.append(
+            f"ไม่พบไฟล์ base_empty.inpx ที่ {base_network} · เปิด Vissim 2025 > File > New > Save As "
+            "ไปที่ตำแหน่งนี้ แล้วปิด Vissim ก่อนกดสร้างไฟล์อีกครั้ง"
+        )
+    running = running_vissim_processes()
+    if running:
+        problems.append(
+            f"มี Vissim เปิดอยู่ ({', '.join(sorted(set(running)))}) · ปิด Vissim ทุกหน้าต่างก่อนสร้างไฟล์ "
+            "เพราะแอปต้องเปิด Vissim ใหม่ผ่าน COM"
+        )
+    return problems
+
 def build_failure_message(returncode: int, log_path: Path, stdout: str, stderr: str) -> str:
     """Error text for a failed build. The traceback (stderr) goes last and is never cut;
     stdout (which can hold thousands of validation warnings) is trimmed to its last lines."""
@@ -97,8 +147,10 @@ def build_failure_message(returncode: int, log_path: Path, stdout: str, stderr: 
     err = stderr.strip()
     if len(err) > 6000:
         err = '...\n' + err[-6000:]
+    hint = com_error_hint(stderr)
     return (
-        f'Vissim build failed with exit code {returncode}. Log: {log_path}\n'
+        (f'{hint}\n\n' if hint else '')
+        + f'Vissim build failed with exit code {returncode}. Log: {log_path}\n'
         f'--- last output ---\n{stdout_tail}\n'
         f'--- error ---\n{err or "(no error text; see log)"}'
     )

@@ -487,3 +487,5 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .vertical-row .dir-badge { font-weight: 600; white-space: nowrap; }
 .dir-ok { color: #1f8a70; font-weight: 600; }
 .dir-review { color: #b87503; font-weight: 600; }
+.check-row.not-loaded {color:#7a8a8c;}
+.check-row.not-loaded .check-count {font-style:italic;}

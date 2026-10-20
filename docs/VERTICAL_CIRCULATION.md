@@ -38,7 +38,17 @@ Existing engine fields are unchanged (`key, name, type, start_level, end_level, 
 
 Engine-contract tests (`tests/test_engine_contract_*.py`) run the real engine when `VBB_GEOMETRY_ENGINE` points to a local copy, and are skipped otherwise.
 
+## Verified in Vissim 2025 (SP 15), 2026-10-20
+
+Revit advanced sample (5 storeys, 10 stairs / 20 flights, two generated landing levels) built through COM and opened in Vissim:
+
+- All 20 ramps `STAIRWAY`, levels `1 -> 901 -> 2 -> 902 -> 3`, offsets 0, `rise x steps` = 1.90 m.
+- Vissim keeps our first point (bottom edge) as the ramp start; the first stored edge runs bottom -> top for flights rising in +y and in -y. Stair direction checked visually by the engineer: correct.
+- Both ends of every ramp touch the walkable area of their own level.
+- Known side effect: the 0.10 m `end_overlap` at each end makes the Vissim run 0.20 m longer than the IFC flight (going 0.348 m instead of 0.330 m).
+- Vissim reports `usableWid` 0.58 m for a 1.14 m wide flight (balustrade and obstacle distance); review this against the design capacity.
+
 ## Still to verify in Vissim
 
-- Which polygon edge Vissim treats as the ramp start, and that negative `EndZOffset` is accepted.
-- A two-storey IFC with one straight stair and one U-stair builds, reopens, and pedestrians route L1 → landing → L2.
+- Negative `EndZOffset` (ends between levels) - not exercised by the Revit sample.
+- Pedestrian routing L1 -> landing -> L2 in a simulation run.

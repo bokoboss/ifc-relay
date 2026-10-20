@@ -54,6 +54,10 @@ SIMULATION_MESH_TYPES = (
 )
 
 
+
+# Above this many simulation-relevant meshes the 3D view opens one storey at a time.
+WHOLE_MODEL_MESH_LIMIT = 4000
+
 def simulation_mesh_candidate(entity: Any) -> bool:
     """True when an IfcElement can appear in default simulation-relevant 3D."""
     if not any(is_a(entity, ifc_type) for ifc_type in SIMULATION_MESH_TYPES):
@@ -438,6 +442,7 @@ def audit_ifc(path: Path) -> dict[str, Any]:
         large_reasons.append(f"{slab_count} slab panels")
 
     large_model = bool(large_reasons)
+    simulation_mesh_total = int(sum(storey_mesh_counts.values()))
     structural_like = (
         beam_count > 0
         and slab_count > 0
@@ -498,7 +503,11 @@ def audit_ifc(path: Path) -> dict[str, Any]:
             "reasons": large_reasons,
             "file_size_bytes": file_size_bytes,
             "file_size_mb": round(file_size_mb, 2),
-            "recommended_load_mode": "simulation_storey" if large_model else "simulation_all",
+            # The browser handles a few thousand simulation meshes comfortably (the
+            # 30-storey structural fixture: 2,471 meshes / 304k triangles), so only
+            # fall back to one storey at a time above that, whatever the file size.
+            "simulation_mesh_total": simulation_mesh_total,
+            "recommended_load_mode": "simulation_storey" if simulation_mesh_total > WHOLE_MODEL_MESH_LIMIT else "simulation_all",
             "structural_like": structural_like,
             "simulation_counts": {
                 "walls": wall_count,

@@ -20,7 +20,7 @@ from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
-from vissim_build_service import build_vissim_model, validate_engine_input
+from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -77,7 +77,7 @@ def current_upload_or_404() -> Path:
     state = store.read()
     upload = state.get("upload")
     if not upload:
-        raise HTTPException(status_code=404, detail="No file has been imported.")
+        raise HTTPException(status_code=404, detail="ยังไม่ได้นำเข้าไฟล์")
 
     path = Path(upload["path"])
     if not path.exists():
@@ -106,7 +106,7 @@ def current_semantic_path_or_404() -> Path:
     semantic = state.get("semantic") or {}
     path_text = semantic.get("path")
     if not path_text:
-        raise HTTPException(status_code=404, detail="Semantic model has not been generated.")
+        raise HTTPException(status_code=404, detail="ยังไม่ได้เตรียมโมเดลคนเดิน")
     path = Path(path_text)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Semantic model file is missing: {path}")
@@ -159,10 +159,10 @@ async def import_file(
     original = safe_filename(file.filename or "upload")
     suffix = Path(original).suffix.lower()
 
-    if suffix not in {".ifc", ".pdf", ".dxf"}:
+    if suffix != ".ifc":
         raise HTTPException(
             status_code=400,
-            detail="Supported inputs in MVP v0.4.1: .ifc, .pdf, .dxf",
+            detail="รองรับเฉพาะไฟล์ .ifc ในเวอร์ชันนี้ (การนำเข้า PDF/DXF ยังอยู่ระหว่างพัฒนา)",
         )
 
     token = uuid.uuid4().hex[:10]
@@ -170,7 +170,7 @@ async def import_file(
     content = await file.read()
 
     if not content:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        raise HTTPException(status_code=400, detail="ไฟล์ที่นำเข้าว่างเปล่า")
 
     target.write_bytes(content)
 
@@ -287,7 +287,7 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
 
     state = store.read()
     if not state.get("analysis"):
-        raise HTTPException(status_code=400, detail="Run IFC Analyze before loading 3D geometry.")
+        raise HTTPException(status_code=400, detail="ต้องตรวจ IFC ก่อนโหลดโมเดล 3D")
 
     try:
         result = extract_ifc_geometry(
@@ -465,7 +465,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
 
     state = store.read()
     if (state.get("geometry") or {}).get("status") != "loaded":
-        raise HTTPException(status_code=400, detail="Load IFC 3D geometry before semantic extraction.")
+        raise HTTPException(status_code=400, detail="ต้องโหลดโมเดล 3D ก่อนเตรียมโมเดลคนเดิน")
 
     overrides = (state.get("selection") or {}).get("overrides", {})
 
@@ -569,7 +569,7 @@ def current_build_result_or_404() -> dict[str, Any]:
     build = state.get("build") or {}
     result = build.get("result") or {}
     if build.get("status") != "success" or not result:
-        raise HTTPException(status_code=404, detail="No successful Viswalk build is available.")
+        raise HTTPException(status_code=404, detail="ยังไม่มีไฟล์ Viswalk ที่สร้างสำเร็จ")
     return result
 
 
@@ -581,7 +581,7 @@ def validate_current_semantic() -> dict[str, Any]:
     if semantic.get("stale", False):
         raise HTTPException(
             status_code=400,
-            detail="Semantic model is stale because selection changed. Generate Semantic Model again.",
+            detail="โมเดลคนเดินไม่ตรงกับการเลือกล่าสุด · กด \"เตรียมโมเดลคนเดิน\" อีกครั้งก่อนตรวจหรือสร้างไฟล์",
         )
 
     try:
@@ -609,11 +609,15 @@ def build_current_semantic_in_vissim() -> dict[str, Any]:
     if semantic.get("stale", False):
         raise HTTPException(
             status_code=400,
-            detail="Semantic model is stale because selection changed. Generate Semantic Model again.",
+            detail="โมเดลคนเดินไม่ตรงกับการเลือกล่าสุด · กด \"เตรียมโมเดลคนเดิน\" อีกครั้งก่อนตรวจหรือสร้างไฟล์",
         )
 
     upload = state.get("upload") or {}
     source_name = upload.get("original_name", "model.ifc")
+
+    problems = build_preflight(base_network_path())
+    if problems:
+        raise HTTPException(status_code=409, detail="ยังสร้างไฟล์ไม่ได้: " + " | ".join(problems))
 
     # Always validate immediately before build; do not trust an older validation state.
     try:
@@ -694,7 +698,7 @@ def open_latest_build_folder() -> dict[str, Any]:
     result = current_build_result_or_404()
     folder = Path(result["output_path"]).parent
     if os.name != "nt":
-        raise HTTPException(status_code=400, detail="Open output folder is available only on Windows.")
+        raise HTTPException(status_code=400, detail="เปิดโฟลเดอร์ผลลัพธ์ได้เฉพาะบน Windows")
     try:
         os.startfile(str(folder))  # type: ignore[attr-defined]
     except Exception as exc:
