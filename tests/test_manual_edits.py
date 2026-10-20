@@ -1,0 +1,81 @@
+"""Manual plan edits (P1-02): added floor, obstacles and passages survive regeneration."""
+from __future__ import annotations
+
+import pytest
+
+from tests.ifc_factory import semantic_for
+from tests.test_connectivity import _two_storeys
+
+
+def test_passage_opens_closed_room_and_obstacle_blocks(tmp_path):
+    b, ov = _two_storeys(with_stair=True)          # closed room x 14..20, y 6..10 on L1
+    path = b.write(tmp_path / "e.ifc")
+    before = semantic_for(path, ov)["ifc_semantic"]["connectivity"]
+    assert len(before["isolated_zones"]) == 1
+
+    edits = [
+        {"id": "E1", "kind": "passage", "level_key": 1, "polygon": [[13.5, 7.5], [14.5, 7.5], [14.5, 8.5], [13.5, 8.5]]},
+        {"id": "E2", "kind": "obstacle", "level_key": 1, "polygon": [[3, 5], [5, 5], [5, 6], [3, 6]]},
+        {"id": "E3", "kind": "walkable", "level_key": 1, "polygon": [[20, 0], [24, 0], [24, 4], [20, 4]]},
+    ]
+    from ifc_geometry_service import extract_ifc_geometry
+    from ifc_semantic_service import build_semantic_model
+    sem = build_semantic_model(path, extract_ifc_geometry(path), ov, edits)
+    info = sem["ifc_semantic"]
+    assert info["manual_edits_applied"] == {"walkable": 1, "obstacle": 1, "passage": 1, "skipped": 0}
+    assert not info["connectivity"]["isolated_zones"]                     # room reachable through E1
+    cut = [w for w in sem["walls"] if w.get("manual_edit_id") == "E1"]
+    assert len(cut) == 2                                                   # wall split into two pieces
+    assert any(o.get("manual_edit_id") == "E2" and o["type"] == "manual_obstacle" for o in sem["obstacles"])
+    assert any(a.get("manual_edit_id") == "E3" for a in sem["areas"])
+    keys = [o["key"] for k in ("areas", "walls", "columns", "obstacles", "vertical_connections") for o in sem[k]]
+    assert len(keys) == len(set(keys))
+
+
+def test_bad_edit_is_skipped_with_warning(tmp_path):
+    b, ov = _two_storeys(with_stair=False)
+    path = b.write(tmp_path / "bad.ifc")
+    from ifc_geometry_service import extract_ifc_geometry
+    from ifc_semantic_service import build_semantic_model
+    sem = build_semantic_model(path, extract_ifc_geometry(path), ov,
+                               [{"id": "E9", "kind": "walkable", "level_key": 77, "polygon": [[0, 0], [1, 0], [1, 1]]}])
+    assert sem["ifc_semantic"]["manual_edits_applied"]["skipped"] == 1
+    assert any("Manual edit E9 skipped" in w for w in sem["ifc_semantic"]["warnings"])
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import app as app_module
+    from state_store import ProjectStateStore
+
+    for name in ("UPLOAD_DIR", "SEMANTIC_DIR", "CACHE_DIR"):
+        (tmp_path / name).mkdir()
+        monkeypatch.setattr(app_module, name, tmp_path / name)
+    monkeypatch.setattr(app_module, "store", ProjectStateStore(tmp_path / "state.json"))
+    return TestClient(app_module.app)
+
+
+def test_edits_api_marks_model_stale_and_is_used_on_regenerate(client, tmp_path):
+    b, ov = _two_storeys(with_stair=True)
+    path = b.write(tmp_path / "api.ifc")
+    with open(path, "rb") as fh:
+        client.post("/api/import", files={"file": (path.name, fh)})
+    client.post("/api/analyze")
+    for guid, status in ov.items():
+        client.post("/api/selection", json={"global_id": guid, "status": status})
+    client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []})
+    assert client.post("/api/ifc/semantic").status_code == 200
+
+    r = client.post("/api/edits", json={"kind": "passage", "level_key": 1,
+                                        "polygon": [[13.5, 7.5], [14.5, 7.5], [14.5, 8.5], [13.5, 8.5]]})
+    assert r.status_code == 200 and r.json()["edit"]["id"] == "E1"
+    assert client.get("/api/project").json()["semantic"]["stale"] is True
+    assert client.post("/api/edits", json={"kind": "walkable", "level_key": 1, "polygon": [[0, 0], [0.01, 0], [0, 0.01]]}).status_code == 400
+
+    client.post("/api/ifc/semantic")
+    sem = client.get("/api/ifc/semantic").json()
+    assert not sem["ifc_semantic"]["connectivity"]["isolated_zones"]
+    assert client.delete("/api/edits/E1").status_code == 200
+    assert client.get("/api/edits").json()["edits"] == []

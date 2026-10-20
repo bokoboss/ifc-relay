@@ -96,6 +96,13 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
         items.append(_item("multi_storey_no_doors", "ack", n, "ผนังหลายชั้น: ชั้นบนไม่มีช่องประตู",
                            "ผนังที่คัดลอกขึ้นชั้นบนปิดทึบ · ตรวจว่าชั้นบนมีประตูในแนวผนังนี้หรือไม่"))
 
+    edits = info.get("manual_edits") or []
+    if edits:
+        kinds = {k: sum(1 for e in edits if e.get("kind") == k) for k in ("walkable", "obstacle", "passage")}
+        items.append(_item("manual_edits", "info", len(edits), "แก้ไขบนแปลนโดยวิศวกร",
+                           f"พื้นที่เดินเพิ่ม {kinds['walkable']} · สิ่งกีดขวางเพิ่ม {kinds['obstacle']} · "
+                           f"ทางผ่าน {kinds['passage']} · บันทึกใน build manifest"))
+
     if issues:
         by_key = {int(r["key"]): r for k in ("walls", "columns", "obstacles") for r in semantic.get(k, [])}
         no_floor = edge = 0

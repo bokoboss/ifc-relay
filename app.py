@@ -61,6 +61,13 @@ class GeometryRequest(BaseModel):
     # the browser loads afterwards with "review"; "all" = both at once.
     tier: Literal["all", "core", "review"] = "all"
 
+class ManualEdit(BaseModel):
+    kind: Literal["walkable", "obstacle", "passage"]
+    level_key: int
+    polygon: list[list[float]]
+    note: str = ""
+
+
 class GateAck(BaseModel):
     id: str
     acknowledged: bool = True
@@ -255,6 +262,9 @@ async def import_file(
         ),
         "semantic": None,
         "build": {"status": "not_ready"},
+        # Plan edits follow the selection: kept for a new revision of the same model.
+        "manual_edits": (previous.get("manual_edits") or [])
+        if carry_selection and suffix == ".ifc" and previous_upload.get("extension") == ".ifc" else [],
     }
     store.write(state)
     return {
@@ -534,7 +544,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
             tier="core",
             extra_guids=included,
         )
-        semantic = build_semantic_model(path, geometry, overrides)
+        semantic = build_semantic_model(path, geometry, overrides, state.get("manual_edits") or [])
         output_path = ifc_semantic_path(path)
         write_semantic_model(output_path, semantic)
     except Exception as exc:
@@ -655,6 +665,51 @@ def validate_current_semantic() -> dict[str, Any]:
     }
     store.write(state)
     return result
+
+
+def _mark_semantic_stale(state: dict[str, Any], message: str) -> None:
+    if state.get("semantic"):
+        state["semantic"]["stale"] = True
+        state["build"] = {"status": "selection_changed", "message": message}
+
+
+@app.get("/api/edits")
+def list_manual_edits() -> dict[str, Any]:
+    return {"edits": store.read().get("manual_edits") or []}
+
+
+@app.post("/api/edits")
+def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
+    from datetime import datetime as _dt
+
+    from manual_edits import validate_edit
+
+    data = edit.model_dump()
+    problem = validate_edit(data)
+    if problem:
+        raise HTTPException(status_code=400, detail=f"แก้ไขบนแปลนไม่ได้: {problem}")
+    state = store.read()
+    edits = state.setdefault("manual_edits", [])
+    next_no = max([int(str(e.get("id", "E0"))[1:] or 0) for e in edits] + [0]) + 1
+    data["id"] = f"E{next_no}"
+    data["created_at"] = _dt.now().isoformat(timespec="seconds")
+    edits.append(data)
+    _mark_semantic_stale(state, "Plan edit added. Regenerate the pedestrian model.")
+    store.write(state)
+    return {"edit": data, "edits": edits}
+
+
+@app.delete("/api/edits/{edit_id}")
+def delete_manual_edit(edit_id: str) -> dict[str, Any]:
+    state = store.read()
+    edits = state.get("manual_edits") or []
+    kept = [e for e in edits if e.get("id") != edit_id]
+    if len(kept) == len(edits):
+        raise HTTPException(status_code=404, detail="ไม่พบรายการแก้ไขนี้")
+    state["manual_edits"] = kept
+    _mark_semantic_stale(state, "Plan edit removed. Regenerate the pedestrian model.")
+    store.write(state)
+    return {"edits": kept}
 
 
 class GateNotPassed(Exception):

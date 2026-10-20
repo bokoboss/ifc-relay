@@ -147,6 +147,8 @@
             <div class="mode-switch">
               <button id="sourceModeBtn" class="mode-btn active">โมเดลต้นฉบับ</button>
               <button id="simulationModeBtn" class="mode-btn" title="ดูพื้นที่เดิน สิ่งกีดขวาง และการเชื่อมต่อที่แปลงไว้">โมเดลคนเดิน</button>
+              <button id="overlayModeBtn" class="mode-btn" title="โมเดลคนเดินซ้อนบน IFC ต้นฉบับแบบโปร่ง เพื่อเทียบว่าอะไรถูกแปลง ตัด หรือเพิ่ม">ซ้อนภาพ</button>
+              <button id="planModeBtn" class="mode-btn" title="แปลน 2D รายชั้น: วัดระยะ เพิ่มพื้นที่เดิน/สิ่งกีดขวาง หรือเปิดทางผ่านในผนัง">แปลน 2D</button>
             </div>
             <div class="toolbar-actions">
               <button id="fitModelBtn" class="icon-btn" title="ซูมให้เห็นโมเดลทั้งหมด">ซูมทั้งโมเดล</button>
@@ -158,6 +160,17 @@
           </div>
 
           <div id="viewerCanvasHost" class="viewer-host">
+            <div id="planToolbar" class="plan-toolbar hidden">
+              <label class="plan-level">ระดับ <select id="planLevelSelect"></select></label>
+              <div class="plan-tools" role="group" aria-label="เครื่องมือแปลน">
+                <button data-tool="select" class="plan-tool active" title="คลิกเลือกวัตถุ">เลือก</button>
+                <button data-tool="measure" class="plan-tool" title="คลิกจุดเริ่มและจุดปลายเพื่อวัดระยะ">วัดระยะ</button>
+                <button data-tool="walkable" class="plan-tool walkable" title="คลิกสองมุมเพื่อเพิ่มพื้นที่เดิน">+ พื้นที่เดิน</button>
+                <button data-tool="obstacle" class="plan-tool obstacle" title="คลิกสองมุมเพื่อเพิ่มสิ่งกีดขวาง">+ สิ่งกีดขวาง</button>
+                <button data-tool="passage" class="plan-tool passage" title="คลิกสองมุมคร่อมผนังเพื่อเปิดทางผ่าน (เช่นประตูที่ IFC ไม่ได้ผูก)">เปิดทางผ่าน</button>
+              </div>
+              <span id="planHint" class="plan-hint">เลือกเครื่องมือ แล้วคลิกบนแปลน</span>
+            </div>
             <div class="viewport-ident" aria-hidden="true">
               <span class="viewport-ident-mark"></span>
               <span id="viewportIdentLabel">3D MODEL SPACE <small> / IFC ต้นฉบับ</small></span>
@@ -352,6 +365,11 @@
           <h3>แผ่นพื้นต่างระดับมาก (ยังไม่ใช้เป็นพื้นเดิน)</h3>
           <p class="opening-candidates-note">แผ่นที่สูงหรือต่ำกว่าพื้นชั้นเกิน 0.40 ม. เช่นแผงบังแดด กันสาด หรือชั้นลอย · ติ๊กเฉพาะแผ่นที่เป็นพื้นเดินจริงเพื่อรวมเข้าพื้นชั้น แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
           <div id="offLevelList"></div>
+        </div>
+        <div id="editsSection" class="opening-candidates hidden">
+          <h3>แก้ไขบนแปลนโดยวิศวกร</h3>
+          <p class="opening-candidates-note">วาดในโหมด "แปลน 2D" · ระบบใช้ทุกครั้งที่เตรียมโมเดลคนเดิน และบันทึกใน build manifest · ไม่แก้ไฟล์ IFC</p>
+          <div id="editsList"></div>
         </div>
         <div id="verticalSection" class="opening-candidates hidden">
           <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>

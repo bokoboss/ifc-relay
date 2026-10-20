@@ -34,6 +34,21 @@ controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
 controls.target.set(0, 4, 0);
 
+// 2D plan view: top-down orthographic camera with pan/zoom only.
+const orthoCamera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.01, 5000);
+orthoCamera.up.set(0, 0, -1);              // IFC +y points up on screen
+const planControls = new OrbitControls(orthoCamera, renderer.domElement);
+planControls.enableRotate = false;
+planControls.screenSpacePanning = true;
+planControls.enabled = false;
+let planActive = false;
+let planLevelKey = null;
+let planTool = 'select';
+let planPoints = [];
+let orthoHalfHeight = 10;
+const activeCam = () => (planActive ? orthoCamera : camera);
+const activeControls = () => (planActive ? planControls : controls);
+
 scene.add(new THREE.HemisphereLight(0xffffff, 0x617080, 1.35));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 sun.position.set(25, 35, 20);
@@ -201,8 +216,18 @@ function semanticLevelKey(info) {
   return Number(src.level_key);
 }
 
+let semanticLevelZ = new Map();
+
 function semanticPassesFilters(object) {
-  const name = semanticLevelNames.get(semanticLevelKey(object.userData.semantic));
+  const info = object.userData.semantic;
+  if (planActive && planLevelKey != null) {
+    const src = info?.source || {};
+    if (info?.kind === 'vertical_connection' || info?.kind === 'stair_direction') {
+      return Number(src.start_level) === planLevelKey || Number(src.end_level) === planLevelKey;
+    }
+    return Number(src.level_key) === planLevelKey;
+  }
+  const name = semanticLevelNames.get(semanticLevelKey(info));
   return name == null || storeyFilter.has(name);
 }
 
@@ -213,6 +238,7 @@ function addSemanticPreview(model) {
     (model.levels || []).filter(level => !level.generated && Number(level.key) < 900)
       .map(level => [Number(level.key), level.name]),
   );
+  semanticLevelZ = levels;
 
   // Walking zones nobody can reach (connectivity check) - drawn red above the floor.
   for (const zone of model.ifc_semantic?.connectivity?.isolated_zones || []) {
@@ -374,7 +400,13 @@ function updateMaterial(mesh) {
   const item = mesh.userData.item;
   if (!item) return;
 
-  if (mode === 'source') {
+  mesh.material.depthWrite = mode !== 'overlay';
+  if (mode === 'overlay') {
+    // Source IFC as a faint ghost behind the pedestrian model.
+    mesh.material.color.setHex(sourceColors[item.ifc_type] ?? 0x9ba5ae);
+    mesh.material.opacity = 0.16;
+    mesh.material.transparent = true;
+  } else if (mode === 'source') {
     mesh.material.color.setHex(sourceColors[item.ifc_type] ?? 0x9ba5ae);
     mesh.material.opacity = item.ifc_type === 'IfcWindow' ? 0.58 : item.ifc_type === 'IfcSlab' ? 0.75 : 1.0;
     mesh.material.transparent = mesh.material.opacity < 1;
@@ -444,6 +476,10 @@ function fitBox(box, padding = 1.25) {
 }
 
 function fitModel() {
+  if (planActive) {
+    fitPlan();
+    return;
+  }
   const box = new THREE.Box3();
   let any = false;
 
@@ -491,6 +527,131 @@ function selectGuid(guid, emit = true) {
 
 let semanticHelper = null;
 
+// ---------------------------------------------------------------------------
+// 2D plan: drawing tools and engineer edits
+// ---------------------------------------------------------------------------
+const planOverlay = new THREE.Group();
+planOverlay.rotation.x = -Math.PI / 2;
+scene.add(planOverlay);
+const editsGroup = new THREE.Group();
+planOverlay.add(editsGroup);
+const draftGroup = new THREE.Group();
+planOverlay.add(draftGroup);
+const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, measure: 0xd35400 };
+let manualEdits = [];
+
+function levelZ(key) {
+  return semanticLevelZ.get(Number(key)) || 0;
+}
+
+function clearGroup(group) {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    disposeObjectTree(child);
+  }
+}
+
+function outline(points, z, color, fillOpacity = 0.28) {
+  const group = new THREE.Group();
+  const pts = points.map(p => new THREE.Vector3(Number(p[0]), Number(p[1]), z));
+  const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, depthTest: false }));
+  line.renderOrder = 20;
+  group.add(line);
+  if (fillOpacity > 0 && points.length >= 3) {
+    const fill = new THREE.Mesh(new THREE.ShapeGeometry(shapeFromPolygon(points)),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: fillOpacity, depthTest: false, side: THREE.DoubleSide }));
+    fill.position.z = z;
+    fill.renderOrder = 19;
+    group.add(fill);
+  }
+  return group;
+}
+
+function drawEdits() {
+  clearGroup(editsGroup);
+  for (const edit of manualEdits) {
+    if (planActive && planLevelKey != null && Number(edit.level_key) !== planLevelKey) continue;
+    const g = outline(edit.polygon, levelZ(edit.level_key) + 0.06, EDIT_COLORS[edit.kind] || 0x888888);
+    g.userData.edit = edit;
+    editsGroup.add(g);
+  }
+}
+
+function groundPoint(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, activeCam());
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -levelZ(planLevelKey));
+  const hit = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+  return hit ? [Math.round(hit.x * 1000) / 1000, Math.round(-hit.z * 1000) / 1000] : null;
+}
+
+function rectPoints(a, b) {
+  return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
+}
+
+function drawDraft(cursor) {
+  clearGroup(draftGroup);
+  if (!planPoints.length || !cursor) return;
+  const z = levelZ(planLevelKey) + 0.08;
+  if (planTool === 'measure') {
+    const pts = [planPoints[0], cursor].map(p => new THREE.Vector3(p[0], p[1], z));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: EDIT_COLORS.measure, depthTest: false }));
+    line.renderOrder = 21;
+    draftGroup.add(line);
+    window.dispatchEvent(new CustomEvent('plan-measure', {
+      detail: { distance: Math.hypot(cursor[0] - planPoints[0][0], cursor[1] - planPoints[0][1]), final: false },
+    }));
+  } else {
+    draftGroup.add(outline(rectPoints(planPoints[0], cursor), z, EDIT_COLORS[planTool] || 0x888888, 0.18));
+  }
+}
+
+function planClick(event) {
+  const p = groundPoint(event);
+  if (!p) return;
+  if (!planPoints.length) {
+    planPoints = [p];
+    return;
+  }
+  const a = planPoints[0];
+  planPoints = [];
+  clearGroup(draftGroup);
+  if (planTool === 'measure') {
+    window.dispatchEvent(new CustomEvent('plan-measure', {
+      detail: { distance: Math.hypot(p[0] - a[0], p[1] - a[1]), final: true, from: a, to: p },
+    }));
+    return;
+  }
+  if (Math.abs(p[0] - a[0]) < 0.05 || Math.abs(p[1] - a[1]) < 0.05) return;
+  window.dispatchEvent(new CustomEvent('plan-rect', {
+    detail: { tool: planTool, level_key: planLevelKey, polygon: rectPoints(a, p) },
+  }));
+}
+
+function fitPlan() {
+  const box = new THREE.Box3();
+  for (const child of semanticGroup.children) {
+    if (child.visible && child.userData?.semantic) box.expandByObject(child);
+  }
+  if (box.isEmpty()) box.setFromObject(semanticGroup);
+  if (box.isEmpty()) return;
+  const centre = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const rect = renderer.domElement.getBoundingClientRect();
+  const aspect = Math.max(rect.width, 1) / Math.max(rect.height, 1);
+  orthoHalfHeight = Math.max(size.z / 2, size.x / 2 / aspect, 2) * 1.12;
+  orthoCamera.zoom = 1;
+  orthoCamera.position.set(centre.x, levelZ(planLevelKey) + 200, centre.z);
+  planControls.target.set(centre.x, levelZ(planLevelKey), centre.z);
+  orthoCamera.lookAt(planControls.target);
+  resize();
+  planControls.update();
+}
+
 function clearSemanticSelection() {
   if (!semanticHelper) return;
   scene.remove(semanticHelper);
@@ -532,13 +693,19 @@ function resize() {
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+  const aspect = width / height;
+  orthoCamera.left = -orthoHalfHeight * aspect;
+  orthoCamera.right = orthoHalfHeight * aspect;
+  orthoCamera.top = orthoHalfHeight;
+  orthoCamera.bottom = -orthoHalfHeight;
+  orthoCamera.updateProjectionMatrix();
 }
 
 function pointerSelect(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
+  raycaster.setFromCamera(pointer, activeCam());
 
   // Pick only what is on screen: the pedestrian model in simulation mode, the
   // source IFC otherwise (a hidden parent group hides its meshes too).
@@ -569,7 +736,14 @@ renderer.domElement.addEventListener('pointerdown', event => { pointerDownAt = [
 
 renderer.domElement.addEventListener('pointerup', event => {
   if (pointerDownAt && Math.hypot(event.clientX - pointerDownAt[0], event.clientY - pointerDownAt[1]) > 5) return;
+  if (planActive && planTool !== 'select') {
+    planClick(event);
+    return;
+  }
   pointerSelect(event);
+});
+renderer.domElement.addEventListener('pointermove', event => {
+  if (planActive && planTool !== 'select' && planPoints.length) drawDraft(groundPoint(event));
 });
 window.addEventListener('resize', resize);
 
@@ -585,8 +759,8 @@ const resizeObserver = new ResizeObserver(entries => {
 resizeObserver.observe(host);
 
 function animate() {
-  controls.update();
-  renderer.render(scene, camera);
+  activeControls().update();
+  renderer.render(scene, activeCam());
   requestAnimationFrame(animate);
 }
 resize();
@@ -648,9 +822,9 @@ window.IFCViewer = {
   },
 
   setMode(nextMode) {
-    mode = nextMode === 'simulation' ? 'simulation' : 'source';
-    const useSemantic = mode === 'simulation' && semanticLoaded;
-    modelGroup.visible = !useSemantic;
+    mode = ['simulation', 'overlay'].includes(nextMode) ? nextMode : 'source';
+    const useSemantic = mode !== 'source' && semanticLoaded;
+    modelGroup.visible = mode !== 'simulation' || !semanticLoaded;
     semanticGroup.visible = useSemantic;
     applyVisibility();
     if (selectionHelper) selectionHelper.visible = !useSemantic && !!meshes.get(selectedGuid)?.visible;
@@ -660,8 +834,8 @@ window.IFCViewer = {
 
   loadSemantic(model) {
     addSemanticPreview(model || {});
-    if (mode === 'simulation') {
-      modelGroup.visible = false;
+    if (mode === 'simulation' || mode === 'overlay') {
+      modelGroup.visible = mode === 'overlay';
       semanticGroup.visible = semanticLoaded;
       applyVisibility();
       requestAnimationFrame(() => { resize(); fitModel(); });
@@ -684,9 +858,67 @@ window.IFCViewer = {
     selectGuid(guid, true);
   },
 
+  // ---- 2D plan -------------------------------------------------------------
+  enterPlan(levelKey) {
+    if (!semanticLoaded) return false;
+    planActive = true;
+    planLevelKey = Number(levelKey);
+    planPoints = [];
+    controls.enabled = false;
+    planControls.enabled = true;
+    this.setMode('simulation');
+    applyVisibility();
+    drawEdits();
+    requestAnimationFrame(() => fitPlan());
+    return true;
+  },
+
+  exitPlan() {
+    planActive = false;
+    planPoints = [];
+    clearGroup(draftGroup);
+    planControls.enabled = false;
+    controls.enabled = true;
+    applyVisibility();
+    drawEdits();
+    requestAnimationFrame(() => { resize(); fitModel(); });
+  },
+
+  setPlanLevel(levelKey) {
+    planLevelKey = Number(levelKey);
+    planPoints = [];
+    clearGroup(draftGroup);
+    applyVisibility();
+    drawEdits();
+    requestAnimationFrame(() => fitPlan());
+  },
+
+  setPlanTool(tool) {
+    planTool = tool || 'select';
+    planPoints = [];
+    clearGroup(draftGroup);
+  },
+
+  setManualEdits(edits) {
+    manualEdits = Array.isArray(edits) ? edits : [];
+    drawEdits();
+  },
+
+  isPlan() {
+    return planActive;
+  },
+
+  // Screen position (client px) of an IFC plan point on the current plan level (QA helper).
+  planScreenPoint(x, y) {
+    const v = new THREE.Vector3(Number(x), levelZ(planLevelKey), -Number(y)).project(activeCam());
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height };
+  },
+
   // Jump from a pedestrian-model object to the IFC element it came from.
   showSource(guid) {
     if (!guid || !meshes.has(guid)) return false;
+    if (planActive) this.exitPlan();
     this.setMode('source');
     selectGuid(guid, true);
     requestAnimationFrame(() => fitSelection());
@@ -729,7 +961,7 @@ window.IFCViewer = {
   semanticScreenPoint(key) {
     const object = semanticMeshes.find(m => Number(m.userData.semantic?.source?.key) === Number(key));
     if (!object || !object.visible || !semanticGroup.visible) return null;
-    const centre = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3()).project(camera);
+    const centre = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3()).project(activeCam());
     const rect = renderer.domElement.getBoundingClientRect();
     return { x: rect.left + (centre.x + 1) / 2 * rect.width, y: rect.top + (1 - centre.y) / 2 * rect.height };
   },
