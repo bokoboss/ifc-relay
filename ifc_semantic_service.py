@@ -189,7 +189,16 @@ def precision_clean_polygon(poly: Polygon, grid_size: float = 0.005) -> Polygon 
     return geom if isinstance(geom, (Polygon, MultiPolygon)) else None
 
 
-def merge_walkable_components(components: list[Polygon], grid_size: float = 0.005) -> list[Polygon]:
+# Viswalk connects walkable elements only where they touch or overlap (Vissim
+# manual, "Modeling construction elements"); any gap - even a slab joint of a few
+# millimetres - splits the walking ground and pedestrians cannot cross it.
+# Gaps narrower than this between slab pieces of one level are closed.
+WALKABLE_GAP_CLOSE = 0.05
+
+
+def merge_walkable_components(components: list[Polygon], grid_size: float = 0.005,
+                              close_gap: float = WALKABLE_GAP_CLOSE,
+                              stats: dict[str, int] | None = None) -> list[Polygon]:
     cleaned: list[Polygon] = []
     for poly in components:
         cleaned.extend(polygon_components(precision_clean_polygon(poly, grid_size=grid_size)))
@@ -198,6 +207,19 @@ def merge_walkable_components(components: list[Polygon], grid_size: float = 0.00
     merged = unary_union(cleaned)
     if not merged.is_valid:
         merged = merged.buffer(0)
+    before = len(polygon_components(merged))
+    if close_gap > 0 and before > 1:
+        # Morphological closing with square joins: bridges gaps narrower than
+        # close_gap, leaves straight outer edges and wider openings unchanged.
+        closed = merged.buffer(close_gap / 2, join_style=2, mitre_limit=2.0).buffer(
+            -close_gap / 2, join_style=2, mitre_limit=2.0)
+        if not closed.is_empty:
+            closed = closed if closed.is_valid else closed.buffer(0)
+            after = len(polygon_components(closed))
+            if after < before:
+                merged = closed
+                if stats is not None:
+                    stats["gaps_closed"] = stats.get("gaps_closed", 0) + (before - after)
     return polygon_components(merged)
 
 
@@ -1058,7 +1080,13 @@ def build_semantic_model(
 
     for level_key in sorted(walkable_components_by_level):
         source_components = walkable_components_by_level[level_key]
-        merged_regions = merge_walkable_components(source_components, grid_size=0.005)
+        gap_stats: dict[str, int] = {}
+        merged_regions = merge_walkable_components(source_components, grid_size=0.005, stats=gap_stats)
+        if gap_stats.get("gaps_closed"):
+            warnings.append(
+                f"Level {level_key}: closed {gap_stats['gaps_closed']} gap(s) narrower than {WALKABLE_GAP_CLOSE * 1000:.0f} mm "
+                "between floor slabs so the walking ground is continuous (Viswalk only connects touching/overlapping areas)."
+            )
 
         if not merged_regions:
             warnings.append(
