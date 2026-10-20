@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from version import GEOMETRY_PAYLOAD_VERSION
+
 import json
 import multiprocessing
 from pathlib import Path
@@ -293,7 +295,7 @@ def extract_ifc_geometry(
         role_counts[role] = role_counts.get(role, 0) + 1
 
     payload = {
-        "schema_version": "0.4.1",
+        "schema_version": GEOMETRY_PAYLOAD_VERSION,
         "source_file": str(path),
         "request": {
             "mode": mode,

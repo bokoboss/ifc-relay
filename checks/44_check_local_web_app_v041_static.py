@@ -21,7 +21,7 @@ html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
 app3d = (ROOT / "static" / "app3d.js").read_text(encoding="utf-8")
 
-add("app version 0.4.1", 'version="0.4.1"' in app)
+add("app version from version.py", 'version=APP_VERSION' in app)
 add("large-model audit metadata", '"large_model"' in ifc)
 add("BASESLAB is review-only", '"BASESLAB"' in ifc and 'Foundation/base slab' in ifc)
 add("filtered geometry modes", 'mode: str = "simulation_relevant"' in geom)

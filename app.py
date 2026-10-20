@@ -21,6 +21,7 @@ from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
+from version import APP_VERSION, PROJECT_STATE_VERSION, versions
 from gate_service import evaluate_gate, gate_message_th, record_ack
 from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
 
@@ -42,7 +43,7 @@ store = ProjectStateStore(RUNTIME_DIR / "project_state.json")
 
 app = FastAPI(
     title="Viswalk AI Model Builder",
-    version="0.4.1",
+    version=APP_VERSION,
     description=(
         "Large-model IFC Explorer, consolidated semantic geometry generation, "
         "validation, and Vissim/Viswalk COM build workflow."
@@ -181,7 +182,7 @@ def health() -> dict[str, Any]:
 
     return {
         "status": "ok",
-        "app_version": "0.4.1",
+        **versions(),
         "python": sys.version.split()[0],
         "ifcopenshell": ifcopenshell_version(),
         "three_vendor_ready": (
@@ -253,7 +254,7 @@ async def import_file(
     )
 
     state = {
-        "schema_version": "0.4.1",
+        "schema_version": PROJECT_STATE_VERSION,
         "upload": {
             "original_name": original,
             "path": str(target),
@@ -339,7 +340,7 @@ def analyze() -> dict[str, Any]:
         "kind": suffix.replace(".", ""),
         "status": "adapter_reserved",
         "message": (
-            "PDF/DXF are recognized, but v0.4.1 focuses on large IFC semantic extraction. "
+            "PDF/DXF are not converted in this version; only IFC is supported. "
             "Existing POC parsers remain unchanged."
         ),
     }
@@ -795,7 +796,7 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
         "geometry_engine": {"file": engine_path().name, "sha256": _sha(engine_path())},
         "manual_edits": [{**e, "status": (info.get("manual_edits_status") or {}).get(str(e.get("id")))}
                          for e in info.get("manual_edits", [])],
-        "app_version": "0.4.1",
+        **versions(),
         "source_ifc": {"name": upload.get("original_name"), "sha256": sha},
         "output_inpx": out.name,
         "engine_severity_counts": validation.get("severity_counts"),
