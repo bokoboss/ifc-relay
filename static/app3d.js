@@ -627,6 +627,11 @@ window.IFCViewer = {
       ? new Set([...categoryFilter, ...incomingCategories])
       : new Set(incomingCategories);
 
+    if (options.keepView) {
+      // Background addition: keep the mode, camera and selection as they are.
+      applyVisibility();
+      return;
+    }
     isolatedGuid = null;
     mode = 'source';
     modelGroup.visible = true;

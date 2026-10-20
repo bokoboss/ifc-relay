@@ -96,12 +96,22 @@ def _merge_bounds(
     }
 
 
+def _review_tier(entity: Any) -> bool:
+    """Elements whose default rule is 'review' (proxies, furniture, transport,
+    curtain walls). They can be slow to tessellate (furniture/proxy detail) and are
+    not used by the pedestrian model unless the engineer includes them."""
+    status, _, role = recommendation(entity)
+    return status == "review" and role == "review"   # stairs (vertical_connection) stay in core
+
+
 def _selected_elements(
     model: Any,
     util_element: Any,
     *,
     mode: str,
     storey_ids: set[int] | None,
+    tier: str = "all",
+    extra_guids: set[str] | None = None,
 ) -> tuple[list[Any], dict[int, Any]]:
     if mode not in {"simulation_relevant", "full"}:
         raise ValueError(f"Unsupported geometry mode: {mode}")
@@ -115,6 +125,14 @@ def _selected_elements(
 
         if mode == "simulation_relevant" and not _is_simulation_relevant(entity):
             continue
+
+        if tier != "all":
+            extra = bool(extra_guids) and getattr(entity, "GlobalId", None) in extra_guids
+            in_review = _review_tier(entity)
+            if tier == "core" and in_review and not extra:
+                continue
+            if tier == "review" and not in_review:
+                continue
 
         if storey_ids:
             storey = resolve_storey(entity, lookup, util_element)
@@ -133,6 +151,8 @@ def extract_ifc_geometry(
     *,
     mode: str = "simulation_relevant",
     storey_ids: Iterable[int] | None = None,
+    tier: str = "all",
+    extra_guids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Extract browser/semantic mesh geometry with large-model filtering.
 
@@ -148,6 +168,7 @@ def extract_ifc_geometry(
         all storeys with ``simulation_relevant`` mode.
     """
     requested_storeys = {int(v) for v in (storey_ids or [])}
+    extra = sorted({str(g) for g in (extra_guids or [])})
 
     if cache_path is not None and cache_path.exists():
         source_mtime = path.stat().st_mtime
@@ -158,6 +179,8 @@ def extract_ifc_geometry(
             if (
                 meta.get("mode") == mode
                 and {int(v) for v in meta.get("storey_ids", [])} == requested_storeys
+                and meta.get("tier", "all") == tier
+                and sorted(meta.get("extra_guids", [])) == extra
             ):
                 return cached
 
@@ -170,6 +193,8 @@ def extract_ifc_geometry(
         util_element,
         mode=mode,
         storey_ids=requested_storeys or None,
+        tier=tier,
+        extra_guids=set(extra),
     )
 
     if len(elements) > max_elements:
@@ -273,7 +298,9 @@ def extract_ifc_geometry(
         "request": {
             "mode": mode,
             "storey_ids": sorted(requested_storeys),
-            "filtered": mode != "full" or bool(requested_storeys),
+            "tier": tier,
+            "extra_guids": extra,
+            "filtered": mode != "full" or bool(requested_storeys) or tier != "all",
         },
         "candidate_element_count": len(elements),
         "element_count": len(result_elements),
