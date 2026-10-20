@@ -141,17 +141,23 @@ $baseOk = Place-File $BaseNetworkPath "base_empty.inpx"
 if ($Fixture1Ifc) { [void](Place-File $Fixture1Ifc "TallBuilding.ifc") }
 
 # ---------------------------------------------------------------------------
-Step "5/5 Vissim 2025 COM"
+Step "5/5 Vissim COM (2026 / 2025)"
 # ---------------------------------------------------------------------------
-if (Test-Path "Registry::HKEY_CLASSES_ROOT\VISSIM.Vissim.2025") {
-    Ok "VISSIM.Vissim.2025 is registered"
+$found = @()
+foreach ($rel in @("2026", "2025")) {
+    if (Test-Path "Registry::HKEY_CLASSES_ROOT\Vissim.Vissim.$rel") { $found += $rel }
+}
+if ($found.Count -gt 0) {
+    Ok ("Vissim registered: " + ($found -join ", ") + " (the build uses " + $found[0] + "; set VBB_VISSIM_PROGID to choose)")
+} elseif (Test-Path "Registry::HKEY_CLASSES_ROOT\Vissim.Vissim") {
+    Ok "Vissim.Vissim is registered (version-independent ProgID)"
 } else {
-    Warn "VISSIM.Vissim.2025 not registered on this machine. The app still runs; Build Viswalk needs Vissim 2025."
+    Warn "No Vissim COM server registered. The app still runs; Build Viswalk needs Vissim 2025 or 2026."
 }
 
 Write-Host ""
 Write-Host "Install finished." -ForegroundColor Green
 if (-not ($engineOk -and $baseOk)) {
-    Write-Host "Put base_empty.inpx (saved from Vissim 2025) in $Local before Build Viswalk." -ForegroundColor Yellow
+    Write-Host "Put base_empty.inpx (an empty network saved from the Vissim release you build with) in $Local before Build Viswalk." -ForegroundColor Yellow
 }
 Write-Host "Next: start.bat (open the app)  or  verify_vissim.bat (full check with Vissim)."

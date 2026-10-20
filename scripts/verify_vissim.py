@@ -1,4 +1,4 @@
-"""One-command verification on a Windows machine with PTV Vissim 2025.
+"""One-command verification on a Windows machine with PTV Vissim 2025 or 2026.
 
 Run through verify_vissim.bat. Steps:
 
@@ -36,7 +36,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from project_paths import BASE_NETWORK_FILE, engine_path, project_root  # noqa: E402
 
-PROG_ID = "VISSIM.Vissim.2025"
 
 
 class Report:
@@ -54,16 +53,11 @@ class Report:
         return any(s["status"] == "FAIL" for s in self.steps)
 
 
-def vissim_com_registered() -> bool:
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
+def vissim_com_registered() -> tuple[bool, str]:
+    from vissim_com import resolve_prog_id
 
-        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, PROG_ID))
-        return True
-    except OSError:
-        return False
+    prog_id, how = resolve_prog_id()
+    return prog_id is not None, f"{prog_id} ({how})" if prog_id else how
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +88,11 @@ def check_environment(rep: Report, root: Path) -> dict[str, Any]:
     rep.add("Geometry Engine", "PASS" if engine.exists() else "FAIL", str(engine))
     rep.add("Vissim base network", "PASS" if base.exists() else "FAIL", str(base))
 
-    com = vissim_com_registered()
+    com, detail = vissim_com_registered()
     env["vissim_com_registered"] = com
-    rep.add(f"Vissim COM ({PROG_ID})", "PASS" if com else "FAIL",
-            "registered" if com else "ProgID not found; is Vissim 2025 installed?")
+    env["vissim_com"] = detail
+    rep.add("Vissim COM", "PASS" if com else "FAIL",
+            detail if com else "no Vissim 2025/2026 COM server registered; is Vissim installed?")
     rep.data["environment"] = env
     return env
 
@@ -258,7 +253,7 @@ def run_vissim_build(rep: Report, root: Path, skip_build: bool) -> None:
         rep.add("Vissim COM build", "SKIP", "--skip-build")
         return
     if os.name != "nt" or not vissim_com_registered() or not (root / BASE_NETWORK_FILE).exists():
-        rep.add("Vissim COM build", "SKIP", "needs Windows, Vissim 2025 COM and base_empty.inpx")
+        rep.add("Vissim COM build", "SKIP", "needs Windows, Vissim 2025/2026 COM and base_empty.inpx")
         return
 
     print("Building .inpx through Vissim COM (Vissim will open; this can take a minute)...")
@@ -276,7 +271,7 @@ def run_vissim_build(rep: Report, root: Path, skip_build: bool) -> None:
 # ---------------------------------------------------------------------------
 
 MANUAL_CHECKS = [
-    "Open the built .inpx in Vissim 2025 (path above).",
+    "Open the built .inpx in the same Vissim release that built it (path above).",
     "Levels: L1 (0.00), L2 (3.40) and one generated landing level (+1.70) exist.",
     "Straight stair (x 2-8, y 1-2.2): starts on L1 at x = 2 and ends on L2 at x = 8. "
     "If Vissim shows it reversed, the start edge convention is the opposite of bottom-edge-first.",

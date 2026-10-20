@@ -1622,7 +1622,7 @@ buildViswalkBtn.addEventListener('click', async () => {
   document.getElementById('buildSection').classList.remove('hidden');
   document.getElementById('buildStatus').textContent = 'กำลังสร้าง...';
   document.getElementById('buildDuration').textContent = '—';
-  setMessage('กำลังสร้างไฟล์ Viswalk · Vissim 2025 อาจเปิดขึ้นชั่วครู่ แล้วโปรแกรมจะบันทึกและปิดให้เอง');
+  setMessage('กำลังสร้างไฟล์ Viswalk · Vissim อาจเปิดขึ้นชั่วครู่ แล้วโปรแกรมจะบันทึกและปิดให้เอง');
   try {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
@@ -1665,7 +1665,10 @@ async function restoreState() {
       ? `Python ${health.python} · IfcOpenShell ${health.ifcopenshell} · Three ${health.three_vendor_ready ? 'ready' : 'missing'} · Build ${health.vissim_engine_found && health.base_network_found && health.build_adapter_found ? 'ready' : 'missing'}`
       : `Python ${health.python} · IfcOpenShell missing`;
     document.getElementById('versionText').textContent = health.app_version
-      ? `แอป v${health.app_version} · Semantic schema ${health.semantic_schema_version} · ${health.engine_contract} · ทดสอบกับ ${health.supported_vissim}`
+      ? `แอป v${health.app_version} · Semantic schema ${health.semantic_schema_version} · ${health.engine_contract} · ` +
+        (health.vissim_prog_id
+          ? `Vissim ที่จะใช้: ${health.vissim_prog_id}${health.vissim_release_tested === false ? ' (รุ่นนี้ยังไม่ได้ทดสอบ build จริง)' : ''}`
+          : 'ไม่พบ Vissim ในเครื่อง (ยังตรวจและเตรียมโมเดลได้)')
       : '';
     if (health.app_version) document.getElementById('appVersionText').textContent = `v${health.app_version}`;
     if (health.credit) document.getElementById('creditText').textContent = health.credit;

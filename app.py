@@ -21,6 +21,7 @@ from ifc_service import audit_ifc, ifcopenshell_version
 from revision_service import compare_revisions, report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
+from vissim_com import describe as vissim_describe
 from version import APP_VERSION, PROJECT_STATE_VERSION, versions
 from gate_service import evaluate_gate, gate_message_th, record_ack
 from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
@@ -183,6 +184,7 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         **versions(),
+        **vissim_describe(),
         "python": sys.version.split()[0],
         "ifcopenshell": ifcopenshell_version(),
         "three_vendor_ready": (
@@ -794,6 +796,7 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
                            "schema_version": info.get("schema_version") or semantic_model.get("schema_version")},
         "output_inpx_sha256": _sha(out),
         "geometry_engine": {"file": engine_path().name, "sha256": _sha(engine_path())},
+        "vissim": vissim_describe(),
         "manual_edits": [{**e, "status": (info.get("manual_edits_status") or {}).get(str(e.get("id")))}
                          for e in info.get("manual_edits", [])],
         **versions(),
@@ -986,6 +989,6 @@ def build_readiness() -> dict[str, Any]:
         "can_build_current_ifc": (semantic_ready and engine_path().exists() and base_network_path().exists()
                                   and _gate_passed_quiet(state)),
         "next_gate": (
-            "Validate semantic geometry, then Build Viswalk through Vissim COM 2025."
+            "Validate semantic geometry, then Build Viswalk through Vissim COM."
         ),
     }

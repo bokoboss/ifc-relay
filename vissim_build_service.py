@@ -95,7 +95,7 @@ COM_ERROR_HINTS = {
     "-2146959355": "Vissim เปิดขึ้นมาแต่ไม่ตอบการเชื่อมต่อ (Server execution failed): ปิด Vissim ที่เปิดค้างอยู่ทุกหน้าต่าง "
                    "(ดูใน Task Manager ว่าไม่มี VISSIM*.exe), เปิดแอปและ Vissim แบบปกติทั้งคู่ (ไม่ใช่ Run as administrator) "
                    "และปิดหน้าต่างถามตอนเปิด Vissim (เช่นเลือก license) ด้วยการติ๊กไม่ต้องแสดงอีก",
-    "-2147221005": "Windows ไม่พบ Vissim 2025 ใน COM (Invalid class string): เปิด Vissim 2025 แบบ Run as administrator หนึ่งครั้งเพื่อลงทะเบียน COM",
+    "-2147221005": "Windows ไม่พบ Vissim ใน COM (Invalid class string): เปิด Vissim (2025 หรือ 2026) แบบ Run as administrator หนึ่งครั้งเพื่อลงทะเบียน COM หรือกำหนด VBB_VISSIM_PROGID",
     "-2147221021": None,  # 'Operation unavailable' = no running instance; normal first attempt
 }
 
@@ -128,9 +128,13 @@ def build_preflight(base_network: Path) -> list[str]:
     problems = []
     if not base_network.exists():
         problems.append(
-            f"ไม่พบไฟล์ base_empty.inpx ที่ {base_network} · เปิด Vissim 2025 > File > New > Save As "
+            f"ไม่พบไฟล์ base_empty.inpx ที่ {base_network} · เปิด Vissim (รุ่นที่จะใช้ build) > File > New > Save As "
             "ไปที่ตำแหน่งนี้ แล้วปิด Vissim ก่อนกดสร้างไฟล์อีกครั้ง"
         )
+    if os.name == 'nt':
+        from vissim_com import resolve_prog_id
+        if resolve_prog_id()[0] is None:
+            problems.append("ไม่พบ PTV Vissim 2025/2026 ที่ลงทะเบียน COM บนเครื่องนี้ · ติดตั้ง Vissim หรือเปิดแบบ Run as administrator หนึ่งครั้ง")
     running = running_vissim_processes()
     if running:
         problems.append(
