@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Literal
@@ -50,6 +51,21 @@ app = FastAPI(
         "validation, and Vissim/Viswalk COM build workflow."
     ),
 )
+
+def state_transaction(func):
+    """Run a short state-changing endpoint as one read-modify-write (F-07)."""
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with store.lock:
+            return func(*args, **kwargs)
+    return wrapper
+
+
+# One Vissim build at a time: two COM builds would fight over the same Vissim.
+BUILD_LOCK = threading.Lock()
+
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -204,6 +220,7 @@ def get_project() -> dict[str, Any]:
 
 
 @app.post("/api/project/reset")
+@state_transaction
 def reset_project() -> dict[str, Any]:
     store.reset()
     return {"status": "ok", "message": "Local project state reset."}
@@ -245,48 +262,49 @@ async def import_file(
 
     # Carry review decisions from the previous IFC import (matched by GlobalId
     # during Analyze). The previous upload file is kept for the revision diff.
-    previous = store.read()
-    previous_upload = previous.get("upload") or {}
-    previous_overrides = dict(((previous.get("selection") or {}).get("overrides")) or {})
-    carry = (
-        carry_selection
-        and suffix == ".ifc"
-        and previous_upload.get("extension") == ".ifc"
-        and bool(previous_overrides)
-    )
+    with store.lock:
+        previous = store.read()
+        previous_upload = previous.get("upload") or {}
+        previous_overrides = dict(((previous.get("selection") or {}).get("overrides")) or {})
+        carry = (
+            carry_selection
+            and suffix == ".ifc"
+            and previous_upload.get("extension") == ".ifc"
+            and bool(previous_overrides)
+        )
 
-    state = {
-        "schema_version": PROJECT_STATE_VERSION,
-        "upload": {
-            "original_name": original,
-            "path": str(target),
-            "extension": suffix,
-            "size_bytes": content_size,
-        },
-        "analysis": None,
-        "geometry": None,
-        "selection": {"mode": "auto", "overrides": previous_overrides if carry else {}},
-        "revision": (
-            {
-                "status": "pending",
-                "previous_upload": previous_upload,
-                "previous_decisions": len(previous_overrides),
-            }
-            if carry
-            else None
-        ),
-        "semantic": None,
-        "build": {"status": "not_ready"},
-        # Plan edits follow the selection: kept for a new revision of the same model.
-        "manual_edits": (previous.get("manual_edits") or [])
-        if carry_selection and suffix == ".ifc" and previous_upload.get("extension") == ".ifc" else [],
-    }
-    store.write(state)
-    return {
-        "status": "ok",
-        "upload": state["upload"],
-        "carried_decisions_pending": len(previous_overrides) if carry else 0,
-    }
+        state = {
+            "schema_version": PROJECT_STATE_VERSION,
+            "upload": {
+                "original_name": original,
+                "path": str(target),
+                "extension": suffix,
+                "size_bytes": content_size,
+            },
+            "analysis": None,
+            "geometry": None,
+            "selection": {"mode": "auto", "overrides": previous_overrides if carry else {}},
+            "revision": (
+                {
+                    "status": "pending",
+                    "previous_upload": previous_upload,
+                    "previous_decisions": len(previous_overrides),
+                }
+                if carry
+                else None
+            ),
+            "semantic": None,
+            "build": {"status": "not_ready"},
+            # Plan edits follow the selection: kept for a new revision of the same model.
+            "manual_edits": (previous.get("manual_edits") or [])
+            if carry_selection and suffix == ".ifc" and previous_upload.get("extension") == ".ifc" else [],
+        }
+        store.write(state)
+        return {
+            "status": "ok",
+            "upload": state["upload"],
+            "carried_decisions_pending": len(previous_overrides) if carry else 0,
+        }
 
 
 @app.post("/api/analyze")
@@ -330,12 +348,17 @@ def analyze() -> dict[str, Any]:
             result["revision"] = state["revision"]
             result["warnings"] = report_messages(state["revision"]) + list(result.get("warnings") or [])
 
-        state["analysis"] = result
-        state["build"] = {
-            "status": "ifc_audited",
-            "message": "IFC audit complete. Load 3D geometry and review selection.",
-        }
-        store.write(state)
+        with store.lock:
+            fresh = reread_state_for(path)
+            if revision.get("status") == "pending":       # carry-over computed above
+                fresh["revision"] = state["revision"]
+                fresh.setdefault("selection", {"mode": "auto"})["overrides"] = state["selection"]["overrides"]
+            fresh["analysis"] = result
+            fresh["build"] = {
+                "status": "ifc_audited",
+                "message": "IFC audit complete. Load 3D geometry and review selection.",
+            }
+            store.write(fresh)
         return result
 
     result = {
@@ -375,28 +398,29 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
             detail=f"IFC geometry extraction failed: {type(exc).__name__}: {exc}",
         )
 
-    state = reread_state_for(path)
-    previous_loaded = set((state.get("geometry") or {}).get("loaded_storey_ids", []))
-    requested = {int(v) for v in request.storey_ids}
-    loaded_storeys = sorted(previous_loaded | requested) if request.append else sorted(requested)
+    with store.lock:
+        state = reread_state_for(path)
+        previous_loaded = set((state.get("geometry") or {}).get("loaded_storey_ids", []))
+        requested = {int(v) for v in request.storey_ids}
+        loaded_storeys = sorted(previous_loaded | requested) if request.append else sorted(requested)
 
-    state["geometry"] = {
-        "status": "loaded",
-        "mode": request.mode,
-        "append": request.append,
-        "loaded_storey_ids": loaded_storeys,
-        "element_count": result["element_count"],
-        "triangle_count": result.get("triangle_count", 0),
-        "mesh_failures": len(result["mesh_failures"]),
-    }
-    # Loading or adding storeys to the 3D view is viewing only: keep an existing
-    # pedestrian model, its validation and any build result (e.g. after a page reload).
-    if (state.get("semantic") or {}).get("status") != "ready":
-        state["build"] = {
-            "status": "ifc_3d_review",
-            "message": "Filtered 3D IFC loaded. Review selection before semantic extraction.",
+        state["geometry"] = {
+            "status": "loaded",
+            "mode": request.mode,
+            "append": request.append,
+            "loaded_storey_ids": loaded_storeys,
+            "element_count": result["element_count"],
+            "triangle_count": result.get("triangle_count", 0),
+            "mesh_failures": len(result["mesh_failures"]),
         }
-    store.write(state)
+        # Loading or adding storeys to the 3D view is viewing only: keep an existing
+        # pedestrian model, its validation and any build result (e.g. after a page reload).
+        if (state.get("semantic") or {}).get("status") != "ready":
+            state["build"] = {
+                "status": "ifc_3d_review",
+                "message": "Filtered 3D IFC loaded. Review selection before semantic extraction.",
+            }
+        store.write(state)
     return result
 
 
@@ -416,6 +440,7 @@ def get_selection() -> dict[str, Any]:
 
 
 @app.post("/api/selection")
+@state_transaction
 def update_selection(update: SelectionUpdate) -> dict[str, Any]:
     state = store.read()
     selection = state.setdefault("selection", {"mode": "auto", "overrides": {}})
@@ -439,6 +464,7 @@ def update_selection(update: SelectionUpdate) -> dict[str, Any]:
 
 
 @app.post("/api/selection/bulk")
+@state_transaction
 def bulk_update_selection(update: BulkSelectionUpdate) -> dict[str, Any]:
     state = store.read()
     selection = state.setdefault("selection", {"mode": "auto", "overrides": {}})
@@ -486,6 +512,7 @@ def get_stairs() -> dict[str, Any]:
 
 
 @app.post("/api/stairs/bulk")
+@state_transaction
 def bulk_update_stairs(update: StairBulkUpdate) -> dict[str, Any]:
     """Include all stair/ramp units, or return them to review (auto).
 
@@ -572,26 +599,27 @@ def generate_ifc_semantic() -> dict[str, Any]:
     summary = semantic["ifc_semantic"]["summary"]
     warnings = semantic["ifc_semantic"]["warnings"]
 
-    used_overrides, used_edits = dict(overrides), list(state.get("manual_edits") or [])
-    state = reread_state_for(path)
-    changed_meanwhile = (dict((state.get("selection") or {}).get("overrides", {})) != used_overrides
-                         or list(state.get("manual_edits") or []) != used_edits)
+    with store.lock:
+        used_overrides, used_edits = dict(overrides), list(state.get("manual_edits") or [])
+        state = reread_state_for(path)
+        changed_meanwhile = (dict((state.get("selection") or {}).get("overrides", {})) != used_overrides
+                             or list(state.get("manual_edits") or []) != used_edits)
 
-    state["semantic"] = {
-        "status": "ready",
-        # Selection or plan edits changed while this model was being generated.
-        "stale": changed_meanwhile,
-        "path": str(output_path),
-        "summary": summary,
-        "warnings": warnings,
-    }
-    state["build"] = {
-        "status": "semantic_ready",
-        "message": (
-            "Semantic model ready. Validate, then Build Viswalk through Vissim COM."
-        ),
-    }
-    store.write(state)
+        state["semantic"] = {
+            "status": "ready",
+            # Selection or plan edits changed while this model was being generated.
+            "stale": changed_meanwhile,
+            "path": str(output_path),
+            "summary": summary,
+            "warnings": warnings,
+        }
+        state["build"] = {
+            "status": "semantic_ready",
+            "message": (
+                "Semantic model ready. Validate, then Build Viswalk through Vissim COM."
+            ),
+        }
+        store.write(state)
 
     return {
         "status": "ok",
@@ -647,6 +675,7 @@ def download_engine_input() -> FileResponse:
 
 
 @app.post("/api/ifc/semantic/export-engine-input")
+@state_transaction
 def export_engine_input() -> dict[str, Any]:
     source = current_semantic_path_not_stale()
     target = PROJECT_ROOT / "geometry_ifc_v03.json"
@@ -697,12 +726,11 @@ def validate_current_semantic() -> dict[str, Any]:
             detail=f"Geometry Engine validation failed: {type(exc).__name__}: {exc}",
         )
 
-    state["build"] = {
+    commit_build_status(semantic_path, {
         "status": "validated",
         "validation": result,
         "message": "Geometry Engine validation complete. Build Viswalk is ready.",
-    }
-    store.write(state)
+    })
     return result
 
 
@@ -713,6 +741,20 @@ def reread_state_for(path: Path) -> dict[str, Any]:
     if str((state.get("upload") or {}).get("path")) != str(path):
         raise HTTPException(status_code=409, detail="ไฟล์ IFC ถูกเปลี่ยนระหว่างประมวลผล · ผลนี้ถูกยกเลิก")
     return state
+
+
+def commit_build_status(semantic_path: Path, build: dict[str, Any]) -> None:
+    """Record a validation/build result on a fresh state, only if it is still about
+    the current, non-stale pedestrian model (F-07: no lost update, no result for a
+    model that changed while Vissim / the engine ran)."""
+    with store.lock:
+        state = store.read()
+        semantic = state.get("semantic") or {}
+        if str(semantic.get("path")) != str(semantic_path) or semantic.get("stale", False):
+            raise HTTPException(status_code=409,
+                                detail="โมเดลคนเดินถูกเปลี่ยนระหว่างตรวจ/สร้างไฟล์ · ผลนี้ไม่ถูกบันทึก · ตรวจหรือสร้างใหม่อีกครั้ง")
+        state["build"] = build
+        store.write(state)
 
 
 def _mark_semantic_stale(state: dict[str, Any], message: str) -> None:
@@ -751,6 +793,7 @@ def list_manual_edits() -> dict[str, Any]:
 
 
 @app.post("/api/edits")
+@state_transaction
 def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
     from datetime import datetime as _dt
 
@@ -782,6 +825,7 @@ def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
 
 
 @app.delete("/api/edits/{edit_id}")
+@state_transaction
 def delete_manual_edit(edit_id: str) -> dict[str, Any]:
     state = store.read()
     edits = state.get("manual_edits") or []
@@ -863,6 +907,7 @@ def get_engineering_gate() -> dict[str, Any]:
 
 
 @app.post("/api/gate/ack")
+@state_transaction
 def acknowledge_gate_item(update: GateAck) -> dict[str, Any]:
     state = store.read()
     gate = _current_gate(state)
@@ -879,6 +924,15 @@ def acknowledge_gate_item(update: GateAck) -> dict[str, Any]:
 
 @app.post("/api/build-vissim")
 def build_current_semantic_in_vissim() -> dict[str, Any]:
+    if not BUILD_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="กำลังสร้างไฟล์ Viswalk อยู่แล้ว · รอให้เสร็จก่อน")
+    try:
+        return _build_current_semantic_in_vissim()
+    finally:
+        BUILD_LOCK.release()
+
+
+def _build_current_semantic_in_vissim() -> dict[str, Any]:
     semantic_path = current_semantic_path_or_404()
     state = store.read()
     semantic = state.get("semantic") or {}
@@ -900,32 +954,31 @@ def build_current_semantic_in_vissim() -> dict[str, Any]:
         validation = validate_engine_input(APP_DIR, PROJECT_ROOT, semantic_path)
         gate = _current_gate(state, validation)
         if not gate["passed"]:
-            state["build"] = {"status": "validated", "validation": validation,
-                              "message": "Engineering gate not passed."}
-            store.write(state)
+            commit_build_status(semantic_path, {"status": "validated", "validation": validation,
+                                                "message": "Engineering gate not passed."})
             raise GateNotPassed(gate)
         result = build_vissim_model(APP_DIR, PROJECT_ROOT, semantic_path, source_name)
         write_build_manifest(result, gate, validation, upload)
     except GateNotPassed as exc:
         raise HTTPException(status_code=409, detail="ยังสร้างไฟล์ไม่ได้ · " + gate_message_th(exc.gate))
+    except HTTPException:
+        raise
     except Exception as exc:
-        state["build"] = {
-            "status": "failed",
-            "message": str(exc),
-        }
-        store.write(state)
+        try:
+            commit_build_status(semantic_path, {"status": "failed", "message": str(exc)})
+        except HTTPException:
+            pass            # the model changed meanwhile; the error below still reports it
         raise HTTPException(
             status_code=500,
             detail=f"Vissim build failed: {type(exc).__name__}: {exc}",
         )
 
-    state["build"] = {
+    commit_build_status(semantic_path, {
         "status": "success",
         "validation": validation,
         "result": result,
         "message": "Vissim/Viswalk .inpx build completed successfully.",
-    }
-    store.write(state)
+    })
 
     return {
         "status": "success",
