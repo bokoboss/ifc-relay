@@ -127,3 +127,44 @@ def test_upload_size_limit(client, tmp_path, monkeypatch):
     r = client.post("/api/import", files={"file": ("big.ifc", b"x" * 5000)})
     assert r.status_code == 413
     assert not any(p.name.endswith("big.ifc") for p in (tmp_path / "UPLOAD_DIR").iterdir())
+
+
+def test_edit_review_states():
+    from manual_edits import edit_review_state
+    e = {"kind": "obstacle"}
+    assert edit_review_state(e, None)["state"] == "pending"
+    assert edit_review_state(e, {"applied": False, "reason": "no level at 5.70 m"}) == \
+        {"state": "skipped", "detail": "no level at 5.70 m"}
+    assert edit_review_state(e, {"applied": True, "level_key": 3, "note": "re-bound"})["state"] == "rebound"
+    assert edit_review_state(e, {"applied": True, "level_key": 1, "note": ""})["state"] == "applied"
+    assert edit_review_state({"kind": "passage"}, {"applied": True, "note": "", "walls_cut": 0})["state"] == "no_effect"
+    assert edit_review_state({"kind": "passage"}, {"applied": True, "note": "", "walls_cut": 2})["state"] == "applied"
+
+
+def test_edits_api_reports_review_state_per_edit(client, tmp_path):
+    """F-19: each edit says what the last run did with it; a new edit is pending
+    until regenerated, and a reused id does not inherit the deleted edit's result."""
+    b, ov = _two_storeys(with_stair=True)
+    path = b.write(tmp_path / "review.ifc")
+    with open(path, "rb") as fh:
+        client.post("/api/import", files={"file": (path.name, fh)})
+    client.post("/api/analyze")
+    for guid, status in ov.items():
+        client.post("/api/selection", json={"global_id": guid, "status": status})
+    client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []})
+    assert client.post("/api/ifc/semantic").status_code == 200
+
+    wall = [[13.5, 7.5], [14.5, 7.5], [14.5, 8.5], [13.5, 8.5]]
+    open_floor = [[1, 1], [2, 1], [2, 2], [1, 2]]
+    r = client.post("/api/edits", json={"kind": "passage", "level_key": 1, "polygon": wall})
+    assert r.json()["edits"][0]["review"]["state"] == "pending"
+    client.post("/api/edits", json={"kind": "passage", "level_key": 1, "polygon": open_floor})
+    client.post("/api/ifc/semantic")
+    states = {e["id"]: e["review"]["state"] for e in client.get("/api/edits").json()["edits"]}
+    assert states == {"E1": "applied", "E2": "no_effect"}
+
+    client.delete("/api/edits/E2")
+    r = client.post("/api/edits", json={"kind": "obstacle", "level_key": 1, "polygon": open_floor})
+    assert r.json()["edit"]["id"] == "E2"
+    states = {e["id"]: e["review"]["state"] for e in r.json()["edits"]}
+    assert states == {"E1": "applied", "E2": "pending"}

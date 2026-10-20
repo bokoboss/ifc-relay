@@ -727,6 +727,14 @@ window.addEventListener('plan-measure', event => {
 });
 
 const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน' };
+// F-19: what the last pedestrian-model run did with each edit
+const EDIT_REVIEW_TH = {
+  applied: 'ใช้แล้ว',
+  rebound: 'ย้ายระดับ',
+  no_effect: 'ไม่มีผล',
+  skipped: 'ใช้ไม่ได้',
+  pending: 'รอเตรียมใหม่',
+};
 
 // ---- drawing on the plan: preview -> confirm -> save, with undo/redo ----------
 let pendingShape = null;
@@ -936,8 +944,14 @@ function renderEdits(edits) {
     const ys = edit.polygon.map(p => p[1]);
     const w = Math.max(...xs) - Math.min(...xs);
     const h = Math.max(...ys) - Math.min(...ys);
+    const review = edit.review || { state: 'pending', detail: '' };
+    row.dataset.review = review.state;
+    const shownLevel = review.state === 'rebound' && review.level_key != null
+      ? `${levelName(edit.level_key)} → ${levelName(review.level_key)}` : levelName(edit.level_key);
     row.innerHTML = `<span class="edit-kind">${escapeHtml(edit.id)} · ${escapeHtml(EDIT_KIND_TH[edit.kind] || edit.kind)}</span>` +
-      `<span>${escapeHtml(levelName(edit.level_key))} · ${w.toFixed(2)} × ${h.toFixed(2)} ม.</span>`;
+      `<span>${escapeHtml(shownLevel)} · ${w.toFixed(2)} × ${h.toFixed(2)} ม.</span>` +
+      `<span class="edit-review edit-review-${escapeHtml(review.state)}" title="${escapeHtml(review.detail || '')}">` +
+      `${escapeHtml(EDIT_REVIEW_TH[review.state] || review.state)}</span>`;
     const del = document.createElement('button');
     del.type = 'button';
     del.textContent = 'ลบ';
@@ -950,7 +964,24 @@ function renderEdits(edits) {
       }
     });
     row.appendChild(del);
+    if (review.detail && review.state !== 'applied') {
+      const why = document.createElement('div');
+      why.className = 'edit-review-detail';
+      why.textContent = review.detail;
+      row.appendChild(why);
+    }
     root.appendChild(row);
+  }
+  const counts = {};
+  for (const edit of list) counts[edit.review?.state || 'pending'] = (counts[edit.review?.state || 'pending'] || 0) + 1;
+  const summary = document.getElementById('editsReview');
+  if (summary) {
+    const needs = (counts.skipped || 0) + (counts.no_effect || 0) + (counts.rebound || 0) + (counts.pending || 0);
+    summary.textContent = needs
+      ? 'ต้องตรวจ: ' + ['skipped', 'no_effect', 'rebound', 'pending']
+        .filter(k => counts[k]).map(k => `${EDIT_REVIEW_TH[k]} ${counts[k]}`).join(' · ')
+      : `ใช้ครบทั้ง ${list.length} รายการ`;
+    summary.classList.toggle('needs-review', needs > 0);
   }
 }
 

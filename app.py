@@ -721,9 +721,33 @@ def _mark_semantic_stale(state: dict[str, Any], message: str) -> None:
         state["build"] = {"status": "selection_changed", "message": message}
 
 
+def edits_with_review(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Plan edits, each with what the last pedestrian-model run did with it."""
+    from manual_edits import edit_review_state
+
+    edits = state.get("manual_edits") or []
+    semantic = state.get("semantic") or {}
+    status: dict[str, Any] = {}
+    used: set[tuple[str, str]] = set()
+    if semantic.get("path") and Path(semantic["path"]).exists():
+        try:
+            info = json.loads(Path(semantic["path"]).read_text(encoding="utf-8")).get("ifc_semantic") or {}
+            status = info.get("manual_edits_status") or {}
+            # id + uid: an id freed by a delete can be given to a new edit
+            used = {(str(e.get("id")), str(e.get("uid") or e.get("created_at"))) for e in info.get("manual_edits") or []}
+        except (OSError, ValueError):
+            status = {}
+    out = []
+    for edit in edits:
+        eid = str(edit.get("id"))
+        st = status.get(eid) if (eid, str(edit.get("uid") or edit.get("created_at"))) in used else None
+        out.append({**edit, "review": edit_review_state(edit, st)})
+    return out
+
+
 @app.get("/api/edits")
 def list_manual_edits() -> dict[str, Any]:
-    return {"edits": store.read().get("manual_edits") or []}
+    return {"edits": edits_with_review(store.read())}
 
 
 @app.post("/api/edits")
@@ -750,10 +774,11 @@ def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
     next_no = max([int(str(e.get("id", "E0"))[1:] or 0) for e in edits] + [0]) + 1
     data["id"] = f"E{next_no}"
     data["created_at"] = _dt.now().isoformat(timespec="seconds")
+    data["uid"] = uuid.uuid4().hex     # ids are reused after a delete; uid is not
     edits.append(data)
     _mark_semantic_stale(state, "Plan edit added. Regenerate the pedestrian model.")
     store.write(state)
-    return {"edit": data, "edits": edits}
+    return {"edit": data, "edits": edits_with_review(state)}
 
 
 @app.delete("/api/edits/{edit_id}")
@@ -766,7 +791,7 @@ def delete_manual_edit(edit_id: str) -> dict[str, Any]:
     state["manual_edits"] = kept
     _mark_semantic_stale(state, "Plan edit removed. Regenerate the pedestrian model.")
     store.write(state)
-    return {"edits": kept}
+    return {"edits": edits_with_review(state)}
 
 
 class GateNotPassed(Exception):

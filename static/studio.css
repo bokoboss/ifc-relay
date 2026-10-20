@@ -526,6 +526,14 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .edit-row {display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-bottom:1px solid #eef2f2;}
 .edit-row .edit-kind {font-weight:600;min-width:84px;}
 .edit-row button {margin-left:auto;font-size:11px;padding:2px 7px;border:1px solid #e0b8b3;border-radius:4px;background:#fff;color:#9b2c22;cursor:pointer;}
+.edit-row {flex-wrap:wrap;}
+.edit-review {font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid #cfd8d8;color:#3d5050;background:#f4f7f7;white-space:nowrap;}
+.edit-review-applied {border-color:#b6d7c2;color:#21633a;background:#eef8f1;}
+.edit-review-rebound, .edit-review-no_effect, .edit-review-pending {border-color:#e6cf9a;color:#7a5512;background:#fdf7e8;}
+.edit-review-skipped {border-color:#e0b8b3;color:#9b2c22;background:#fcefed;}
+.edit-review-detail {flex-basis:100%;font-size:11px;color:#6b7777;padding-left:92px;}
+.edits-review {font-size:12px;margin:4px 0 6px;color:#21633a;}
+.edits-review.needs-review {color:#7a5512;font-weight:600;}
 
 .version-text {margin-top:6px;font-size:11px;color:#5b6b6d;}
 .app-credit {display:flex;justify-content:center;gap:8px;padding:14px 16px 18px;font-size:11px;letter-spacing:.04em;color:#7a8a8c;}

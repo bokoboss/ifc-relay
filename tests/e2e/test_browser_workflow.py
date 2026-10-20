@@ -206,6 +206,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         assert "ตัดผนัง 1 ชิ้น" in page.text_content("#planConfirmText")
         page.click("#planConfirmBtn")
         page.wait_for_selector("#editsList .edit-row", timeout=15000)
+        assert page.query_selector("#editsList .edit-review-pending")
     except Exception as exc:
         raise AssertionError(f"no edit saved: hits={hits} hint={page.text_content('#planHint')} "
                              f"plan={page.evaluate('window.IFCViewer.isPlan()')} {_diag(page)}") from exc
@@ -214,4 +215,6 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
     page.wait_for_timeout(500)
     assert "ที่เดินไปไม่ถึง 1 แห่ง" in page.text_content("#connectivityNote")   # only the other floor (no stair)
+    page.wait_for_selector("#editsList .edit-review-applied")          # F-19: the run used the passage
+    assert "ใช้ครบ" in page.text_content("#editsReview")
     assert page.errors == []
