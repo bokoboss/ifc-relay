@@ -237,6 +237,9 @@ function geometryRequestFromControls() {
     mode: isFull ? 'full' : 'simulation_relevant',
     storey_ids: storeyIds,
     append: !!appendStoreyCheck?.checked && isStorey,
+    // Open the model with everything except review-rule elements (proxies,
+    // furniture...), which can take minutes to tessellate; they follow in the background.
+    tier: isFull ? 'all' : 'core',
   };
 }
 
@@ -333,6 +336,39 @@ async function runAnalyze() {
 
 analyzeBtn.addEventListener('click', () => runAnalyze());
 
+let geometryLoadSeq = 0;
+
+// Second pass after the model is on screen: proxies, furniture and other
+// review-rule elements, added to the view without changing the current mode.
+async function loadReviewTier(baseRequest, seq) {
+  const request = { ...baseRequest, tier: 'review', append: true };
+  const note = document.getElementById('previewNote');
+  if (note) note.textContent = 'กำลังโหลดชิ้นส่วนรอตรวจ (เช่นเฟอร์นิเจอร์/Proxy) เพิ่มในพื้นหลัง...';
+  try {
+    const geometry = await api('/api/ifc/geometry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    if (seq !== geometryLoadSeq) return;          // a newer load replaced the view
+    if ((geometry.element_count || 0) > 0) {
+      currentGeometry = mergeGeometryPayload(currentGeometry, geometry, true);
+      render3dFilters(currentGeometry);
+      const v = await waitForViewer();
+      v.load(geometry, selectionState.overrides || {}, { append: true, keepView: true });
+      applyViewerFilters();
+      document.getElementById('viewerStatus').textContent =
+        `โหลดแล้ว ${currentGeometry.element_count} ชิ้น · ${currentGeometry.triangle_count || 0} triangles · WebGL พร้อม`;
+      updateSelectionSummary();
+    }
+    if (note) note.textContent = geometry.element_count
+      ? `โหลดชิ้นส่วนรอตรวจเพิ่มแล้ว ${geometry.element_count} ชิ้น`
+      : '';
+  } catch (error) {
+    if (note && seq === geometryLoadSeq) note.textContent = `โหลดชิ้นส่วนรอตรวจไม่สำเร็จ: ${error.message}`;
+  }
+}
+
 async function runLoad3d() {
   load3dBtn.disabled = true;
   const request = geometryRequestFromControls();
@@ -393,6 +429,7 @@ async function runLoad3d() {
     document.getElementById('stepExplore').classList.add('done');
     document.getElementById('stepSelect').classList.add('done');
     generateSemanticBtn.disabled = false;
+    if (request.tier === 'core') loadReviewTier(request, ++geometryLoadSeq);
     updateSelectionSummary();
     refreshStairOverview();
     setMessage(

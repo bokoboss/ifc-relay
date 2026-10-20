@@ -57,6 +57,9 @@ class GeometryRequest(BaseModel):
     mode: Literal["simulation_relevant", "full"] = "simulation_relevant"
     storey_ids: list[int] = Field(default_factory=list)
     append: bool = False
+    # "core" = everything except review-rule elements (proxies, furniture...), which
+    # the browser loads afterwards with "review"; "all" = both at once.
+    tier: Literal["all", "core", "review"] = "all"
 
 class GateAck(BaseModel):
     id: str
@@ -92,15 +95,52 @@ def current_upload_or_404() -> Path:
     return path
 
 
+# Tessellation (IfcOpenShell geometry iterator) holds the Python GIL for long
+# stretches, so running it in the server process stalls every other request
+# (e.g. "prepare pedestrian model" waited minutes behind the background
+# furniture/proxy load). It runs in worker processes instead.
+_GEOMETRY_POOL = None
+
+
+def extract_geometry_isolated(path: Path, **kwargs: Any) -> dict[str, Any]:
+    global _GEOMETRY_POOL
+    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures.process import BrokenProcessPool
+
+    if os.environ.get("VBB_GEOMETRY_IN_PROCESS") == "1":
+        return extract_ifc_geometry(path, **kwargs)
+    for attempt in range(2):
+        if _GEOMETRY_POOL is None:
+            import multiprocessing
+
+            # "spawn" (the Windows default) everywhere: a forked copy of the running
+            # server would inherit uvicorn's state.
+            _GEOMETRY_POOL = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
+        try:
+            return _GEOMETRY_POOL.submit(extract_ifc_geometry, path, **kwargs).result()
+        except BrokenProcessPool:
+            _GEOMETRY_POOL = None
+            if attempt:
+                raise
+    raise RuntimeError("geometry worker unavailable")
+
+
 def ifc_cache_path(
     path: Path,
     mode: str = "simulation_relevant",
     storey_ids: list[int] | None = None,
+    tier: str = "all",
+    extra_guids: list[str] | None = None,
 ) -> Path:
+    import hashlib
+
     token = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)
     storey_token = "all" if not storey_ids else "s" + "-".join(str(int(v)) for v in sorted(set(storey_ids)))
     mode_token = "sim" if mode == "simulation_relevant" else "full"
-    return CACHE_DIR / f"{token}_geometry_v041_{mode_token}_{storey_token}.json"
+    tier_token = "" if tier == "all" else f"_{tier}"
+    if extra_guids:
+        tier_token += "_x" + hashlib.sha1("|".join(sorted(extra_guids)).encode()).hexdigest()[:8]
+    return CACHE_DIR / f"{token}_geometry_v041_{mode_token}_{storey_token}{tier_token}.json"
 
 
 def ifc_semantic_path(path: Path) -> Path:
@@ -297,11 +337,12 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="ต้องตรวจ IFC ก่อนโหลดโมเดล 3D")
 
     try:
-        result = extract_ifc_geometry(
+        result = extract_geometry_isolated(
             path,
-            cache_path=ifc_cache_path(path, request.mode, request.storey_ids),
+            cache_path=ifc_cache_path(path, request.mode, request.storey_ids, request.tier),
             mode=request.mode,
             storey_ids=request.storey_ids,
+            tier=request.tier,
         )
     except Exception as exc:
         raise HTTPException(
@@ -482,11 +523,16 @@ def generate_ifc_semantic() -> dict[str, Any]:
     try:
         # Semantic generation is authoritative and independent from the browser's
         # lazy-loaded storey subset. Build/cache all simulation-relevant geometry.
-        geometry = extract_ifc_geometry(
+        # Review-rule elements (proxies, furniture...) are slow to tessellate and
+        # only matter when the engineer included them, so mesh just those.
+        included = sorted(g for g, status in overrides.items() if status == "include")
+        geometry = extract_geometry_isolated(
             path,
-            cache_path=ifc_cache_path(path, "simulation_relevant", []),
+            cache_path=ifc_cache_path(path, "simulation_relevant", [], "core", included),
             mode="simulation_relevant",
             storey_ids=[],
+            tier="core",
+            extra_guids=included,
         )
         semantic = build_semantic_model(path, geometry, overrides)
         output_path = ifc_semantic_path(path)
