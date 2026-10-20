@@ -52,3 +52,12 @@ Revit advanced sample (5 storeys, 10 stairs / 20 flights, two generated landing 
 
 - Negative `EndZOffset` (ends between levels) - not exercised by the Revit sample.
 - Pedestrian routing L1 -> landing -> L2 in a simulation run.
+
+## Walkable continuity (no gaps)
+
+Vissim connects walkable elements only "at the points where they directly touch or overlap" and groups touching/overlapping areas into one walkable polygon (Vissim 2025 manual, *Modeling construction elements*). A gap, however small, splits the walking ground. The converter therefore:
+
+- closes gaps narrower than 50 mm between floor slabs of one level (morphological closing; outer edges unchanged) and reports how many it closed;
+- adds manual walkable floor drawn on the plan as drawn, overlapping the existing floor, instead of a cut-to-fit piece that would only touch along a seam;
+- makes every ramp end overlap its level's area: by at least 0.09 m where the floor already lies under the end, otherwise by extending the ramp 0.10 m (stair wells count as no floor);
+- reports any remaining separate walking zones in the connectivity check.

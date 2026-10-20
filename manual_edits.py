@@ -59,14 +59,10 @@ def apply_manual_edits(edits: list[dict[str, Any]], *, areas: list[dict[str, Any
         tag = {"manual_edit_id": edit.get("id"), "generated": True}
 
         if kind == "walkable":
-            existing = unary_union([_poly(a["polygon"]) for a in areas if int(a["level_key"]) == level]) \
-                if any(int(a["level_key"]) == level for a in areas) else None
-            add = shape.difference(existing) if existing is not None else shape
-            for n, part in enumerate(getattr(add, "geoms", [add]), start=1):
-                if part.is_empty or part.area < 0.01 or not isinstance(part, Polygon):
-                    continue
-                areas.append({"name": f"Manual walkable {edit.get('id')} [{n}]", "level_key": level,
-                              "polygon": _pts(part), **tag})
+            # Added as drawn, overlapping the existing floor: Viswalk joins areas that
+            # overlap, whereas a cut-to-fit piece would only touch along a seam.
+            areas.append({"name": f"Manual walkable {edit.get('id')}", "level_key": level,
+                          "polygon": _pts(shape), **tag})
             applied["walkable"] += 1
 
         elif kind == "obstacle":
