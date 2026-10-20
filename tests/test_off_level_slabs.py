@@ -46,10 +46,15 @@ def test_far_off_level_slabs_wait_for_review(tmp_path):
 
 
 def test_engineer_can_include_an_off_level_slab(tmp_path):
+    """An included mezzanine becomes its own level at its real height."""
     b, sun, wet, mezz = _model()
     sem = semantic_for(b.write(tmp_path / "m.ifc"), {mezz.GlobalId: "include"})
     floor = _walkable(sem, 1)
-    assert floor.intersects(Polygon([(0.1, 11.1), (5.9, 11.1), (5.9, 14.9)]))
+    assert not floor.intersects(Polygon([(0.1, 11.1), (5.9, 11.1), (5.9, 14.9)]))
+    [lv] = [lv for lv in sem["levels"] if str(lv["name"]).startswith("Mezzanine")]
+    assert abs(lv["z"] - 1.5) < 1e-3 and lv["key"] >= 901
+    assert _walkable(sem, lv["key"]).intersects(Polygon([(0.1, 11.1), (5.9, 11.1), (5.9, 14.9)]))
+    assert any("included as its own level (mezzanine)" in w for w in sem["ifc_semantic"]["warnings"])
     out = {x["global_id"]: x["decision"] for x in sem["ifc_semantic"]["off_level_slabs"]}
     assert out == {sun.GlobalId: "auto", mezz.GlobalId: "include"}
     assert sem["ifc_semantic"]["summary"]["off_level_slabs_excluded"] == 1

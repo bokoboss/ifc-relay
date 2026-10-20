@@ -87,6 +87,7 @@ WARNING_RULES: list[tuple[str, str, str]] = [
     (r"is not a straight flight", "review", "บันไดไม่ใช่แนวตรง"),
     (r"differs from floor-slab tops", "review", "ระดับชั้น (Elevation) ไม่ตรงกับผิวพื้น"),
     (r"from its storey floor; merged", "review", "แผ่นพื้นสูงต่างจากระดับชั้น (รวมเข้าพื้นชั้น)"),
+    (r"included as its own level \(mezzanine\)", "review", "ชั้นลอยที่ใช้ แยกเป็นระดับของตัวเอง (ต้องมีบันไดเชื่อม)"),
     (r"from its storey floor; left out of level", "review", "แผ่นพื้นต่างระดับมาก (ไม่ใช้เป็นพื้นเดินจนกว่าจะยืนยัน)"),
     (r"IfcTransportElement", "review", "ลิฟต์/บันไดเลื่อน ส่งออกเป็นสิ่งกีดขวางเท่านั้น"),
     (r"span several storeys; copied onto each storey", "info", "ผนัง/เสาสูงหลายชั้น คัดลอกไปทุกชั้นที่ผ่าน"),

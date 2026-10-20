@@ -33,7 +33,7 @@ Existing engine fields are unchanged (`key, name, type, start_level, end_level, 
 | Extra fields / level keys 901+ | Ignored / accepted (keys only need to be > 0 and unique) | none needed |
 | `start_z_offset` / `end_z_offset` | Passed to Vissim as `StartZOffset` / `EndZOffset` | used for ends that match no level |
 | `start_level == end_level` | **Rejected** (`ValueError`) | an end between levels is referenced to the nearest *other* level (above, negative offset) |
-| Ramp end must overlap the area of its level | Engine validation warns when a ramp only touches it | polygon extended by `end_overlap` = 0.10 m beyond both ends; `bottom_edge`/`top_edge` keep the true flight edges |
+| Ramp end must overlap the area of its level | Engine validation warns when a ramp only touches it | polygon extended by 0.10 m only at ends whose level area does not already lie under the end (stair wells count as no floor); `end_overlap` records `{bottom, top}`; `bottom_edge`/`top_edge` keep the true flight edges |
 | Low end of a stairway | Engine passes the polygon WKT unchanged to `Ramps.AddRamp`; direction comes from Vissim's reading of the polygon | records are bottom edge first; **confirm in Vissim** which edge it treats as the start |
 
 Engine-contract tests (`tests/test_engine_contract_*.py`) run the real engine when `VBB_GEOMETRY_ENGINE` points to a local copy, and are skipped otherwise.
@@ -45,8 +45,8 @@ Revit advanced sample (5 storeys, 10 stairs / 20 flights, two generated landing 
 - All 20 ramps `STAIRWAY`, levels `1 -> 901 -> 2 -> 902 -> 3`, offsets 0, `rise x steps` = 1.90 m.
 - Vissim keeps our first point (bottom edge) as the ramp start; the first stored edge runs bottom -> top for flights rising in +y and in -y. Stair direction checked visually by the engineer: correct.
 - Both ends of every ramp touch the walkable area of their own level.
-- Known side effect: the 0.10 m `end_overlap` at each end makes the Vissim run 0.20 m longer than the IFC flight (going 0.348 m instead of 0.330 m).
-- Vissim reports `usableWid` 0.58 m for a 1.14 m wide flight (balustrade and obstacle distance); review this against the design capacity.
+- The 0.10 m extension at both ends made that run 0.20 m longer than the IFC flight (going 0.348 m instead of 0.330 m). Since 2026-10-20 an end standing on its floor is not extended (Revit sample: 7 of 20 flights keep their bottom end exact).
+- Vissim stores `usableWid` 0.58 m for a 1.14 m flight. In the Vissim 2024 manual *Usable width (UsableWid)* is the escalator/moving-walkway step width ("value range 600 to 1,200 mm", basis of the socket width); a `STAIRWAY` is defined by its polygon width, so the 0.58 m default does not narrow the stair. No change made.
 
 ## Still to verify in Vissim
 
