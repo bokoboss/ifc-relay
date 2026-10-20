@@ -1490,6 +1490,11 @@ async function restoreState() {
     document.getElementById('healthText').textContent = health.ifcopenshell
       ? `Python ${health.python} · IfcOpenShell ${health.ifcopenshell} · Three ${health.three_vendor_ready ? 'ready' : 'missing'} · Build ${health.vissim_engine_found && health.base_network_found && health.build_adapter_found ? 'ready' : 'missing'}`
       : `Python ${health.python} · IfcOpenShell missing`;
+    document.getElementById('versionText').textContent = health.app_version
+      ? `แอป v${health.app_version} · Semantic schema ${health.semantic_schema_version} · ${health.engine_contract} · ทดสอบกับ ${health.supported_vissim}`
+      : '';
+    if (health.app_version) document.getElementById('appVersionText').textContent = `v${health.app_version}`;
+    if (health.credit) document.getElementById('creditText').textContent = health.credit;
 
     if (!health.three_vendor_ready) {
       setMessage('ไม่พบไฟล์ Three.js · รัน install.bat ก่อนใช้งานมุมมอง 3D');

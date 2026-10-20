@@ -4,7 +4,9 @@
 
 **ภาษาไทย:** เครื่องมือช่วยเปลี่ยนแบบอาคาร/BIM ให้เป็นโมเดลเรขาคณิตสำหรับ PTV Viswalk ลดการขึ้นโมเดลซ้ำ โดยให้วิศวกรตรวจสอบและเลือกองค์ประกอบก่อนสร้างโมเดล ไม่ใช่ระบบแปลงไฟล์อัตโนมัติที่รับรองความถูกต้องโดยไม่ต้องตรวจ
 
-> **Status:** POC / active development — v0.4.1a source snapshot. Local-first, Windows-based Vissim/Viswalk integration. Not an official PTV product or a standalone production release.
+> **Status:** v0.6.0 — supervised engineering pilot. Local-first, Windows-based Vissim/Viswalk integration. Not an official PTV product or a standalone production release.
+>
+> *Orchestrated by **KITTIPAT TANGITTINUNT**.*
 
 ## What are we building?
 
@@ -51,7 +53,13 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 | Large IFC workflow | Relevant-geometry filtering, per-storey loading, whole-building inspection | **Implemented; viewer tested on large IFC** |
 | Walkable areas | Merge floor panels; track internal voids | **Implemented; unit tested; large-model QA pending** |
 | Validation & export | Check geometry, download JSON, run local Vissim COM build and generate `.inpx` with reports | **Validated on small baseline** |
-| Vertical circulation | Stair/ramp flights from mesh geometry, intermediate landing levels, level snapping with explicit offsets ([details](docs/VERTICAL_CIRCULATION.md)) | **Implemented (v0.5 draft); synthetic-IFC tested; Vissim QA pending. Elevators planned** |
+| Vertical circulation | Stair/ramp flights from mesh geometry, intermediate landing levels, level snapping, mezzanine levels ([details](docs/VERTICAL_CIRCULATION.md)) | **Implemented; stair direction checked in Vissim 2025 on the Revit sample; routing QA pending. Elevators planned** |
+| Multi-storey walls/columns | Exported per storey, each cut by the openings at that storey's walking height | **Implemented; synthetic-IFC tested** |
+| Off-level slabs | Slabs > 0.40 m from the storey floor wait for review (sunscreens, canopies); included ones become their own level | **Implemented; Revit-sample tested** |
+| Connectivity diagnostic | Geometry-only check for walking zones nobody can reach and stairs that reach no floor | **Implemented; not routing verification** |
+| Engineering gate | Block / acknowledge (with fingerprints and reasons) / info before build; build manifest with hashes | **Implemented ([policy](docs/ENGINEERING_GATE.md))** |
+| 2D plan editor | Per-level plan: measure, add walkable floor / obstacle, open a passage through walls (rectangles) | **Implemented; browser E2E in CI** |
+| Source vs pedestrian model | Click pedestrian-model objects, jump to their IFC source, overlay view | **Implemented** |
 | Drawing inputs | Full DXF/PDF interpretation and editable 2D review in the app | **Planned; not supported by the current web workflow** |
 | Pedestrian demand/results | Set origins/destinations, run simulation, summarize KPIs | **Longer-term extension; not implemented** |
 
@@ -136,6 +144,21 @@ python -m pytest tests
 ```
 
 The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (`checks/41`, `43`, `45`, `46`) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the bundled `engine/05_geometry_engine_v03.py` in validate-only mode (no Vissim, no base network) on every run, including CI; `VBB_GEOMETRY_ENGINE` can point to another copy.
+
+## Versions
+
+| | |
+| --- | --- |
+| App | 0.6.0 (`version.py`) |
+| Pedestrian-model (semantic) schema | 0.6.0 |
+| Geometry Engine contract | v0.3 (`engine/05_geometry_engine_v03.py`) |
+| Tested Vissim | PTV Vissim 2025 SP15 (COM `VISSIM.Vissim.2025`) |
+
+The app reports these in *Engine ในเครื่อง* and writes them into every build manifest.
+
+## Credits
+
+Orchestrated by **KITTIPAT TANGITTINUNT** — product direction, engineering review and Vissim/Viswalk verification.
 
 ## Data, trademark and licensing
 

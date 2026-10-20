@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from version import ENGINE_CONTRACT, SEMANTIC_SCHEMA_VERSION
+
 import json
 import math
 from collections import defaultdict
@@ -1622,7 +1624,8 @@ def build_semantic_model(
         "obstacles": obstacles,
         "vertical_connections": vertical_connections,
         "ifc_semantic": {
-            "schema_version": "0.5.0-dev",
+            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "engine_contract": ENGINE_CONTRACT,
             "ifc_schema": str(model.schema),
             "unit_scale_to_m": unit_scale,
             "key_ranges": key_ranges,

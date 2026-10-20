@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from version import PROJECT_STATE_VERSION
+
 
 class ProjectStateStore:
     def __init__(self, path: Path):
@@ -14,7 +16,7 @@ class ProjectStateStore:
     def read(self) -> dict[str, Any]:
         if not self.path.exists():
             return {
-                "schema_version": "0.3",
+                "schema_version": PROJECT_STATE_VERSION,
                 "upload": None,
                 "analysis": None,
                 "geometry": None,

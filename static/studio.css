@@ -526,3 +526,7 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .edit-row {display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-bottom:1px solid #eef2f2;}
 .edit-row .edit-kind {font-weight:600;min-width:84px;}
 .edit-row button {margin-left:auto;font-size:11px;padding:2px 7px;border:1px solid #e0b8b3;border-radius:4px;background:#fff;color:#9b2c22;cursor:pointer;}
+
+.version-text {margin-top:6px;font-size:11px;color:#5b6b6d;}
+.app-credit {display:flex;justify-content:center;gap:8px;padding:14px 16px 18px;font-size:11px;letter-spacing:.04em;color:#7a8a8c;}
+.app-credit #creditText {font-weight:600;color:#4d5f61;}
