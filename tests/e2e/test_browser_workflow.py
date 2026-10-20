@@ -124,29 +124,33 @@ def _enter_plan(page, level="1"):
     page.click("#planModeBtn")
     page.select_option("#planLevelSelect", level)
     page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
-    # wait until the plan camera has settled (fit happens on the next frames)
-    page.wait_for_function("""(() => { const a = JSON.stringify(window.IFCViewer.planScreenPoint(0, 0));
-        return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() =>
-            r(a === JSON.stringify(window.IFCViewer.planScreenPoint(0, 0)))))); })()""", timeout=10000)
+    _plan_point(page, 0, 0)       # plan camera has settled (fit happens on the next frames)
 
 
 def _plan_point(page, x, y):
-    """Viewport point of plan coordinate (x, y), on screen and stable for two frames.
+    """Viewport point of plan coordinate (x, y), on the canvas and stable for two frames.
 
-    Panels below the viewer fill in asynchronously (gate, connectivity), which can
-    scroll the page after _enter_plan; a stale point then lands off the canvas.
+    Panels below the viewer fill in asynchronously and can scroll the page after
+    _enter_plan; a stale point then lands off the canvas. page.evaluate awaits the
+    promise (wait_for_function would treat the Promise object itself as truthy).
     """
-    page.wait_for_function(f"""(() => {{
+    js = f"""() => {{
         document.getElementById('viewerCanvasHost').scrollIntoView({{block: 'center'}});
         const a = JSON.stringify(window.IFCViewer.planScreenPoint({x}, {y}));
         return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
             const p = window.IFCViewer.planScreenPoint({x}, {y});
             const rc = document.getElementById('viewerCanvasHost').getBoundingClientRect();
-            r(a === JSON.stringify(p) && p.y >= Math.max(rc.top, 0) && p.y <= Math.min(rc.bottom, innerHeight)
-              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth));
+            const ok = a === JSON.stringify(p) && p.y >= Math.max(rc.top, 0) && p.y <= Math.min(rc.bottom, innerHeight)
+              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth);
+            r({{ok, p, rect: [rc.left, rc.top, rc.right, rc.bottom], view: [innerWidth, innerHeight, scrollY]}});
         }})));
-    }})()""", timeout=10000)
-    return page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+    }}"""
+    for _ in range(40):
+        res = page.evaluate(js)
+        if res["ok"]:
+            return res["p"]
+        page.wait_for_timeout(250)
+    raise AssertionError(f"plan point ({x}, {y}) never on the canvas: {res}")
 
 
 def _click_plan(page, x, y):
