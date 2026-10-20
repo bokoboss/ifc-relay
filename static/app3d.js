@@ -154,6 +154,7 @@ function stairDirectionArrow(connection, startZ, endZ) {
 }
 
 function clearSemantic() {
+  clearSemanticSelection();
   for (const child of [...semanticGroup.children]) {
     semanticGroup.remove(child);
     disposeObjectTree(child);
@@ -190,9 +191,28 @@ function levelZMap(model) {
   return map;
 }
 
+// Semantic level key -> IFC storey name, so the storey filter also applies to the
+// pedestrian model. Generated landing levels (901+) have no storey of their own.
+let semanticLevelNames = new Map();
+
+function semanticLevelKey(info) {
+  const src = info?.source || {};
+  if (info?.kind === 'vertical_connection' || info?.kind === 'stair_direction') return Number(src.start_level);
+  return Number(src.level_key);
+}
+
+function semanticPassesFilters(object) {
+  const name = semanticLevelNames.get(semanticLevelKey(object.userData.semantic));
+  return name == null || storeyFilter.has(name);
+}
+
 function addSemanticPreview(model) {
   clearSemantic();
   const levels = levelZMap(model);
+  semanticLevelNames = new Map(
+    (model.levels || []).filter(level => !level.generated && Number(level.key) < 900)
+      .map(level => [Number(level.key), level.name]),
+  );
 
   for (const area of model.areas || []) {
     if (!area.polygon?.length) continue;
@@ -369,6 +389,11 @@ function applyVisibility() {
     updateMaterial(mesh);
   }
 
+  for (const child of semanticGroup.children) {
+    if (child === semanticHelper) continue;
+    if (child.userData?.semantic) child.visible = semanticPassesFilters(child);
+  }
+
   if (selectionHelper) {
     const mesh = selectedGuid ? meshes.get(selectedGuid) : null;
     selectionHelper.visible = !!mesh?.visible;
@@ -453,6 +478,43 @@ function selectGuid(guid, emit = true) {
   }
 }
 
+let semanticHelper = null;
+
+function clearSemanticSelection() {
+  if (!semanticHelper) return;
+  scene.remove(semanticHelper);
+  semanticHelper.geometry.dispose();
+  semanticHelper.material.dispose();
+  semanticHelper = null;
+}
+
+// Source GlobalIds a pedestrian-model object came from (areas merge many slabs).
+function semanticSourceGuids(info) {
+  const src = info?.source || {};
+  const guids = [];
+  if (src.ifc_global_id) guids.push(src.ifc_global_id);
+  for (const g of src.ifc_source_global_ids || []) if (!guids.includes(g)) guids.push(g);
+  if (src.ifc_parent_global_id && !guids.includes(src.ifc_parent_global_id)) guids.push(src.ifc_parent_global_id);
+  return guids;
+}
+
+function selectSemantic(object) {
+  clearSemanticSelection();
+  if (!object) return;
+  semanticHelper = new THREE.BoxHelper(object, 0xd98e04);
+  scene.add(semanticHelper);
+  const info = object.userData.semantic;
+  const guids = semanticSourceGuids(info);
+  window.dispatchEvent(new CustomEvent('semantic-element-selected', {
+    detail: {
+      kind: info.kind,
+      source: info.source,
+      sourceGuids: guids,
+      sourceItems: guids.map(g => meshes.get(g)?.userData.item).filter(Boolean),
+    },
+  }));
+}
+
 function resize() {
   const width = Math.max(host.clientWidth, 1);
   const height = Math.max(host.clientHeight, 1);
@@ -467,6 +529,22 @@ function pointerSelect(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
 
+  // Pick only what is on screen: the pedestrian model in simulation mode, the
+  // source IFC otherwise (a hidden parent group hides its meshes too).
+  if (semanticGroup.visible) {
+    const targets = semanticGroup.children.filter(child => child.visible && child.userData?.semantic && child !== semanticHelper);
+    // Walkable areas are translucent: a click passes through them to walls,
+    // columns or stairs behind; an area is picked only when nothing else is hit.
+    const owners = raycaster.intersectObjects(targets, true).map(hit => {
+      let object = hit.object;
+      while (object && !object.userData?.semantic) object = object.parent;
+      return object;
+    }).filter(Boolean);
+    const object = owners.find(o => o.userData.semantic.kind !== 'area') || owners[0];
+    if (object) selectSemantic(object);
+    return;
+  }
+  if (!modelGroup.visible) return;
   const visibleMeshes = Array.from(meshes.values()).filter(mesh => mesh.visible);
   const hit = raycaster.intersectObjects(visibleMeshes, false)[0];
   if (hit?.object?.userData?.item?.global_id) {
@@ -474,7 +552,14 @@ function pointerSelect(event) {
   }
 }
 
-renderer.domElement.addEventListener('pointerup', pointerSelect);
+// Ignore drags (orbit/pan): select only on a click that did not move.
+let pointerDownAt = null;
+renderer.domElement.addEventListener('pointerdown', event => { pointerDownAt = [event.clientX, event.clientY]; });
+
+renderer.domElement.addEventListener('pointerup', event => {
+  if (pointerDownAt && Math.hypot(event.clientX - pointerDownAt[0], event.clientY - pointerDownAt[1]) > 5) return;
+  pointerSelect(event);
+});
 window.addEventListener('resize', resize);
 
 // Keep the renderer synchronized when a previously hidden explorer section
@@ -553,6 +638,7 @@ window.IFCViewer = {
     semanticGroup.visible = useSemantic;
     applyVisibility();
     if (selectionHelper) selectionHelper.visible = !useSemantic && !!meshes.get(selectedGuid)?.visible;
+    if (semanticHelper) semanticHelper.visible = useSemantic;
     requestAnimationFrame(() => { resize(); fitModel(); });
   },
 
@@ -580,6 +666,15 @@ window.IFCViewer = {
 
   selectByGuid(guid) {
     selectGuid(guid, true);
+  },
+
+  // Jump from a pedestrian-model object to the IFC element it came from.
+  showSource(guid) {
+    if (!guid || !meshes.has(guid)) return false;
+    this.setMode('source');
+    selectGuid(guid, true);
+    requestAnimationFrame(() => fitSelection());
+    return true;
   },
 
   fitModel,
@@ -612,6 +707,16 @@ window.IFCViewer = {
   },
 
   resize,
+
+  // Screen position (client px) of a pedestrian-model object's centre - used by
+  // browser QA to click a specific object.
+  semanticScreenPoint(key) {
+    const object = semanticMeshes.find(m => Number(m.userData.semantic?.source?.key) === Number(key));
+    if (!object || !object.visible || !semanticGroup.visible) return null;
+    const centre = new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3()).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + (centre.x + 1) / 2 * rect.width, y: rect.top + (1 - centre.y) / 2 * rect.height };
+  },
 
   diagnostics() {
     const gl = renderer.getContext();
