@@ -788,6 +788,76 @@ def build_geometry_model(data):
 
 
 # ============================================================
+# OBSTACLE OVERLAP (F-16)
+# ============================================================
+
+def find_obstacle_overlaps(
+    obstacles,
+):
+    """Same-level obstacle pairs that overlap by more than TOLERANCE.
+
+    Same result, in the same order (i < j, ascending), as checking every pair,
+    but obstacles are grouped by level and only pairs whose bounding boxes
+    meet (Shapely STRtree) are intersected: an overlap with area > 0 needs
+    the boxes to meet, so no pair is missed.
+    """
+    from shapely import STRtree
+
+    by_level = {}
+    for index, record in enumerate(obstacles):
+        by_level.setdefault(
+            record["level_key"], []
+        ).append(index)
+
+    trees = {
+        level_key: (
+            STRtree([obstacles[n]["geometry"] for n in members]),
+            members,
+        )
+        for level_key, members in by_level.items()
+    }
+
+    found = []
+    for i, a in enumerate(obstacles):
+        tree, members = trees[a["level_key"]]
+        candidates = sorted(
+            members[n]
+            for n in tree.query(a["geometry"])
+            if members[n] > i
+        )
+        for j in candidates:
+            b = obstacles[j]
+            overlap = a["geometry"].intersection(
+                b["geometry"]
+            )
+            if (
+                not overlap.is_empty
+                and overlap.area
+                > TOLERANCE
+            ):
+                found.append({
+                    "type":
+                        "obstacle_overlap",
+                    "level_key":
+                        a["level_key"],
+                    "objects": [
+                        a["key"],
+                        b["key"],
+                    ],
+                    "names": [
+                        a["name"],
+                        b["name"],
+                    ],
+                    "overlap_area_m2":
+                        round(
+                            overlap.area,
+                            6,
+                        ),
+                })
+    return found
+
+
+# ============================================================
 # ENGINEERING VALIDATION
 # ============================================================
 
@@ -875,53 +945,11 @@ def validate_model(
     # OBSTACLE OVERLAP - SAME LEVEL ONLY
     # --------------------------------------------------------
 
-    for i in range(
-        len(obstacles)
-    ):
-        for j in range(
-            i + 1,
-            len(obstacles),
-        ):
-            a = obstacles[i]
-            b = obstacles[j]
-
-            if (
-                a["level_key"]
-                != b["level_key"]
-            ):
-                continue
-
-            overlap = (
-                a["geometry"]
-                .intersection(
-                    b["geometry"]
-                )
-            )
-
-            if (
-                not overlap.is_empty
-                and overlap.area
-                > TOLERANCE
-            ):
-                warnings.append({
-                    "type":
-                        "obstacle_overlap",
-                    "level_key":
-                        a["level_key"],
-                    "objects": [
-                        a["key"],
-                        b["key"],
-                    ],
-                    "names": [
-                        a["name"],
-                        b["name"],
-                    ],
-                    "overlap_area_m2":
-                        round(
-                            overlap.area,
-                            6,
-                        ),
-                })
+    warnings.extend(
+        find_obstacle_overlaps(
+            obstacles
+        )
+    )
 
     # --------------------------------------------------------
     # VERTICAL CONNECTION FOOTPRINT CHECK
