@@ -4,7 +4,7 @@ Run through verify_vissim.bat. Steps:
 
 1. Environment: Python packages, engine / base network location, Vissim COM.
 2. Automated tests (synthetic IFC) including engine-contract tests.
-3. Fixture #1 regression (36_check_ifc_semantic_v03.py) if TallBuilding.ifc
+3. Fixture #1 regression (checks/36_check_ifc_semantic_v03.py) if TallBuilding.ifc
    is available (VBB_FIXTURE1_IFC or the project root).
 4. Vissim COM build of a synthetic verification model that exercises the
    v0.5 work: straight stair, U-stair with landing level, flight ending
@@ -134,7 +134,7 @@ def run_fixture1(rep: Report, root: Path) -> None:
         return
     env = dict(os.environ, VBB_FIXTURE1_IFC=str(ifc), VBB_PROJECT_ROOT=str(root))
     proc = subprocess.run(
-        [sys.executable, "36_check_ifc_semantic_v03.py"],
+        [sys.executable, "checks/36_check_ifc_semantic_v03.py"],
         cwd=APP_DIR, env=env, capture_output=True, text=True,
     )
     (rep.out_dir / "fixture1.log").write_text(proc.stdout + "\n" + proc.stderr, encoding="utf-8")

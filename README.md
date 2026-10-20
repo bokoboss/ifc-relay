@@ -98,15 +98,31 @@ Runs import (read-only, SHA-256 checked before/after) → IFC audit → geometry
 
 Lookup order (`project_paths.py`): engine `VBB_GEOMETRY_ENGINE` -> `local\` -> bundled `engine\` -> parent folder; base network and outputs `VBB_PROJECT_ROOT` -> `local\` -> parent folder. `local\` is git-ignored.
 
-## Local development (Windows)
+## Repository layout
 
-1. Clone the repository to the intended local project folder.
-2. Prepare a Python environment and install packages from `requirements.txt`.
-3. Run `setup_app.ps1` to install Python dependencies and locally hosted Three.js modules (initial setup requires internet).
-4. Run `run_app.ps1` and open `http://127.0.0.1:8765`.
-5. For `.inpx` export, configure licensed PTV Vissim 2025 COM and place `base_empty.inpx` in `local\` (or the parent folder, original layout). The engine is bundled in `engine/`.
+```text
+install.bat  start.bat  verify_vissim.bat   Windows entry points (no .exe)
+app.py                      FastAPI server (uvicorn app:app)
+ifc_service.py              IFC audit and storey/mesh listing
+ifc_geometry_service.py     IFC geometry extraction
+ifc_semantic_service.py     walkable areas, obstacles, openings, key ranges
+ifc_vertical_service.py     stairs/ramps, landings, up-direction review
+revision_service.py         carry review decisions across IFC revisions
+vissim_build_service.py     validation and build orchestration
+vissim_build_adapter.py     subprocess adapter around the Geometry Engine (COM)
+state_store.py  project_paths.py  fixture_paths.py
+static/                     browser UI (Three.js runtime downloaded to static/vendor/)
+engine/                     bundled Geometry Engine v0.3
+scripts/                    installer, launcher, verify and IFC dry-run scripts
+tests/                      pytest suite on synthetic IFC (runs in CI)
+checks/                     older numbered checks; 41/43/45/46 need a local IFC (VBB_LARGE_IFC)
+examples/                   sample engine input
+docs/                       design notes, product vision, history, sample report
+legacy/                     DXF/PDF prototypes, superseded checks and launchers (reference only)
+local/  output/             machine-specific files and results (git-ignored)
+```
 
-The present scripts assume a local project layout and are not yet packaged as a one-click installer.
+For development without the launchers: `pip install -r requirements.txt -r requirements-dev.txt`, then `python -m uvicorn app:app --host 127.0.0.1 --port 8765`. The browser needs the Three.js files in `static/vendor/` (`install.bat` downloads them).
 
 ## Engineering quality and roadmap
 
@@ -119,7 +135,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests
 ```
 
-The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (41/43/45/46) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the bundled `engine/05_geometry_engine_v03.py` in validate-only mode (no Vissim, no base network) on every run, including CI; `VBB_GEOMETRY_ENGINE` can point to another copy.
+The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (`checks/41`, `43`, `45`, `46`) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the bundled `engine/05_geometry_engine_v03.py` in validate-only mode (no Vissim, no base network) on every run, including CI; `VBB_GEOMETRY_ENGINE` can point to another copy.
 
 ## Data, trademark and licensing
 

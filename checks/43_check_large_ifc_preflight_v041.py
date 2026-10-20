@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))  # repo root
+
 import json
 from pathlib import Path
 
@@ -9,7 +13,7 @@ from ifc_geometry_service import extract_ifc_geometry
 from ifc_service import audit_ifc
 
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_DIR.parent
 CACHE_DIR = APP_DIR / "runtime" / "regression"
 

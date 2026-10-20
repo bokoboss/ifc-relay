@@ -34,7 +34,7 @@ def _run_adapter(
     validate_only: bool = False,
     timeout_sec: int = 240,
 ) -> subprocess.CompletedProcess[str]:
-    adapter = app_dir / '40_vissim_build_adapter_v04.py'
+    adapter = app_dir / 'vissim_build_adapter.py'
     if not adapter.exists():
         raise FileNotFoundError(f'Build adapter missing: {adapter}')
 

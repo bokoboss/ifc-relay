@@ -24,8 +24,8 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Self-contained regression (synthetic IFC, no Vissim)
         run: python -m pytest -q tests
-      - name: Legacy static checks
+      - name: Static checks (checks/)
         run: |
-          python 42_check_walkable_merge_v041.py
-          python 44_check_local_web_app_v041_static.py
-          python 38_check_export_ui_v031.py
+          python checks/42_check_walkable_merge_v041.py
+          python checks/44_check_local_web_app_v041_static.py
+          python checks/38_check_export_ui_v031.py

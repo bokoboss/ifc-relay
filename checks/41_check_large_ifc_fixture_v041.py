@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))  # repo root
+
 import re
 from collections import Counter
 from pathlib import Path
@@ -7,7 +11,7 @@ from pathlib import Path
 from fixture_paths import large_ifc_from_env
 
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_DIR.parent
 
 

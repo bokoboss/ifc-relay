@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))  # repo root
+
 import importlib.util
 import json
 import sys
@@ -12,7 +16,7 @@ from ifc_geometry_service import extract_ifc_geometry
 from ifc_semantic_service import build_semantic_model, write_semantic_model
 
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = project_root()
 IFC_PATH = Path(os.environ["VBB_FIXTURE1_IFC"]) if os.environ.get("VBB_FIXTURE1_IFC") else PROJECT_ROOT / "TallBuilding.ifc"
 CACHE_PATH = APP_DIR / "runtime" / "cache" / "TallBuilding_geometry_v02.json"
