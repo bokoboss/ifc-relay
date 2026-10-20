@@ -114,3 +114,35 @@ def test_verify_script_cli(tmp_path):
                           env={**__import__("os").environ, "VBB_PROJECT_ROOT": str(tmp_path / "proj")})
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert "RESULT:" in proc.stdout and "does NOT mean" in proc.stdout
+
+
+@requires_engine
+def test_report_breaks_down_engine_warnings_and_groups_slab_offsets(tmp_path):
+    """Structural-style model: perimeter column, column with no floor under it, wall/column overlap,
+    sunken slabs. The report must say which obstacles and how much lies outside, by GlobalId."""
+    b = Building([0.0, H])
+    l1, l2 = b.storeys
+    b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 0.0, l1)
+    for x0 in (0, 7, 14):                                          # floor in three panels
+        b.slab([(x0, 0), (x0 + 7 if x0 < 14 else 20, 0), (x0 + 7 if x0 < 14 else 20, 10), (x0, 10)], H, l2)
+    b.slab([(20, 0), (24, 0), (24, 4), (20, 4)], H - 0.27, l2)   # sunken wet area
+    b.slab([(20, 6), (24, 6), (24, 10), (20, 10)], H - 0.27, l2)
+    b.box("IfcColumn", 19.8, 5, 20.2, 5.4, 0.0, 3.0, l1)          # half outside (edge)
+    b.box("IfcColumn", 30, 5, 30.4, 5.4, 0.0, 3.0, l1)            # no floor under it
+    add_wall(b, 2.0, 3.0, 8.0, l1)
+    b.box("IfcColumn", 5.0, 2.9, 5.4, 3.3, 0.0, 3.0, l1)          # overlaps the wall
+    ifc = b.write(tmp_path / "struct.ifc")
+    _, md = run_ifc_check(ifc, tmp_path / "out", redact=True)
+    text = md.read_text(encoding="utf-8")
+    data = json.loads((tmp_path / "out" / "report.json").read_text(encoding="utf-8"))
+    bd = data["engine_validation"]["breakdown"]
+    assert bd["outside_by_band"].get("> 90 % (outside floor / no slab)") == 1
+    assert bd["outside_by_band"].get("10-90 % (straddles floor edge)") == 1
+    assert bd["overlap_by_pair"] == {"column + wall": 1}
+    assert all(r["global_id"] for r in bd["outside_samples"])
+    assert bd["outside_samples"][0]["outside_pct"] == 100
+    assert "### Obstacles outside the walkable floor" in text
+    assert "### Overlapping obstacles" in text
+    assert "| 2 | -0.270 |" in text            # grouped slab-offset row, not one line per slab
+    assert "Floor slab " not in text
+    assert "Ifc[redacted]" not in text        # factory building is named "Building"
