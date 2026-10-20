@@ -68,7 +68,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 ## Outputs
 
 - Reviewed semantic/engine-facing geometry JSON.
-- Locally generated Vissim/Viswalk `.inpx` (requires licensed Vissim 2025 and a local `base_empty.inpx`).
+- Locally generated Vissim/Viswalk `.inpx` (requires licensed Vissim 2025 or 2026 and a local `base_empty.inpx`).
 - Validation results, model-building report, and build log.
 
 ## Architecture and boundaries
@@ -86,10 +86,10 @@ Structural IFC models may contain no doors or other information needed to establ
 
 ## Quick start on Windows (no .exe)
 
-Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (the installer can install Python 3.12 with `winget` if none is found). `Build Viswalk` additionally needs a licensed PTV Vissim 2025.
+Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (the installer can install Python 3.12 with `winget` if none is found). `Build Viswalk` additionally needs a licensed PTV Vissim 2025 or 2026.
 
 1. Download the repository ZIP (or `git clone`) and extract it anywhere, e.g. `C:\Tools\viswalk-bim-builder`.
-2. Copy `base_empty.inpx` (an empty network saved from Vissim 2025) into the `local\` folder (created by step 3), or pass it to the installer: `install.bat -BaseNetworkPath D:\proj\base_empty.inpx`. The Geometry Engine is bundled in `engine\`; `-EnginePath` copies an override into `local\`.
+2. Copy `base_empty.inpx` (an empty network saved from the Vissim release you build with) into the `local\` folder (created by step 3), or pass it to the installer: `install.bat -BaseNetworkPath D:\proj\base_empty.inpx`. The Geometry Engine is bundled in `engine\`; `-EnginePath` copies an override into `local\`.
 3. Double-click **`install.bat`**: creates `.venv` inside the app folder, installs packages, downloads the local Three.js runtime and checks Vissim COM.
 4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
 5. On the Vissim machine, double-click **`verify_vissim.bat`**: runs the automated tests (including engine-contract tests), Fixture #1 if `local\TallBuilding.ifc` exists, builds a synthetic verification model (straight stair, U-stair with landing, partial flight, L-wall, closed wall loop, door-less opening) through Vissim COM, and writes `output\verify_<time>\report.md` with a short manual checklist for Vissim. Use `verify_vissim.bat -SkipBuild` to skip the COM build.
@@ -152,7 +152,7 @@ The same suite runs on every pull request via GitHub Actions. Large-IFC regressi
 | App | 0.6.0 (`version.py`) |
 | Pedestrian-model (semantic) schema | 0.6.0 |
 | Geometry Engine contract | v0.3 (`engine/05_geometry_engine_v03.py`) |
-| Tested Vissim | PTV Vissim 2025 SP15 (COM `VISSIM.Vissim.2025`) |
+| Vissim | 2025 SP15 tested (build, reopen, stair check); 2026 supported. The build uses the newest installed release (`Vissim.Vissim.2026`, then `.2025`); set `VBB_VISSIM_PROGID` to choose |
 
 The app reports these in *Engine ในเครื่อง* and writes them into every build manifest.
 

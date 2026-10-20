@@ -8,6 +8,8 @@ import platform
 import sys
 import types
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from typing import Any
 
 
@@ -177,6 +179,14 @@ def main() -> int:
     engine.OUTPUT_DIR = output_path.parent
     engine.OUTPUT_FILE = output_path
     engine.REPORT_FILE = report_path
+
+    # Talk to whichever supported Vissim release is installed (2026, 2025 ...).
+    from vissim_com import resolve_prog_id
+    prog_id, how = resolve_prog_id()
+    if prog_id is None:
+        raise RuntimeError('No PTV Vissim COM server is registered on this computer (Vissim 2025/2026 not found).')
+    engine.PROG_ID = prog_id
+    print(f'Vissim COM ProgID: {prog_id} ({how})')
 
     original_input = builtins.input
     builtins.input = lambda prompt='': (print(f'{prompt}[auto-close]'), '')[1]

@@ -12,7 +12,7 @@ PROJECT_STATE_VERSION = "0.6"
 GEOMETRY_PAYLOAD_VERSION = "0.6"
 SEMANTIC_SCHEMA_VERSION = "0.6.0"
 ENGINE_CONTRACT = "Geometry Engine v0.3 (engine/05_geometry_engine_v03.py)"
-SUPPORTED_VISSIM = "PTV Vissim 2025 SP15 (COM ProgID VISSIM.Vissim.2025)"
+SUPPORTED_VISSIM = "PTV Vissim 2025 SP15 (tested) and 2026 (supported; picks the newest installed via COM)"
 
 CREDIT = "Orchestrated by KITTIPAT TANGITTINUNT"
 

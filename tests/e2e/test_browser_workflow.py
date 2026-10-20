@@ -124,14 +124,37 @@ def _enter_plan(page, level="1"):
     page.click("#planModeBtn")
     page.select_option("#planLevelSelect", level)
     page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
-    # wait until the plan camera has settled (fit happens on the next frames)
-    page.wait_for_function("""(() => { const a = JSON.stringify(window.IFCViewer.planScreenPoint(0, 0));
-        return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() =>
-            r(a === JSON.stringify(window.IFCViewer.planScreenPoint(0, 0)))))); })()""", timeout=10000)
+    _plan_point(page, 0, 0)       # plan camera has settled (fit happens on the next frames)
+
+
+def _plan_point(page, x, y):
+    """Viewport point of plan coordinate (x, y), on the canvas and stable for two frames.
+
+    Panels below the viewer fill in asynchronously and can scroll the page after
+    _enter_plan; a stale point then lands off the canvas. page.evaluate awaits the
+    promise (wait_for_function would treat the Promise object itself as truthy).
+    """
+    js = f"""() => {{
+        document.getElementById('viewerCanvasHost').scrollIntoView({{block: 'center'}});
+        const a = JSON.stringify(window.IFCViewer.planScreenPoint({x}, {y}));
+        return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
+            const p = window.IFCViewer.planScreenPoint({x}, {y});
+            const rc = document.getElementById('viewerCanvasHost').getBoundingClientRect();
+            const ok = a === JSON.stringify(p) && p.y >= Math.max(rc.top, 0) && p.y <= Math.min(rc.bottom, innerHeight)
+              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth);
+            r({{ok, p, rect: [rc.left, rc.top, rc.right, rc.bottom], view: [innerWidth, innerHeight, scrollY]}});
+        }})));
+    }}"""
+    for _ in range(40):
+        res = page.evaluate(js)
+        if res["ok"]:
+            return res["p"]
+        page.wait_for_timeout(250)
+    raise AssertionError(f"plan point ({x}, {y}) never on the canvas: {res}")
 
 
 def _click_plan(page, x, y):
-    pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+    pt = _plan_point(page, x, y)
     page.mouse.move(pt["x"], pt["y"])
     page.mouse.click(pt["x"], pt["y"])
     page.wait_for_timeout(150)
@@ -173,7 +196,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.click(".plan-tool[data-tool=passage]")
     hits = []
     for x, y in ((13.5, 7.5), (14.5, 8.5)):
-        pt = page.evaluate(f"window.IFCViewer.planScreenPoint({x},{y})")
+        pt = _plan_point(page, x, y)
         hits.append(page.evaluate(f"(() => {{ const e = document.elementFromPoint({pt['x']}, {pt['y']}); "
                                   f"return [{pt['x']:.0f}, {pt['y']:.0f}, e ? e.tagName + '#' + e.id + '.' + e.className : null]; }})()"))
         page.mouse.click(pt["x"], pt["y"])
