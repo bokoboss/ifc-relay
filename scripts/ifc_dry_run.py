@@ -86,7 +86,8 @@ WARNING_RULES: list[tuple[str, str, str]] = [
     (r"matches no storey or landing level", "review", "ปลายบันไดไม่ตรงกับระดับชั้น (ใช้ z offset)"),
     (r"is not a straight flight", "review", "บันไดไม่ใช่แนวตรง"),
     (r"differs from floor-slab tops", "review", "ระดับชั้น (Elevation) ไม่ตรงกับผิวพื้น"),
-    (r"from its storey floor; merged", "review", "แผ่นพื้นสูงต่างจากระดับชั้น"),
+    (r"from its storey floor; merged", "review", "แผ่นพื้นสูงต่างจากระดับชั้น (รวมเข้าพื้นชั้น)"),
+    (r"from its storey floor; left out of level", "review", "แผ่นพื้นต่างระดับมาก (ไม่ใช้เป็นพื้นเดินจนกว่าจะยืนยัน)"),
     (r"IfcTransportElement", "review", "ลิฟต์/บันไดเลื่อน ส่งออกเป็นสิ่งกีดขวางเท่านั้น"),
     (r"span several storeys; copied onto each storey", "info", "ผนัง/เสาสูงหลายชั้น คัดลอกไปทุกชั้นที่ผ่าน"),
     (r"exported without door gaps on the upper storeys", "review", "ผนังหลายชั้น: ชั้นบนไม่มีช่องประตู (ต้องตรวจ)"),
@@ -304,6 +305,7 @@ class DryRun:
                 "door_openings_applied": summary.get("door_openings_applied"),
                 "unfilled_openings": summary.get("unfilled_openings", 0),
                 "unfilled_passage_candidates": summary.get("unfilled_passage_candidates", 0),
+                "off_level_slabs_left_out": summary.get("off_level_slabs_excluded", 0),
             },
             "not_converted_by_reason": dict(by_category["skipped"]),
             "review_items_by_reason": dict(by_category["review"]),
@@ -458,7 +460,7 @@ def _table(rows: list[tuple[Any, ...]], header: tuple[str, ...]) -> list[str]:
 
 OUTSIDE_BANDS = ((0.10, "< 10 % (edge contact)"), (0.90, "10-90 % (straddles floor edge)"),
                  (1.01, "> 90 % (outside floor / no slab)"))
-SLAB_OFFSET_RE = re.compile(r"Floor slab \S+ top \(([-\d.]+) m\) is ([-+\d.]+) m from its storey floor; merged into level (\d+)")
+SLAB_OFFSET_RE = re.compile(r"Floor slab \S+ top \(([-\d.]+) m\) is ([-+\d.]+) m from its storey floor; (merged into|left out of) level (\d+)")
 
 
 def _obstacle_index(sem: dict[str, Any]) -> dict[int, dict[str, Any]]:
@@ -538,11 +540,12 @@ def group_semantic_warnings(warnings: list[str]) -> tuple[list[dict[str, Any]], 
         if not m:
             rest.append(w)
             continue
-        key = (int(m.group(3)), m.group(2))
+        action = "merged" if m.group(3) == "merged into" else "left out"
+        key = (int(m.group(4)), m.group(2), action)
         g = groups.setdefault(key, {"level": key[0], "offset_m": float(m.group(2)), "slab_top_m": float(m.group(1)),
-                                    "slabs": 0})
+                                    "action": action, "slabs": 0})
         g["slabs"] += 1
-    return sorted(groups.values(), key=lambda g: (g["level"], g["offset_m"])), rest
+    return sorted(groups.values(), key=lambda g: (g["level"], g["offset_m"], g["action"])), rest
 
 
 def render_markdown(p: dict[str, Any]) -> str:
@@ -608,13 +611,18 @@ def render_markdown(p: dict[str, Any]) -> str:
                         ("Key", "Type", "Levels", "Offsets (m)", "Rise (m)", "Steps", "Level match"))
             L += ["", "Stair direction is derived from geometry and is **not certified** until checked in Vissim."]
         if sem.get("warnings"):
+            try:
+                from ifc_semantic_service import OFF_LEVEL_MERGE_MAX
+            except Exception:  # noqa: BLE001 - report text only
+                OFF_LEVEL_MERGE_MAX = 0.40
             groups, rest = group_semantic_warnings(sem["warnings"])
             L += ["", f"### All semantic warnings ({len(sem['warnings'])})", ""]
             if groups:
-                L += [f"Floor slabs whose top differs from the storey floor ({sum(g['slabs'] for g in groups)} slabs, "
-                      "merged into the storey level; typical of sunken wet areas or finishes - review):", ""]
-                L += _table([(g["level"], f"{g['offset_m']:+.3f}", g["slab_top_m"], g["slabs"]) for g in groups],
-                            ("Level", "Offset (m)", "Slab top (m)", "Slabs"))
+                L += [f"Floor slabs whose top differs from the storey floor ({sum(g['slabs'] for g in groups)} slabs). "
+                      f"Within {OFF_LEVEL_MERGE_MAX:.2f} m they are merged (steps, sunken wet areas); further away they are "
+                      "left out of the walkable floor until included in review (sunscreens, canopies, mezzanines):", ""]
+                L += _table([(g["level"], f"{g['offset_m']:+.3f}", g["slab_top_m"], g["slabs"], g["action"]) for g in groups],
+                            ("Level", "Offset (m)", "Slab top (m)", "Slabs", "Action"))
                 L += [""]
             L += [f"- {w}" for w in rest]
     if eng:
