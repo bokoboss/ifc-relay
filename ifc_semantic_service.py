@@ -500,6 +500,104 @@ def area_weighted_median(values: list[tuple[float, float]]) -> float:
             return z
     return values[-1][0]
 
+
+# An element continues onto a storey when it rises at least this far above that
+# storey's floor (it blocks walking height there).
+STOREY_CONTINUATION_MIN = 1.0
+
+
+def _farthest_pair(points: list[list[float]]) -> tuple[list[float], list[float]]:
+    best = (points[0], points[-1])
+    best_d = -1.0
+    for i, a in enumerate(points):
+        for b in points[i + 1:]:
+            d = math.dist(a, b)
+            if d > best_d:
+                best, best_d = (a, b), d
+    return best
+
+
+def replicate_across_storeys(
+    walls: list[dict[str, Any]],
+    columns: list[dict[str, Any]],
+    obstacles: list[dict[str, Any]],
+    storeys: list[dict[str, Any]],
+    level_z_by_key: dict[int, float],
+) -> tuple[int, int, int]:
+    """Copy walls, columns and obstacles that span several storeys onto every storey they cross.
+
+    Vissim obstacles act only on their own level, so a 3-storey exterior or core wall
+    assigned to the ground floor would otherwise be missing on the floors above.
+    The original keeps its level with its height trimmed to the next crossed storey;
+    each copy sits on the crossed storey with z offset 0. Wall copies span the whole
+    wall without the lower storey's door gaps (closed is the safe side; reviewed via warning).
+    Returns (elements replicated, copies made, wall copies without openings).
+    """
+    zs = sorted((float(level_z_by_key[int(lv["key"])]), int(lv["key"]), lv.get("name", "")) for lv in storeys)
+    replicated = copies = closed_wall_copies = 0
+    seen_wall_logical: set[tuple[Any, int, int]] = set()
+
+    def crossed(rec: dict[str, Any]) -> list[tuple[float, int, str]]:
+        base_key = int(rec["level_key"])
+        if base_key not in level_z_by_key:
+            return []
+        bottom = level_z_by_key[base_key] + float(rec.get("z_offset") or 0.0)
+        top = bottom + float(rec.get("height") or 0.0)
+        return [(z, k, n) for z, k, n in zs if k != base_key and z > bottom + 0.5 and top - z >= STOREY_CONTINUATION_MIN]
+
+    # Line walls: group the door-split segments of one logical wall.
+    groups: dict[tuple[Any, int], list[dict[str, Any]]] = defaultdict(list)
+    for w in walls:
+        groups[(w.get("logical_wall_global_id") or id(w), int(w["level_key"]))].append(w)
+    new_walls: list[dict[str, Any]] = []
+    for (logical, base_key), segs in groups.items():
+        targets = crossed(segs[0])
+        if not targets:
+            continue
+        replicated += 1
+        bottom = level_z_by_key[base_key] + float(segs[0].get("z_offset") or 0.0)
+        top = bottom + float(segs[0].get("height") or 0.0)
+        for seg in segs:
+            seg["height"] = round(targets[0][0] - bottom, 5)
+            seg["continues_on_levels"] = [k for _, k, _ in targets]
+        a, b = _farthest_pair([seg["start"] for seg in segs] + [seg["end"] for seg in segs])
+        base_name = str(segs[0]["name"]).split(" [segment ")[0]
+        for i, (z, key, name) in enumerate(targets):
+            z_next = targets[i + 1][0] if i + 1 < len(targets) else top
+            copy = {k: v for k, v in segs[0].items() if k not in ("key", "start", "end", "name", "continues_on_levels")}
+            copy.update({"name": f"{base_name} [continues on {name}]", "level_key": key, "z_offset": 0.0,
+                         "start": list(a), "end": list(b), "height": round(z_next - z, 5),
+                         "replicated_from_level": base_key})
+            new_walls.append(copy)
+            copies += 1
+            if len(segs) > 1:
+                closed_wall_copies += 1
+    walls.extend(new_walls)
+
+    for collection in (columns, obstacles):
+        extra: list[dict[str, Any]] = []
+        for rec in collection:
+            if rec.get("generated") or rec.get("type") == "walkable_void_mask":
+                continue
+            targets = crossed(rec)
+            if not targets:
+                continue
+            replicated += 1
+            base_key = int(rec["level_key"])
+            bottom = level_z_by_key[base_key] + float(rec.get("z_offset") or 0.0)
+            top = bottom + float(rec.get("height") or 0.0)
+            rec["height"] = round(targets[0][0] - bottom, 5)
+            rec["continues_on_levels"] = [k for _, k, _ in targets]
+            for i, (z, key, name) in enumerate(targets):
+                z_next = targets[i + 1][0] if i + 1 < len(targets) else top
+                copy = {k: v for k, v in rec.items() if k not in ("key", "continues_on_levels")}
+                copy.update({"name": f"{rec['name']} [continues on {name}]", "level_key": key, "z_offset": 0.0,
+                             "height": round(z_next - z, 5), "replicated_from_level": base_key})
+                extra.append(copy)
+                copies += 1
+        collection.extend(extra)
+    return replicated, copies, closed_wall_copies
+
 def build_semantic_model(
     path: Path,
     geometry_payload: dict[str, Any],
@@ -1209,6 +1307,20 @@ def build_semantic_model(
                 "it is exported only as an obstacle footprint. Model the elevator in Viswalk manually."
             )
 
+    storey_levels = [lv for lv in levels if not lv.get("generated")]
+    multi_replicated, multi_copies, multi_closed = replicate_across_storeys(
+        walls, columns, obstacles, storey_levels, level_z_by_key)
+    if multi_replicated:
+        warnings.append(
+            f"{multi_replicated} wall/column/obstacle element(s) span several storeys; copied onto each storey "
+            f"they cross ({multi_copies} copies) because Vissim obstacles act only on their own level."
+        )
+    if multi_closed:
+        warnings.append(
+            f"{multi_closed} multi-storey wall copies are exported without door gaps on the upper storeys "
+            "(the lower storey's doors do not carry up). Review doors on those storeys."
+        )
+
     key_ranges = assign_key_ranges({
         "areas": areas,
         "walls": walls,
@@ -1248,6 +1360,8 @@ def build_semantic_model(
             if v["level_match"][end] != "exact"
         ),
         "generated_landing_levels": len(landing_levels),
+        "multi_storey_elements": multi_replicated,
+        "multi_storey_copies": multi_copies,
         "landing_areas": landing_area_count,
         "warnings": len(warnings),
     }
