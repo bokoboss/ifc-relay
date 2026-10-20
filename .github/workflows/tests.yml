@@ -52,6 +52,9 @@ jobs:
           curl -fsSL -o static/vendor/three.module.js https://cdn.jsdelivr.net/npm/three@$V/build/three.module.js
           curl -fsSL -o static/vendor/three.core.js https://cdn.jsdelivr.net/npm/three@$V/build/three.core.js
           curl -fsSL -o static/vendor/jsm/controls/OrbitControls.js https://cdn.jsdelivr.net/npm/three@$V/examples/jsm/controls/OrbitControls.js
+          # same rewrite as scripts/install.ps1: bare 'three' import -> local module
+          sed -i "s#from 'three';#from '../../three.module.js';#; s#from \"three\";#from \"../../three.module.js\";#" static/vendor/jsm/controls/OrbitControls.js
+          grep -q "three.module.js" static/vendor/jsm/controls/OrbitControls.js
       - name: Browser end-to-end (Chromium, software WebGL)
         env:
           VBB_E2E: "1"
