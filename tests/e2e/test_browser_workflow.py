@@ -111,9 +111,9 @@ def test_reason_required_then_build_enabled(page, tmp_path):
     _prepare_and_validate(page)
     assert not page.is_enabled("#buildViswalkBtn")
     row = page.locator("#gateList .gate-row.ack", has_text="พื้นที่ที่เดินไปไม่ถึง")
-    row.locator("input[type=checkbox]").check()
-    page.wait_for_timeout(500)
-    assert not page.is_enabled("#buildViswalkBtn")              # refused without a reason
+    row.locator("input[type=checkbox]").click()                   # the server refuses: no reason
+    page.wait_for_function("!document.querySelector('#gateList .gate-row.ack input').checked", timeout=10000)
+    assert not page.is_enabled("#buildViswalkBtn")
     row.locator(".gate-reason").fill("ช่องท่อ")
     row.locator("input[type=checkbox]").check()
     page.wait_for_function("!document.getElementById('buildViswalkBtn').disabled", timeout=10000)
