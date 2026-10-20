@@ -88,6 +88,21 @@ def validate_engine_input(app_dir: Path, project_root: Path, semantic_path: Path
     return result
 
 
+
+def build_failure_message(returncode: int, log_path: Path, stdout: str, stderr: str) -> str:
+    """Error text for a failed build. The traceback (stderr) goes last and is never cut;
+    stdout (which can hold thousands of validation warnings) is trimmed to its last lines."""
+    out_lines = [line for line in stdout.strip().splitlines() if line.strip()]
+    stdout_tail = '\n'.join(out_lines[-15:])
+    err = stderr.strip()
+    if len(err) > 6000:
+        err = '...\n' + err[-6000:]
+    return (
+        f'Vissim build failed with exit code {returncode}. Log: {log_path}\n'
+        f'--- last output ---\n{stdout_tail}\n'
+        f'--- error ---\n{err or "(no error text; see log)"}'
+    )
+
 def build_vissim_model(
     app_dir: Path,
     project_root: Path,
@@ -134,11 +149,8 @@ def build_vissim_model(
         log_path.write_text(log_text, encoding='utf-8')
 
         if process.returncode != 0:
-            tail = ((process.stderr or '') + '\n' + (process.stdout or ''))[-7000:].strip()
-            raise RuntimeError(
-                f'Vissim build failed with exit code {process.returncode}. '
-                f'Log: {log_path}\n{tail}'
-            )
+            raise RuntimeError(build_failure_message(process.returncode, log_path,
+                                                     process.stdout or '', process.stderr or ''))
         if not output_path.exists():
             raise RuntimeError(f'Build completed without .inpx output. Log: {log_path}')
         if not validation_path.exists():
