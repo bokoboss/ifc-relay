@@ -413,8 +413,7 @@ async function runLoad3d() {
     v.load(geometry, selectionState.overrides || {}, { append: request.append });
     // viewer.load() always returns to the source IFC view.
     setViewerBadge('source');
-    document.getElementById('sourceModeBtn')?.classList.add('active');
-    document.getElementById('simulationModeBtn')?.classList.remove('active');
+    setActiveModeButton('sourceModeBtn');
 
     document.getElementById('viewerStatus').textContent =
       `โหลดแล้ว ${currentGeometry.element_count} ชิ้น · ${currentGeometry.triangle_count || 0} triangles · WebGL พร้อม`;
@@ -632,27 +631,173 @@ function render3dFilters(geometry) {
   }
 }
 
+const MODE_BUTTONS = ['sourceModeBtn', 'simulationModeBtn', 'overlayModeBtn', 'planModeBtn'];
+
+function setActiveModeButton(id) {
+  for (const b of MODE_BUTTONS) document.getElementById(b)?.classList.toggle('active', b === id);
+  document.getElementById('planToolbar')?.classList.toggle('hidden', id !== 'planModeBtn');
+}
+
+function leavePlanIfActive() {
+  const v = viewer();
+  if (v?.isPlan?.()) v.exitPlan();
+}
+
 function setViewerBadge(mode) {
   const badge = document.getElementById('viewportIdentLabel');
   if (!badge) return;
-  badge.innerHTML = mode === 'simulation'
-    ? '3D MODEL SPACE <small> / โมเดลคนเดิน (Viswalk geometry)</small>'
-    : '3D MODEL SPACE <small> / IFC ต้นฉบับ</small>';
+  badge.innerHTML = {
+    simulation: '3D MODEL SPACE <small> / โมเดลคนเดิน (Viswalk geometry)</small>',
+    overlay: '3D MODEL SPACE <small> / ซ้อนภาพ: โมเดลคนเดินบน IFC ต้นฉบับ</small>',
+    plan: 'PLAN 2D <small> / แปลนรายระดับของโมเดลคนเดิน</small>',
+  }[mode] || '3D MODEL SPACE <small> / IFC ต้นฉบับ</small>';
+}
+
+document.getElementById('overlayModeBtn').addEventListener('click', () => {
+  if (!currentSemantic) {
+    setMessage('ซ้อนภาพได้หลังกด "เตรียมโมเดลคนเดิน"');
+    return;
+  }
+  leavePlanIfActive();
+  viewer()?.setMode('overlay');
+  setViewerBadge('overlay');
+  setActiveModeButton('overlayModeBtn');
+  setMessage('ซ้อนภาพ: IFC ต้นฉบับแสดงจาง ๆ ใต้โมเดลคนเดิน · ส่วนที่ไม่มีสีของโมเดลคนเดินคือสิ่งที่ไม่ได้ส่งเข้า Viswalk');
+});
+
+// ---- 2D plan ------------------------------------------------------------------
+let planTool = 'select';
+
+function planLevels() {
+  return (currentSemantic?.levels || []).filter(l => (currentSemantic.areas || []).some(a => Number(a.level_key) === Number(l.key)));
+}
+
+document.getElementById('planModeBtn').addEventListener('click', () => {
+  const v = viewer();
+  const levels = planLevels();
+  if (!currentSemantic || !levels.length || !v) {
+    setMessage('เปิดแปลน 2D ได้หลังกด "เตรียมโมเดลคนเดิน"');
+    return;
+  }
+  const select = document.getElementById('planLevelSelect');
+  const keep = select.value;
+  select.innerHTML = '';
+  for (const level of levels) {
+    const option = document.createElement('option');
+    option.value = String(level.key);
+    option.textContent = `${level.name} (${Number(level.z).toFixed(2)} ม.)`;
+    select.appendChild(option);
+  }
+  if (keep && levels.some(l => String(l.key) === keep)) select.value = keep;
+  if (v.enterPlan(Number(select.value))) {
+    v.setPlanTool(planTool);
+    setViewerBadge('plan');
+    setActiveModeButton('planModeBtn');
+    setMessage('แปลน 2D: เลื่อน/ซูมด้วยเมาส์ · เลือกเครื่องมือด้านขวาบน · การแก้ไขมีผลเมื่อกด "เตรียมโมเดลคนเดิน" อีกครั้ง');
+  }
+});
+
+document.getElementById('planLevelSelect').addEventListener('change', event => {
+  viewer()?.setPlanLevel(Number(event.target.value));
+});
+
+const PLAN_HINTS = {
+  select: 'คลิกวัตถุเพื่อดูรายละเอียด',
+  measure: 'คลิกจุดเริ่ม แล้วคลิกจุดปลาย',
+  walkable: 'คลิกสองมุมของพื้นที่เดินที่ต้องการเพิ่ม',
+  obstacle: 'คลิกสองมุมของสิ่งกีดขวางที่ต้องการเพิ่ม',
+  passage: 'คลิกสองมุมคร่อมผนังตรงที่ต้องการเปิดทางผ่าน',
+};
+document.querySelectorAll('.plan-tool').forEach(button => {
+  button.addEventListener('click', () => {
+    planTool = button.dataset.tool;
+    document.querySelectorAll('.plan-tool').forEach(b => b.classList.toggle('active', b === button));
+    viewer()?.setPlanTool(planTool);
+    document.getElementById('planHint').textContent = PLAN_HINTS[planTool] || '';
+  });
+});
+
+window.addEventListener('plan-measure', event => {
+  const { distance, final } = event.detail || {};
+  document.getElementById('planHint').textContent = `ระยะ ${Number(distance).toFixed(2)} ม.${final ? '' : ' …'}`;
+  if (final) setMessage(`วัดระยะบนแปลน: ${Number(distance).toFixed(3)} ม.`);
+});
+
+const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน' };
+
+window.addEventListener('plan-rect', async event => {
+  const { tool, level_key, polygon } = event.detail || {};
+  try {
+    const result = await api('/api/edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: tool, level_key, polygon }),
+    });
+    renderEdits(result.edits);
+    markSemanticStale();
+    setMessage(`บันทึก${EDIT_KIND_TH[tool] || 'การแก้ไข'} ${result.edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
+  } catch (error) {
+    setMessage(`บันทึกการแก้ไขไม่สำเร็จ: ${error.message}`);
+  }
+});
+
+function renderEdits(edits) {
+  const list = Array.isArray(edits) ? edits : [];
+  viewer()?.setManualEdits(list);
+  const section = document.getElementById('editsSection');
+  const root = document.getElementById('editsList');
+  if (!section || !root) return;
+  section.classList.toggle('hidden', !list.length);
+  root.innerHTML = '';
+  const levelName = key => (currentSemantic?.levels || []).find(l => Number(l.key) === Number(key))?.name || `ระดับ ${key}`;
+  for (const edit of list) {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+    const xs = edit.polygon.map(p => p[0]);
+    const ys = edit.polygon.map(p => p[1]);
+    const w = Math.max(...xs) - Math.min(...xs);
+    const h = Math.max(...ys) - Math.min(...ys);
+    row.innerHTML = `<span class="edit-kind">${escapeHtml(edit.id)} · ${escapeHtml(EDIT_KIND_TH[edit.kind] || edit.kind)}</span>` +
+      `<span>${escapeHtml(levelName(edit.level_key))} · ${w.toFixed(2)} × ${h.toFixed(2)} ม.</span>`;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = 'ลบ';
+    del.addEventListener('click', async () => {
+      try {
+        const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
+        renderEdits(result.edits);
+        markSemanticStale();
+        setMessage(`ลบ ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
+      } catch (error) {
+        setMessage(`ลบไม่สำเร็จ: ${error.message}`);
+      }
+    });
+    row.appendChild(del);
+    root.appendChild(row);
+  }
+}
+
+async function refreshEdits() {
+  try {
+    renderEdits((await api('/api/edits')).edits);
+  } catch (error) {
+    // optional panel
+  }
 }
 
 document.getElementById('sourceModeBtn').addEventListener('click', () => {
+  leavePlanIfActive();
   viewer()?.setMode('source');
   setViewerBadge('source');
-  document.getElementById('sourceModeBtn').classList.add('active');
-  document.getElementById('simulationModeBtn').classList.remove('active');
+  setActiveModeButton('sourceModeBtn');
   document.getElementById('stepPreview').classList.remove('done');
 });
 
 document.getElementById('simulationModeBtn').addEventListener('click', () => {
+  leavePlanIfActive();
   viewer()?.setMode('simulation');
   setViewerBadge('simulation');
-  document.getElementById('simulationModeBtn').classList.add('active');
-  document.getElementById('sourceModeBtn').classList.remove('active');
+  setActiveModeButton('simulationModeBtn');
   document.getElementById('stepPreview').classList.add('done');
   setMessage('โมเดลคนเดิน: แสดงพื้นที่เดิน สิ่งกีดขวาง และบันไดที่จะส่งเข้า Viswalk · ประตูเป็นช่องเปิด หน้าต่างไม่ใช่ทางเดิน');
 });
@@ -734,8 +879,7 @@ window.addEventListener('semantic-element-selected', event => {
     button.addEventListener('click', () => {
       if (viewer()?.showSource(guid)) {
         setViewerBadge('source');
-        document.getElementById('sourceModeBtn').classList.add('active');
-        document.getElementById('simulationModeBtn').classList.remove('active');
+        setActiveModeButton('sourceModeBtn');
       }
     });
     list.appendChild(button);
@@ -831,6 +975,7 @@ function renderSemanticSummary(result) {
   renderVerticalConnections(result.model?.vertical_connections || result.vertical_connections || []);
   renderOffLevelSlabs(result.model?.ifc_semantic?.off_level_slabs || result.ifc_semantic?.off_level_slabs || []);
   renderConnectivity(result.model?.ifc_semantic?.connectivity || result.ifc_semantic?.connectivity || null);
+  refreshEdits();
 
   const root = document.getElementById('semanticWarningList');
   root.innerHTML = '';
@@ -1082,11 +1227,14 @@ generateSemanticBtn.addEventListener('click', async () => {
       if (typeof v.loadSemantic === 'function') {
         previewMeshes = Number(v.loadSemantic(result.model) || 0);
       }
-      if (previewMeshes > 0) {
+      if (previewMeshes > 0 && v.isPlan?.()) {
+        // Regenerated while drawing on the plan: stay on the same level.
+        v.setPlanLevel(Number(document.getElementById('planLevelSelect').value));
+        document.getElementById('stepPreview').classList.add('done');
+      } else if (previewMeshes > 0) {
         v.setMode('simulation');
         setViewerBadge('simulation');
-        document.getElementById('simulationModeBtn').classList.add('active');
-        document.getElementById('sourceModeBtn').classList.remove('active');
+        setActiveModeButton('simulationModeBtn');
         document.getElementById('stepPreview').classList.add('done');
       } else {
         previewIssue = 'ไม่พบ Geometry ที่สามารถแสดงใน 3D Preview ได้';
@@ -1375,8 +1523,7 @@ async function restoreState() {
           if (typeof v.loadSemantic === 'function' && Number(v.loadSemantic(currentSemantic) || 0) > 0) {
             v.setMode('simulation');
             setViewerBadge('simulation');
-            document.getElementById('simulationModeBtn').classList.add('active');
-            document.getElementById('sourceModeBtn').classList.remove('active');
+            setActiveModeButton('simulationModeBtn');
           }
         } catch (error) {
           // The preview is a convenience on reload; the model itself is restored.

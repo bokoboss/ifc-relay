@@ -691,6 +691,7 @@ def build_semantic_model(
     path: Path,
     geometry_payload: dict[str, Any],
     selection_overrides: dict[str, str] | None = None,
+    manual_edits: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Convert reviewed IFC geometry to Geometry Engine v0.3 input.
 
@@ -1490,6 +1491,18 @@ def build_semantic_model(
             "(the lower storey's doors do not carry up). Review doors on those storeys."
         )
 
+    # Engineer's manual plan edits (added floor / obstacles / passages).
+    from manual_edits import apply_manual_edits
+    manual_applied = apply_manual_edits(
+        manual_edits or [], areas=areas, walls=walls, obstacles=obstacles,
+        level_keys={int(lv["key"]) for lv in levels}, warnings=warnings,
+    )
+    if any(manual_applied[k] for k in ("walkable", "obstacle", "passage")):
+        warnings.append(
+            f"Manual plan edits applied: {manual_applied['walkable']} walkable, {manual_applied['obstacle']} obstacle, "
+            f"{manual_applied['passage']} passage (engineer-drawn, not from the IFC)."
+        )
+
     key_ranges = assign_key_ranges({
         "areas": areas,
         "walls": walls,
@@ -1590,6 +1603,8 @@ def build_semantic_model(
             "opening_candidates": opening_candidates[:CANDIDATE_LIST_LIMIT],
             "off_level_slabs": off_level_slabs,
             "connectivity": connectivity,
+            "manual_edits": list(manual_edits or []),
+            "manual_edits_applied": manual_applied,
             "door_logic": {
                 "source_doors": source_door_count,
                 "included_doors": included_door_count,

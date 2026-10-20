@@ -22,3 +22,7 @@ The Geometry Engine refuses only geometry it cannot build. The gate (`gate_servi
 An acknowledgement stores the item count, an optional reason and a timestamp. If a regenerated model changes the count, the item must be acknowledged again. A new IFC import clears all acknowledgements.
 
 Every successful build writes `<name>_build_manifest.json` next to the `.inpx`: source IFC name and SHA-256, Engine severity counts, the full gate result with acknowledgements and reasons, and `viswalk_verified: false` - the model is not verified until an engineer checks it in Viswalk.
+
+## Manual plan edits
+
+Edits drawn in the 2D plan (`manual_edits.py`: added walkable floor, added obstacle, passage through walls) are stored in the project state, never in the IFC, and re-applied every time the pedestrian model is generated. They appear in the gate as an `info` item and in the build manifest via the semantic model (`ifc_semantic.manual_edits`). They carry over to a new IFC revision when "keep selections" is on.

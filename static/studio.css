@@ -515,3 +515,14 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .gate-chip.block {background:#c0392b;} .gate-chip.ack {background:#d98e04;} .gate-chip.info {background:#8a9696;}
 .gate-summary {margin-top:8px;padding:7px 9px;border-radius:4px;font-size:12px;}
 .gate-summary.ok {background:#e6f4ef;color:#1f6b4f;} .gate-summary.warn {background:#fbeceb;color:#9b2c22;}
+
+.plan-toolbar {position:absolute;bottom:10px;left:10px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px;max-width:calc(100% - 20px);background:rgba(255,255,255,.94);border:1px solid #cfdcdc;border-radius:6px;padding:6px 8px;font-size:12px;box-shadow:0 2px 8px rgba(20,40,40,.08);}
+.plan-level select {font-size:12px;padding:2px 4px;margin-left:4px;}
+.plan-tools {display:flex;gap:4px;flex-wrap:wrap;}
+.plan-tool {font-size:12px;padding:4px 8px;border:1px solid #cfdcdc;border-radius:4px;background:#fff;cursor:pointer;}
+.plan-tool.active {background:#16626a;color:#fff;border-color:#16626a;}
+.plan-tool.walkable {border-left:3px solid #2e9e5b;} .plan-tool.obstacle {border-left:3px solid #34495e;} .plan-tool.passage {border-left:3px solid #0e9fb6;}
+.plan-hint {color:#4d5f61;}
+.edit-row {display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 6px;border-bottom:1px solid #eef2f2;}
+.edit-row .edit-kind {font-weight:600;min-width:84px;}
+.edit-row button {margin-left:auto;font-size:11px;padding:2px 7px;border:1px solid #e0b8b3;border-radius:4px;background:#fff;color:#9b2c22;cursor:pointer;}
