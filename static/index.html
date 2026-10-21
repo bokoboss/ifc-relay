@@ -6,37 +6,11 @@
   <title>Viswalk BIM Builder — Engineering Workspace</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/studio.css?v=3" />
+  <link rel="stylesheet" href="/static/studio.css?v=4" />
 </head>
 <body>
   <div class="app-shell">
     <main class="main">
-      <header class="topbar">
-        <div class="topbar-brand" aria-label="Viswalk BIM Builder">
-          <div class="brand-mark" aria-hidden="true"><span class="brand-glyph">V</span><span class="brand-glyph-accent"></span></div>
-          <div class="topbar-brand-copy">
-            <div class="brand-title">VISWALK</div>
-            <div class="brand-subtitle">BIM BUILDER <span class="brand-edition">STUDIO</span></div>
-          </div>
-        </div>
-        <div class="topbar-divider" aria-hidden="true"></div>
-        <div class="topbar-heading">
-          <div class="breadcrumb"><span>ENGINEERING WORKSPACE</span><span class="breadcrumb-separator">/</span><strong>MODEL BUILDER</strong></div>
-          <h1>พื้นที่ทำงานโมเดล <span>BIM <em>→</em> Viswalk</span></h1>
-          <p>เปิดแบบ ตรวจสอบองค์ประกอบ และสร้างเรขาคณิตสำหรับการจำลองคนเดิน</p>
-        </div>
-        <div class="topbar-actions">
-          <details class="environment-menu">
-            <summary class="environment-trigger"><span class="health-dot" aria-hidden="true"></span> Engine ในเครื่อง <span class="environment-chevron" aria-hidden="true">⌄</span></summary>
-            <div class="environment-popover">
-              <div class="environment-title">สถานะระบบภายในเครื่อง</div>
-              <div id="healthText" class="status-value">กำลังตรวจสอบระบบ...</div>
-              <div id="versionText" class="status-value version-text"></div>
-            </div>
-          </details>
-          <button id="resetBtn" class="secondary-btn">เริ่มโครงการใหม่</button>
-        </div>
-      </header>
 
       <!-- Keep workflow state anchors for the current JS contract; no permanent steps sidebar. -->
       <div class="workflow-state hidden" hidden aria-hidden="true">
@@ -50,6 +24,13 @@
 
       <section class="panel compact-panel workspace-toolbar-shell" aria-label="คำสั่งหลักของ Viswalk BIM Builder">
         <div class="workspace-toolbar">
+          <div class="topbar-brand">
+            <div class="brand-mark" aria-hidden="true"><span class="brand-glyph">V</span><span class="brand-glyph-accent"></span></div>
+            <div class="topbar-brand-copy">
+              <h1 class="brand-title">Viswalk BIM Builder</h1>
+              <div id="fileMeta" class="file-meta" title="ไฟล์ IFC ที่เปิดอยู่">ยังไม่ได้เปิดไฟล์</div>
+            </div>
+          </div>
           <div class="toolbar-primary">
             <label class="file-picker" title="เลือกไฟล์ IFC แล้วระบบจะเปิดโมเดลให้ทันที">
               <input id="fileInput" type="file" accept=".ifc" aria-label="เลือกไฟล์ BIM สำหรับเปิดโมเดล" />
@@ -66,9 +47,18 @@
             <button id="buildViswalkBtn" class="build-btn" disabled
               title="สร้างไฟล์ .inpx ผ่าน Vissim/Viswalk ในเครื่องหลังตรวจสอบโมเดล">สร้างไฟล์ Viswalk <span aria-hidden="true">↗</span></button>
           </div>
-
+          <div class="message-panel" role="status" aria-live="polite">
+            <span id="messageText">พร้อมทำงาน · เลือกไฟล์ BIM เพื่อเริ่มต้น</span>
+          </div>
           <div class="toolbar-utilities">
-            <div id="fileMeta" class="file-meta" title="ชื่อไฟล์ที่เลือกหรือนำเข้า">ยังไม่มีไฟล์ที่นำเข้า</div>
+            <details class="environment-menu">
+            <summary class="environment-trigger"><span class="health-dot" aria-hidden="true"></span> Engine <span class="environment-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="environment-popover">
+              <div class="environment-title">สถานะระบบภายในเครื่อง</div>
+              <div id="healthText" class="status-value">กำลังตรวจสอบระบบ...</div>
+              <div id="versionText" class="status-value version-text"></div>
+            </div>
+          </details>
             <details class="tools-dropdown">
               <summary class="tools-dropdown-trigger" aria-label="เครื่องมือเพิ่มเติมและไฟล์ส่งออก"
                 title="ตรวจ IFC ใหม่ โหลดโมเดล 3D อีกครั้ง และดาวน์โหลดไฟล์">เพิ่มเติม <span aria-hidden="true">⋯</span></summary>
@@ -85,22 +75,19 @@
                 <button id="downloadSemanticTopBtn" class="secondary-btn" disabled>ดาวน์โหลด Semantic JSON</button>
                 <button id="downloadEngineTopBtn" class="secondary-btn" disabled>ดาวน์โหลด Engine JSON</button>
                 <button id="downloadInpxTopBtn" class="secondary-btn" disabled>ดาวน์โหลดไฟล์ Viswalk (.inpx)</button>
+                <div class="tools-dropdown-divider" role="separator"></div>
+                <button id="resetBtn" class="secondary-btn danger-item">เริ่มโครงการใหม่</button>
               </div>
             </details>
           </div>
         </div>
       </section>
 
-      <section class="panel message-panel">
-        <div class="eyebrow">สถานะระบบ</div>
-        <div id="messageText">พร้อมทำงาน · เลือกไฟล์ BIM เพื่อเริ่มต้น</div>
-      </section>
-
+      <div class="workbench">
       <section id="explorerSection" class="explorer-layout" aria-label="พื้นที่ทำงานตรวจสอบโมเดล">
         <aside class="panel explorer-left">
           <div class="panel-heading tight">
             <div>
-              <div class="eyebrow">MODEL HIERARCHY</div>
               <h2>โครงสร้างโมเดล</h2>
             </div>
           </div>
@@ -176,10 +163,9 @@
               </div>
               <label class="plan-size" title="หลังคลิกมุมแรก พิมพ์ขนาดแล้วกด Enter เช่น 1.2x2">ขนาด <input id="planSizeInput" type="text" placeholder="กว้างxยาว ม." size="9" /></label>
               <div class="plan-tools" role="group" aria-label="ย้อนกลับ">
-                <button id="planUndoBtn" class="plan-tool" title="ย้อนรายการแก้ไขล่าสุด (Ctrl+Z)" disabled>↶ ย้อน</button>
-                <button id="planRedoBtn" class="plan-tool" title="ทำซ้ำ (Ctrl+Y)" disabled>↷ ทำซ้ำ</button>
+                <button id="planUndoBtn" class="plan-tool" title="ย้อนรายการแก้ไขล่าสุด (Ctrl+Z)" aria-label="ย้อน" disabled>↶</button>
+                <button id="planRedoBtn" class="plan-tool" title="ทำซ้ำ (Ctrl+Y)" aria-label="ทำซ้ำ" disabled>↷</button>
               </div>
-              <span id="planHint" class="plan-hint">เลือกเครื่องมือ แล้วคลิกบนแปลน · Shift = ล็อกแนวตั้ง/นอน · Esc = ยกเลิก</span>
               <div id="planConfirm" class="plan-confirm hidden">
                 <span id="planConfirmText"></span>
                 <button id="planConfirmBtn" class="plan-tool walkable">บันทึก</button>
@@ -212,6 +198,7 @@
 
           <div class="viewer-footer">
             <span id="viewerStatus">ยังไม่ได้โหลดข้อมูลเรขาคณิต 3D</span>
+            <span id="planHint" class="plan-hint">เลือกเครื่องมือ แล้วคลิกบนแปลน · Shift = ล็อกแนวตั้ง/นอน · Esc = ยกเลิก</span>
             <span id="previewNote"></span>
           </div>
         </section>
@@ -219,9 +206,9 @@
         <aside class="panel inspector-panel">
           <div class="panel-heading tight">
             <div>
-              <div class="eyebrow">ELEMENT PROPERTIES</div>
               <h2 id="selectedName">รายละเอียดวัตถุ</h2>
             </div>
+            <button id="inspectorCloseBtn" class="inspector-close" type="button" aria-label="ปิดรายละเอียดวัตถุ" title="ปิด">×</button>
           </div>
 
           <div id="emptyInspector" class="empty-inspector"><span class="empty-inspector-icon" aria-hidden="true">⌖</span>คลิกวัตถุในพื้นที่ 3D<br>เพื่อดูข้อมูลและกำหนดการใช้งาน</div>
@@ -256,200 +243,253 @@
         </aside>
       </section>
 
-      <section id="largeModelSection" class="panel hidden large-model-section">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">GEOMETRY LOADING</div>
-            <h2>ตั้งค่าการแสดงโมเดลขนาดใหญ่</h2>
+      <section id="reviewDock" class="dock" data-open="false" aria-label="รายการตรวจ ผลลัพธ์ และข้อมูลโมเดล">
+        <div class="dock-resize" id="dockResize" role="separator" aria-orientation="horizontal" aria-label="ปรับความสูงแผงด้านล่าง" tabindex="0"></div>
+        <div class="dock-bar">
+          <div class="dock-tabs" role="tablist">
+            <button class="dock-tab" role="tab" data-tab="checks" aria-selected="false">ตรวจใน Viswalk <span class="dock-count" data-count="checks"></span></button>
+            <button class="dock-tab" role="tab" data-tab="model" aria-selected="false">โมเดลคนเดิน <span class="dock-count" data-count="model"></span></button>
+            <button class="dock-tab" role="tab" data-tab="choices" aria-selected="false">ช่องเปิดและพื้นต่างระดับ <span class="dock-count" data-count="choices"></span></button>
+            <button class="dock-tab" role="tab" data-tab="edits" aria-selected="false">แก้ไขบนแปลน <span class="dock-count" data-count="edits"></span></button>
+            <button class="dock-tab" role="tab" data-tab="stairs" aria-selected="false">บันได <span class="dock-count" data-count="stairs"></span></button>
+            <button class="dock-tab" role="tab" data-tab="engine" aria-selected="false">ผล Engine และไฟล์ <span class="dock-count" data-count="engine"></span></button>
+            <button class="dock-tab" role="tab" data-tab="ifc" aria-selected="false">ข้อมูล IFC <span class="dock-count" data-count="ifc"></span></button>
           </div>
-          <span id="largeModelBadge" class="badge">IFC ขนาดปกติ</span>
+          <button id="dockToggle" class="dock-toggle" type="button" aria-expanded="false" aria-controls="dockBody" title="ย่อ/ขยายแผงด้านล่าง">
+            <span class="dock-toggle-icon" aria-hidden="true"></span><span class="dock-toggle-text">ขยาย</span>
+          </button>
         </div>
+        <div id="dockBody" class="dock-body">
+          <div class="dock-panel" data-panel="checks" role="tabpanel">
+            <div id="gateSection" class="gate-section hidden">
+              <h3>เรื่องที่ต้องตรวจใน Viswalk</h3>
+              <p class="opening-candidates-note">
+                แอปนี้แปลง IFC เป็นโมเดล Viswalk ไม่ใช่ตัวตรวจ BIM · หยุดเฉพาะเมื่อ Geometry Engine สร้างไฟล์ไม่ได้ ·
+                <span class="gate-chip check">ตรวจใน Viswalk</span> สร้างไฟล์ได้ แล้วไปตรวจ/แก้ใน Viswalk (บันทึกเป็น checklist) ·
+                <span class="gate-chip info">ข้อมูล</span> ไม่ต้องทำอะไร
+              </p>
+              <div id="gateList" class="gate-list"></div>
+              <div id="gateSummary" class="gate-summary"></div>
+            </div>
+            <p class="dock-empty">ยังไม่ได้ตรวจสอบโมเดล · กด "ตรวจสอบโมเดล" แล้วรายการที่ต้องตรวจใน Viswalk จะอยู่ที่นี่</p>
+          </div>
+          <div class="dock-panel" data-panel="model" role="tabpanel">
+          <section id="semanticSection" class="panel hidden semantic-section">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">SIMULATION GEOMETRY</div>
+                <h2>โมเดลเรขาคณิตสำหรับคนเดิน</h2>
+              </div>
+              <div class="semantic-actions">
+                <a id="downloadSemanticBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/download">ดาวน์โหลด Semantic JSON</a>
+                <a id="downloadEngineBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/engine-download">ดาวน์โหลด Engine JSON</a>
+                <button id="exportEngineBtn" class="secondary-btn">บันทึก Engine JSON ลงโครงการ</button>
+              </div>
+            </div>
 
-        <div class="metric-grid six large-model-metrics">
-          <div class="metric"><span>ขนาดไฟล์</span><strong id="largeFileSize">—</strong></div>
-          <div class="metric"><span>ผนัง</span><strong id="largeWalls">—</strong></div>
-          <div class="metric"><span>แผ่นพื้น</span><strong id="largeSlabs">—</strong></div>
-          <div class="metric"><span>เสา</span><strong id="largeColumns">—</strong></div>
-          <div class="metric exclude"><span>คาน (ไม่นำเข้า)</span><strong id="largeBeams">—</strong></div>
-          <div class="metric review"><span>บันได / flight</span><strong id="largeStairs">—</strong></div>
-        </div>
+            <div class="metric-grid semantic-metrics">
+              <div class="metric"><span>ระดับชั้น</span><strong id="semanticLevels">0</strong></div>
+              <div class="metric"><span>แผ่นพื้นต้นฉบับ</span><strong id="semanticSourceSlabs">0</strong></div>
+              <div class="metric include"><span>พื้นที่เดิน (รวมแล้ว)</span><strong id="semanticAreas">0</strong></div>
+              <div class="metric review"><span>ช่องว่างในพื้น</span><strong id="semanticVoidMasks">0</strong></div>
+              <div class="metric"><span>ผนัง (ตาม IFC)</span><strong id="semanticLogicalWalls">0</strong></div>
+              <div class="metric opening"><span>ช่วงผนังที่ส่งออก</span><strong id="semanticWallSegments">0</strong></div>
+              <div class="metric opening"><span>ช่องประตู</span><strong id="semanticDoorOpenings">0</strong></div>
+              <div class="metric"><span>เสา / สิ่งกีดขวาง</span><strong id="semanticObstacles">0</strong></div>
+              <div class="metric"><span>บันได / ทางลาด</span><strong id="semanticVertical">0</strong></div>
+              <div class="metric review"><span>คำเตือน</span><strong id="semanticWarnings">0</strong></div>
+            </div>
 
-        <div class="large-load-grid">
-          <label class="field-label">
-            <span>รูปแบบการโหลด 3D</span>
-            <select id="geometryLoadMode">
-              <option value="simulation_storey">เฉพาะส่วนที่ใช้จำลอง · ชั้นที่เลือก</option>
-              <option value="simulation_all">เฉพาะส่วนที่ใช้จำลอง · ทั้งอาคาร</option>
-              <option value="full_storey">IFC ทั้งหมด · ชั้นที่เลือก</option>
-              <option value="full_all">IFC ทั้งหมด · ทั้งอาคาร (หนัก)</option>
-            </select>
-          </label>
+            <div class="semantic-status-grid">
+              <div class="semantic-rule ok">
+                <strong>ประตู</strong>
+                <span id="doorLogicText">เฉพาะ IfcDoor ที่เลือกใช้เท่านั้นที่สร้างช่องทางเดิน</span>
+              </div>
+              <div class="semantic-rule ok">
+                <strong>หน้าต่าง</strong>
+                <span>IfcWindow ไม่สร้างช่องทางเดินอัตโนมัติ</span>
+              </div>
+              <div class="semantic-rule">
+                <strong>ผนังที่ส่งออก</strong>
+                <span>ผนังถูกตัดเป็นช่วงตามช่องเปิดจริง ไม่ต้องใช้ข้อมูลช่องเปิดแฝง</span>
+              </div>
+            </div>
 
-          <label class="field-label">
-            <span>ชั้น</span>
-            <select id="geometryStoreySelect"></select>
-          </label>
+            <div id="connectivityNote" class="connectivity-note hidden"></div>
+            <div id="semanticWarningList" class="warning-list"></div>
 
-          <label class="append-option">
-            <input id="appendStoreyCheck" type="checkbox" />
-            <span>เพิ่มชั้นนี้เข้าในมุมมอง 3D ปัจจุบัน</span>
-          </label>
 
-          <div class="large-load-note">
-            <strong id="largeModelProfile">—</strong>
-            <span id="largeModelNote">ระบบจะแนะนำรูปแบบการโหลดหลังตรวจ IFC</span>
+
+
+            <div id="semanticEnginePath" class="engine-path hidden"></div>
+          </section>
+            <p class="dock-empty">ยังไม่ได้เตรียมโมเดลคนเดิน</p>
+          </div>
+          <div class="dock-panel" data-panel="choices" role="tabpanel">
+            <div id="openingCandidateSection" class="opening-candidates hidden">
+              <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
+              <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div id="openingCandidateList"></div>
+            </div>
+            <div id="offLevelSection" class="opening-candidates hidden">
+              <h3>แผ่นพื้นต่างระดับมาก (ยังไม่ใช้เป็นพื้นเดิน)</h3>
+              <p class="opening-candidates-note">แผ่นที่สูงหรือต่ำกว่าพื้นชั้นเกิน 0.40 ม. เช่นแผงบังแดด กันสาด หรือชั้นลอย · ติ๊กเฉพาะแผ่นที่เป็นพื้นเดินจริง · ระบบจะสร้างเป็นพื้นที่เดินที่ระดับจริงของแผ่น (ชั้นลอย ไม่รวมกับพื้นชั้น) จึงต้องมีบันได/ทางลาดเชื่อม · แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div id="offLevelList"></div>
+            </div>
+            <p class="dock-empty">ไม่มีช่องเปิดไร้ประตูหรือแผ่นพื้นต่างระดับให้เลือก</p>
+          </div>
+          <div class="dock-panel" data-panel="edits" role="tabpanel">
+            <div id="editsSection" class="opening-candidates hidden">
+              <h3>แก้ไขบนแปลนโดยวิศวกร</h3>
+              <p class="opening-candidates-note">วาดในโหมด "แปลน 2D" · ระบบใช้ทุกครั้งที่เตรียมโมเดลคนเดิน และบันทึกใน build manifest · ไม่แก้ไฟล์ IFC</p>
+              <p id="editsReview" class="edits-review"></p>
+              <div id="editsList"></div>
+            </div>
+            <p class="dock-empty">ยังไม่มีการแก้ไขบนแปลน · วาดได้ในโหมด "แปลน 2D"</p>
+          </div>
+          <div class="dock-panel" data-panel="stairs" role="tabpanel">
+            <div id="verticalSection" class="opening-candidates hidden">
+              <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>
+              <p class="opening-candidates-note">ลูกศรใน 3D ชี้ทิศขึ้น · <span class="dir-ok">เขียว</span> = หาจาก Geometry · <span class="dir-review">ส้ม</span> = ต้องตรวจทิศ · ทิศบันไดยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim</p>
+              <div id="verticalList"></div>
+            </div>
+            <p class="dock-empty">ยังไม่มีบันไดหรือทางลาดในโมเดลคนเดิน</p>
+          </div>
+          <div class="dock-panel" data-panel="engine" role="tabpanel">
+          <section id="buildSection" class="panel hidden build-section">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">BUILD / VALIDATION</div>
+                <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
+              </div>
+              <div class="semantic-actions">
+                <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
+                <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
+                <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
+                <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
+                <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
+              </div>
+            </div>
+
+            <div class="metric-grid build-metrics">
+              <div class="metric build-error"><span>ข้อผิดพลาด</span><strong id="buildErrors">—</strong></div>
+              <div class="metric review"><span>คำเตือน</span><strong id="buildWarnings">—</strong></div>
+              <div class="metric opening"><span>ข้อมูล</span><strong id="buildInfo">—</strong></div>
+              <div class="metric include"><span>สถานะ Vissim</span><strong id="buildStatus">พร้อม</strong></div>
+              <div class="metric"><span>เวลา</span><strong id="buildDuration">—</strong></div>
+            </div>
+
+
+            <div id="buildIssueList" class="build-issue-list"></div>
+            <div id="buildOutputPath" class="engine-path hidden"></div>
+          </section>
+            <p class="dock-empty">ยังไม่ได้ตรวจหรือสร้างไฟล์</p>
+          </div>
+          <div class="dock-panel" data-panel="ifc" role="tabpanel">
+          <section id="largeModelSection" class="panel hidden large-model-section">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">GEOMETRY LOADING</div>
+                <h2>ตั้งค่าการแสดงโมเดลขนาดใหญ่</h2>
+              </div>
+              <span id="largeModelBadge" class="badge">IFC ขนาดปกติ</span>
+            </div>
+
+            <div class="metric-grid six large-model-metrics">
+              <div class="metric"><span>ขนาดไฟล์</span><strong id="largeFileSize">—</strong></div>
+              <div class="metric"><span>ผนัง</span><strong id="largeWalls">—</strong></div>
+              <div class="metric"><span>แผ่นพื้น</span><strong id="largeSlabs">—</strong></div>
+              <div class="metric"><span>เสา</span><strong id="largeColumns">—</strong></div>
+              <div class="metric exclude"><span>คาน (ไม่นำเข้า)</span><strong id="largeBeams">—</strong></div>
+              <div class="metric review"><span>บันได / flight</span><strong id="largeStairs">—</strong></div>
+            </div>
+
+            <div class="large-load-grid">
+              <label class="field-label">
+                <span>รูปแบบการโหลด 3D</span>
+                <select id="geometryLoadMode">
+                  <option value="simulation_storey">เฉพาะส่วนที่ใช้จำลอง · ชั้นที่เลือก</option>
+                  <option value="simulation_all">เฉพาะส่วนที่ใช้จำลอง · ทั้งอาคาร</option>
+                  <option value="full_storey">IFC ทั้งหมด · ชั้นที่เลือก</option>
+                  <option value="full_all">IFC ทั้งหมด · ทั้งอาคาร (หนัก)</option>
+                </select>
+              </label>
+
+              <label class="field-label">
+                <span>ชั้น</span>
+                <select id="geometryStoreySelect"></select>
+              </label>
+
+              <label class="append-option">
+                <input id="appendStoreyCheck" type="checkbox" />
+                <span>เพิ่มชั้นนี้เข้าในมุมมอง 3D ปัจจุบัน</span>
+              </label>
+
+              <div class="large-load-note">
+                <strong id="largeModelProfile">—</strong>
+                <span id="largeModelNote">ระบบจะแนะนำรูปแบบการโหลดหลังตรวจ IFC</span>
+              </div>
+            </div>
+
+            <div id="loadedSubsetText" class="engine-path">ยังไม่ได้โหลดโมเดล 3D</div>
+          </section>
+          <section id="auditSection" class="panel hidden">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">MODEL AUDIT / PRE-FLIGHT</div>
+                <h2 id="projectName">ผลตรวจ IFC</h2>
+              </div>
+              <div class="badges">
+                <span id="schemaBadge" class="badge"></span>
+                <span id="unitBadge" class="badge"></span>
+              </div>
+            </div>
+
+            <div class="metric-grid six">
+              <div class="metric"><span>ชั้น</span><strong id="storeyCount">0</strong></div>
+              <div class="metric"><span>องค์ประกอบ</span><strong id="productCount">0</strong></div>
+              <div class="metric include"><span>ใช้ (อัตโนมัติ)</span><strong id="includeCount">0</strong></div>
+              <div class="metric review"><span>รอตรวจ</span><strong id="reviewCount">0</strong></div>
+              <div class="metric exclude"><span>ไม่ใช้ (อัตโนมัติ)</span><strong id="excludeCount">0</strong></div>
+              <div class="metric opening"><span>ช่องประตู</span><strong id="doorOpeningCount">0</strong></div>
+            </div>
+
+            <div id="warningList" class="warning-list"></div>
+          </section>
+          <section id="categorySection" class="panel hidden">
+            <div class="panel-heading tight">
+              <div>
+                <div class="eyebrow">MODEL CLASSIFICATION</div>
+                <h2>กฎการแปลงอัตโนมัติ</h2>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>IFC type</th><th>จำนวน</th><th>อัตโนมัติ</th><th>บทบาทในการจำลอง</th><th>แปลงเป็นใน Viswalk</th></tr>
+                </thead>
+                <tbody id="categoryRows"></tbody>
+              </table>
+            </div>
+          </section>
+            <p class="dock-empty">ยังไม่ได้เปิดไฟล์ IFC</p>
           </div>
         </div>
-
-        <div id="loadedSubsetText" class="engine-path">ยังไม่ได้โหลดโมเดล 3D</div>
       </section>
+      </div>
 
-      <section id="auditSection" class="panel hidden">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">MODEL AUDIT / PRE-FLIGHT</div>
-            <h2 id="projectName">ผลตรวจ IFC</h2>
+      <dialog id="buildConfirm" class="build-confirm" aria-labelledby="buildConfirmTitle">
+        <form method="dialog">
+          <h2 id="buildConfirmTitle">สร้างไฟล์ Viswalk</h2>
+          <p id="buildConfirmLead"></p>
+          <ul id="buildConfirmList" class="build-confirm-list"></ul>
+          <p class="build-confirm-note">รายการนี้จะบันทึกเป็น checklist ข้างไฟล์ .inpx · ไฟล์ที่ได้ยังต้องตรวจใน Viswalk ก่อนใช้งาน</p>
+          <div class="build-confirm-actions">
+            <button id="buildConfirmReview" value="review" class="secondary-btn">ดูรายการก่อน</button>
+            <button id="buildConfirmGo" value="build" class="build-btn">สร้างไฟล์</button>
           </div>
-          <div class="badges">
-            <span id="schemaBadge" class="badge"></span>
-            <span id="unitBadge" class="badge"></span>
-          </div>
-        </div>
-
-        <div class="metric-grid six">
-          <div class="metric"><span>ชั้น</span><strong id="storeyCount">0</strong></div>
-          <div class="metric"><span>องค์ประกอบ</span><strong id="productCount">0</strong></div>
-          <div class="metric include"><span>ใช้ (อัตโนมัติ)</span><strong id="includeCount">0</strong></div>
-          <div class="metric review"><span>รอตรวจ</span><strong id="reviewCount">0</strong></div>
-          <div class="metric exclude"><span>ไม่ใช้ (อัตโนมัติ)</span><strong id="excludeCount">0</strong></div>
-          <div class="metric opening"><span>ช่องประตู</span><strong id="doorOpeningCount">0</strong></div>
-        </div>
-
-        <div id="warningList" class="warning-list"></div>
-      </section>
-
-      <section id="semanticSection" class="panel hidden semantic-section">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">SIMULATION GEOMETRY</div>
-            <h2>โมเดลเรขาคณิตสำหรับคนเดิน</h2>
-          </div>
-          <div class="semantic-actions">
-            <a id="downloadSemanticBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/download">ดาวน์โหลด Semantic JSON</a>
-            <a id="downloadEngineBtn" class="secondary-btn link-btn" href="/api/ifc/semantic/engine-download">ดาวน์โหลด Engine JSON</a>
-            <button id="exportEngineBtn" class="secondary-btn">บันทึก Engine JSON ลงโครงการ</button>
-          </div>
-        </div>
-
-        <div class="metric-grid semantic-metrics">
-          <div class="metric"><span>ระดับชั้น</span><strong id="semanticLevels">0</strong></div>
-          <div class="metric"><span>แผ่นพื้นต้นฉบับ</span><strong id="semanticSourceSlabs">0</strong></div>
-          <div class="metric include"><span>พื้นที่เดิน (รวมแล้ว)</span><strong id="semanticAreas">0</strong></div>
-          <div class="metric review"><span>ช่องว่างในพื้น</span><strong id="semanticVoidMasks">0</strong></div>
-          <div class="metric"><span>ผนัง (ตาม IFC)</span><strong id="semanticLogicalWalls">0</strong></div>
-          <div class="metric opening"><span>ช่วงผนังที่ส่งออก</span><strong id="semanticWallSegments">0</strong></div>
-          <div class="metric opening"><span>ช่องประตู</span><strong id="semanticDoorOpenings">0</strong></div>
-          <div class="metric"><span>เสา / สิ่งกีดขวาง</span><strong id="semanticObstacles">0</strong></div>
-          <div class="metric"><span>บันได / ทางลาด</span><strong id="semanticVertical">0</strong></div>
-          <div class="metric review"><span>คำเตือน</span><strong id="semanticWarnings">0</strong></div>
-        </div>
-
-        <div class="semantic-status-grid">
-          <div class="semantic-rule ok">
-            <strong>ประตู</strong>
-            <span id="doorLogicText">เฉพาะ IfcDoor ที่เลือกใช้เท่านั้นที่สร้างช่องทางเดิน</span>
-          </div>
-          <div class="semantic-rule ok">
-            <strong>หน้าต่าง</strong>
-            <span>IfcWindow ไม่สร้างช่องทางเดินอัตโนมัติ</span>
-          </div>
-          <div class="semantic-rule">
-            <strong>ผนังที่ส่งออก</strong>
-            <span>ผนังถูกตัดเป็นช่วงตามช่องเปิดจริง ไม่ต้องใช้ข้อมูลช่องเปิดแฝง</span>
-          </div>
-        </div>
-
-        <div id="connectivityNote" class="connectivity-note hidden"></div>
-        <div id="semanticWarningList" class="warning-list"></div>
-        <div id="openingCandidateSection" class="opening-candidates hidden">
-          <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
-          <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
-          <div id="openingCandidateList"></div>
-        </div>
-        <div id="offLevelSection" class="opening-candidates hidden">
-          <h3>แผ่นพื้นต่างระดับมาก (ยังไม่ใช้เป็นพื้นเดิน)</h3>
-          <p class="opening-candidates-note">แผ่นที่สูงหรือต่ำกว่าพื้นชั้นเกิน 0.40 ม. เช่นแผงบังแดด กันสาด หรือชั้นลอย · ติ๊กเฉพาะแผ่นที่เป็นพื้นเดินจริง · ระบบจะสร้างเป็นพื้นที่เดินที่ระดับจริงของแผ่น (ชั้นลอย ไม่รวมกับพื้นชั้น) จึงต้องมีบันได/ทางลาดเชื่อม · แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
-          <div id="offLevelList"></div>
-        </div>
-        <div id="editsSection" class="opening-candidates hidden">
-          <h3>แก้ไขบนแปลนโดยวิศวกร</h3>
-          <p class="opening-candidates-note">วาดในโหมด "แปลน 2D" · ระบบใช้ทุกครั้งที่เตรียมโมเดลคนเดิน และบันทึกใน build manifest · ไม่แก้ไฟล์ IFC</p>
-          <p id="editsReview" class="edits-review"></p>
-          <div id="editsList"></div>
-        </div>
-        <div id="verticalSection" class="opening-candidates hidden">
-          <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>
-          <p class="opening-candidates-note">ลูกศรใน 3D ชี้ทิศขึ้น · <span class="dir-ok">เขียว</span> = หาจาก Geometry · <span class="dir-review">ส้ม</span> = ต้องตรวจทิศ · ทิศบันไดยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim</p>
-          <div id="verticalList"></div>
-        </div>
-        <div id="semanticEnginePath" class="engine-path hidden"></div>
-      </section>
-
-
-      <section id="buildSection" class="panel hidden build-section">
-        <div class="panel-heading">
-          <div>
-            <div class="eyebrow">BUILD / VALIDATION</div>
-            <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
-          </div>
-          <div class="semantic-actions">
-            <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
-            <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
-            <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
-            <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
-            <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
-          </div>
-        </div>
-
-        <div class="metric-grid build-metrics">
-          <div class="metric build-error"><span>ข้อผิดพลาด</span><strong id="buildErrors">—</strong></div>
-          <div class="metric review"><span>คำเตือน</span><strong id="buildWarnings">—</strong></div>
-          <div class="metric opening"><span>ข้อมูล</span><strong id="buildInfo">—</strong></div>
-          <div class="metric include"><span>สถานะ Vissim</span><strong id="buildStatus">พร้อม</strong></div>
-          <div class="metric"><span>เวลา</span><strong id="buildDuration">—</strong></div>
-        </div>
-
-        <div id="gateSection" class="gate-section hidden">
-          <h3>เรื่องที่ต้องตรวจใน Viswalk</h3>
-          <p class="opening-candidates-note">
-            แอปนี้แปลง IFC เป็นโมเดล Viswalk ไม่ใช่ตัวตรวจ BIM · หยุดเฉพาะเมื่อ Geometry Engine สร้างไฟล์ไม่ได้ ·
-            <span class="gate-chip check">ตรวจใน Viswalk</span> สร้างไฟล์ได้ แล้วไปตรวจ/แก้ใน Viswalk (บันทึกเป็น checklist) ·
-            <span class="gate-chip info">ข้อมูล</span> ไม่ต้องทำอะไร
-          </p>
-          <div id="gateList" class="gate-list"></div>
-          <div id="gateSummary" class="gate-summary"></div>
-        </div>
-        <div id="buildIssueList" class="build-issue-list"></div>
-        <div id="buildOutputPath" class="engine-path hidden"></div>
-      </section>
-
-      <section id="categorySection" class="panel hidden">
-        <div class="panel-heading tight">
-          <div>
-            <div class="eyebrow">MODEL CLASSIFICATION</div>
-            <h2>กฎการแปลงอัตโนมัติ</h2>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>IFC type</th><th>จำนวน</th><th>อัตโนมัติ</th><th>บทบาทในการจำลอง</th><th>แปลงเป็นใน Viswalk</th></tr>
-            </thead>
-            <tbody id="categoryRows"></tbody>
-          </table>
-        </div>
-      </section>
-
+        </form>
+      </dialog>
     </main>
     <footer class="app-credit">
       <span>Viswalk BIM Builder <span id="appVersionText"></span></span>
@@ -458,6 +498,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=040" defer></script>
+  <script src="/static/app.js?v=041" defer></script>
 </body>
 </html>

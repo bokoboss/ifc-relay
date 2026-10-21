@@ -101,6 +101,12 @@ def test_clean_model_enables_build_without_acknowledgement(page, tmp_path):
     _open(page, b.write(tmp_path / "clean.ifc"))
     _prepare_and_validate(page)
     assert "สร้างไฟล์ได้" in page.text_content("#gateSummary")
+    # UX-01: at 1366x768 the page itself does not scroll; the list is in the dock
+    # and the viewer stays on screen with a usable height.
+    assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
+    box = page.locator("#viewerCanvasHost").bounding_box()
+    assert box["y"] >= 0 and box["y"] + box["height"] <= 768 and box["height"] >= 200
+    assert page.get_attribute('.dock-tab[data-tab="checks"]', "aria-selected") == "true"
     assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
 
@@ -113,13 +119,21 @@ def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     assert page.locator("#gateList input").count() == 0           # nothing to tick
     assert "ต้องตรวจ/แก้ใน Viswalk" in page.text_content("#gateSummary")
     assert page.is_enabled("#buildViswalkBtn")
-    messages = []
-    page.once("dialog", lambda d: (messages.append(d.message), d.dismiss()))   # cancel: no build
-    page.click("#buildViswalkBtn")
-    page.wait_for_timeout(300)
-    assert messages and "พื้นที่ที่เดินไปไม่ถึง" in messages[0]
+    page.click("#buildViswalkBtn")                                 # one confirmation, in-app dialog
+    page.wait_for_selector("#buildConfirm[open]")
+    assert "พื้นที่ที่เดินไปไม่ถึง" in page.text_content("#buildConfirmList")
+    page.click("#buildConfirmReview")                              # go back: no build, checks tab shown
+    page.wait_for_selector("#buildConfirm", state="hidden")
+    assert page.get_attribute('.dock-tab[data-tab="checks"]', "aria-selected") == "true"
     assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
+
+
+def _dock(page, tab):
+    """Show a review-dock tab (lists live there, not on the page)."""
+    if page.get_attribute(f'.dock-tab[data-tab="{tab}"]', "aria-selected") != "true" \
+            or page.get_attribute("#reviewDock", "data-open") != "true":
+        page.click(f'.dock-tab[data-tab="{tab}"]')
 
 
 def _enter_plan(page, level="1"):
@@ -142,8 +156,10 @@ def _plan_point(page, x, y):
         return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
             const p = window.IFCViewer.planScreenPoint({x}, {y});
             const rc = document.getElementById('viewerCanvasHost').getBoundingClientRect();
+            const hit = document.elementFromPoint(p.x, p.y);
             const ok = a === JSON.stringify(p) && p.y >= Math.max(rc.top, 0) && p.y <= Math.min(rc.bottom, innerHeight)
-              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth);
+              && p.x >= Math.max(rc.left, 0) && p.x <= Math.min(rc.right, innerWidth)
+              && !!hit && hit.tagName === 'CANVAS';            // not under a toolbar
             r({{ok, p, rect: [rc.left, rc.top, rc.right, rc.bottom], view: [innerWidth, innerHeight, scrollY]}});
         }})));
     }}"""
@@ -177,6 +193,7 @@ def test_polygon_snap_undo_redo(page, tmp_path):
     page.wait_for_selector("#planConfirm:not(.hidden)")
     assert "4 มุม" in page.text_content("#planConfirmText")
     page.click("#planConfirmBtn")
+    _dock(page, "edits")
     page.wait_for_selector("#editsList .edit-row")
     import json as _json
     edits = _json.loads(urllib.request.urlopen(page.url.rstrip("/") + "/api/edits").read())["edits"]
@@ -207,6 +224,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         page.wait_for_selector("#planConfirm:not(.hidden)", timeout=10000)
         assert "ตัดผนัง 1 ชิ้น" in page.text_content("#planConfirmText")
         page.click("#planConfirmBtn")
+        _dock(page, "edits")
         page.wait_for_selector("#editsList .edit-row", timeout=15000)
         assert page.query_selector("#editsList .edit-review-pending")
     except Exception as exc:
@@ -217,6 +235,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
     page.wait_for_timeout(500)
     assert "ที่เดินไปไม่ถึง 1 แห่ง" in page.text_content("#connectivityNote")   # only the other floor (no stair)
+    _dock(page, "edits")
     page.wait_for_selector("#editsList .edit-review-applied")          # F-19: the run used the passage
     assert "ใช้ครบ" in page.text_content("#editsReview")
     assert page.errors == []

@@ -132,8 +132,8 @@ def test_semantic_preparation_activates_simulation_preview_automatically() -> No
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
     assert "/static/styles.css" in dom.anchors
-    assert "/static/studio.css?v=3" in dom.anchors
-    assert dom.anchors.index("/static/studio.css?v=3") > dom.anchors.index("/static/styles.css")
+    assert "/static/studio.css?v=4" in dom.anchors
+    assert dom.anchors.index("/static/studio.css?v=4") > dom.anchors.index("/static/styles.css")
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
     assert "@import" not in STUDIO
