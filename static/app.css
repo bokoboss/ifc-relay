@@ -279,7 +279,8 @@ a.link-btn {display:inline-flex;align-items:center;}
 .plan-tool.walkable {box-shadow:inset 3px 0 0 #2e9e5b;}
 .plan-tool.obstacle {box-shadow:inset 3px 0 0 #34495e;}
 .plan-tool.passage {box-shadow:inset 3px 0 0 #0e9fb6;}
-.plan-tool.active.walkable,.plan-tool.active.obstacle,.plan-tool.active.passage {box-shadow:none;}
+.plan-tool.exit {box-shadow:inset 3px 0 0 var(--accent);}
+.plan-tool.active.walkable,.plan-tool.active.obstacle,.plan-tool.active.passage,.plan-tool.active.exit {box-shadow:none;}
 #planUndoBtn,#planRedoBtn {padding:3px 7px;}
 .plan-confirm {
   position:absolute;left:0;bottom:calc(100% + 6px);display:flex;align-items:center;gap:6px;white-space:nowrap;

@@ -11,7 +11,9 @@ was not converted, a floor reached by no stair. This builds a graph:
           (walkable areas of the level minus wall/column/obstacle footprints)
 * edge  = a stair/ramp whose bottom end touches one node and top end another
 
-and reports every zone that cannot be reached from the largest network. It runs
+and reports every zone that cannot be reached from the largest network, or -
+when the engineer marked exits/origins on the plan (``anchors``) - every zone
+that cannot be reached from any marked exit. It runs
 on the semantic model alone (no Vissim) and never changes the model.
 """
 from __future__ import annotations
@@ -123,9 +125,26 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
     for i in range(len(nodes)):
         groups.setdefault(find(i), []).append(i)
     ranked = sorted(groups.values(), key=lambda g: -sum(nodes[i]["geom"].area for i in g))
-    main = ranked[0] if ranked else []
+
+    # Roots: networks touched by an engineer-marked exit; else the largest network.
+    anchor_hits: dict[str, int] = {}
+    rooted: set[int] = set()
+    for anchor in model.get("anchors") or []:
+        shape = _poly(anchor.get("polygon"))
+        hit = [i for i in by_level.get(int(anchor["level_key"]), [])
+               if shape is not None and nodes[i]["geom"].intersects(shape)]
+        anchor_hits[str(anchor.get("id"))] = len(hit)
+        rooted.update(find(i) for i in hit)
+    if rooted:
+        basis = "anchors"
+        main = [i for g in ranked if find(g[0]) in rooted for i in g]
+        unreached = [g for g in ranked if find(g[0]) not in rooted]
+    else:
+        basis = "largest"
+        main = ranked[0] if ranked else []
+        unreached = ranked[1:]
     isolated = []
-    for group in ranked[1:]:
+    for group in unreached:
         for i in group:
             g = nodes[i]["geom"]
             isolated.append({
@@ -140,6 +159,9 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
     return {
         "zones": len(nodes),
         "networks": len(ranked),
+        "basis": basis,
+        "anchors": anchor_hits,
+        "networks_reached": len(rooted) if rooted else (1 if ranked else 0),
         "main_network_area_m2": round(sum(nodes[i]["geom"].area for i in main), 2),
         "main_network_levels": main_levels,
         "isolated_zones": isolated,
@@ -153,7 +175,15 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
 def connectivity_warnings(result: dict[str, Any]) -> list[str]:
     out = []
     iso = result["isolated_zones"]
-    if iso:
+    if iso and result.get("basis") == "anchors":
+        top = ", ".join(f"level {z['level_key']} {z['area_m2']:.1f} m2 at ({z['centroid'][0]:.1f}, {z['centroid'][1]:.1f})"
+                        for z in iso[:5])
+        out.append(
+            f"Connectivity (geometry-only): {len(iso)} walking zone(s) ({result['isolated_area_m2']:.1f} m2) cannot reach any "
+            f"engineer-marked exit ({len(result.get('anchors') or {})} marked). Largest: {top}. "
+            "Check for missing doors/openings or stairs, or mark another exit."
+        )
+    elif iso:
         top = ", ".join(f"level {z['level_key']} {z['area_m2']:.1f} m2 at ({z['centroid'][0]:.1f}, {z['centroid'][1]:.1f})"
                         for z in iso[:5])
         out.append(
@@ -161,6 +191,9 @@ def connectivity_warnings(result: dict[str, Any]) -> list[str]:
             f"main pedestrian network (levels {result['main_network_levels']}). Largest: {top}. "
             "Check for missing doors/openings or stairs."
         )
+    for aid, hits in (result.get("anchors") or {}).items():
+        if not hits:
+            out.append(f"Connectivity (geometry-only): exit mark {aid} touches no free walking space and is ignored.")
     for d in result["stairs_not_linked"]:
         side = "bottom" if not d["bottom_connected"] else "top"
         out.append(

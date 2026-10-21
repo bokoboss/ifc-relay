@@ -18,7 +18,9 @@ from typing import Any
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
-EDIT_KINDS = ("walkable", "obstacle", "passage")
+# "exit": an engineer-marked exit/origin. It never changes geometry; connectivity
+# measures reachability from these marks instead of from the largest network.
+EDIT_KINDS = ("walkable", "obstacle", "passage", "exit")
 MANUAL_OBSTACLE_HEIGHT = 2.0
 
 
@@ -75,8 +77,9 @@ def resolve_edit_level(edit: dict[str, Any], level_z: dict[int, float]) -> tuple
 def apply_manual_edits(edits: list[dict[str, Any]], *, areas: list[dict[str, Any]],
                        walls: list[dict[str, Any]], obstacles: list[dict[str, Any]],
                        level_z: dict[int, float], warnings: list[str],
-                       status: dict[str, dict[str, Any]] | None = None) -> dict[str, int]:
-    applied = {"walkable": 0, "obstacle": 0, "passage": 0, "skipped": 0}
+                       status: dict[str, dict[str, Any]] | None = None,
+                  anchors: list[dict[str, Any]] | None = None) -> dict[str, int]:
+    applied = {"walkable": 0, "obstacle": 0, "passage": 0, "exit": 0, "skipped": 0}
     status = status if status is not None else {}
     for edit in edits or []:
         problem = validate_edit(edit)
@@ -105,6 +108,11 @@ def apply_manual_edits(edits: list[dict[str, Any]], *, areas: list[dict[str, Any
                               "level_key": level, "height": MANUAL_OBSTACLE_HEIGHT, "z_offset": 0.0,
                               "polygon": _pts(shape), **tag})
             applied["obstacle"] += 1
+
+        elif kind == "exit":
+            if anchors is not None:
+                anchors.append({"id": str(edit.get("id")), "level_key": level, "polygon": _pts(shape)})
+            applied["exit"] += 1
 
         elif kind == "passage":
             cut = 0
@@ -162,6 +170,8 @@ def edit_review_state(edit: dict[str, Any], status: dict[str, Any] | None) -> di
         return {"state": "skipped", "detail": str(status.get("reason") or "ใช้ไม่ได้")}
     if edit.get("kind") == "passage" and status.get("walls_cut") == 0:
         return {"state": "no_effect", "detail": "ไม่ตัดผนังใดเลย"}
+    if edit.get("kind") == "exit" and status.get("zones_touched") == 0:
+        return {"state": "no_effect", "detail": "ไม่แตะพื้นที่เดินว่าง"}
     if status.get("note"):
         z = edit.get("level_z")
         where = f"ที่ความสูง {float(z):.2f} ม. " if z is not None else ""

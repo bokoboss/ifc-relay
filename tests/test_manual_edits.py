@@ -22,7 +22,7 @@ def test_passage_opens_closed_room_and_obstacle_blocks(tmp_path):
     from ifc_semantic_service import build_semantic_model
     sem = build_semantic_model(path, extract_ifc_geometry(path), ov, edits)
     info = sem["ifc_semantic"]
-    assert info["manual_edits_applied"] == {"walkable": 1, "obstacle": 1, "passage": 1, "skipped": 0}
+    assert info["manual_edits_applied"] == {"walkable": 1, "obstacle": 1, "passage": 1, "exit": 0, "skipped": 0}
     assert not info["connectivity"]["isolated_zones"]                     # room reachable through E1
     cut = [w for w in sem["walls"] if w.get("manual_edit_id") == "E1"]
     assert len(cut) == 2                                                   # wall split into two pieces

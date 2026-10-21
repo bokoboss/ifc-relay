@@ -53,3 +53,56 @@ def test_stair_links_floors_and_door_opens_room(tmp_path):
     con2 = sem2["ifc_semantic"]["connectivity"]
     assert con2["networks"] == 1 and not con2["isolated_zones"]
     assert not any(w.startswith("Connectivity") for w in sem2["ifc_semantic"]["warnings"])
+
+
+# ---- engineer-marked exits (anchors) ------------------------------------------
+def _exit(eid, level, x0, y0, x1, y1):
+    return {"id": eid, "kind": "exit", "level_key": level, "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]}
+
+
+def _semantic_with(b, ov, path, edits):
+    from ifc_geometry_service import extract_ifc_geometry
+    from ifc_semantic_service import build_semantic_model
+    p = b.write(path)
+    return build_semantic_model(p, extract_ifc_geometry(p), ov, edits)
+
+
+def test_exit_in_closed_room_makes_the_rest_unreachable(tmp_path):
+    """Measured from a marked exit, not from the largest network: an exit inside the
+    closed room leaves the big floor unreachable, and the exit changes no geometry."""
+    b, ov = _two_storeys(with_stair=True)
+    plain = semantic_for(b.write(tmp_path / "p.ifc"), ov)
+    sem = _semantic_with(b, ov, tmp_path / "e.ifc", [_exit("E1", 1, 16, 7, 18, 9)])
+    con = sem["ifc_semantic"]["connectivity"]
+    assert con["basis"] == "anchors" and con["anchors"] == {"E1": 1}
+    assert con["main_network_levels"] == [1]
+    assert {z["level_key"] for z in con["isolated_zones"]} == {1, 2}      # big L1 floor + L2
+    assert con["isolated_area_m2"] > 150
+    assert any("cannot reach any engineer-marked exit" in w for w in sem["ifc_semantic"]["warnings"])
+    for key in ("areas", "walls", "obstacles"):
+        assert len(sem[key]) == len(plain[key])                            # no geometry from an exit
+    assert sem["ifc_semantic"]["manual_edits_status"]["E1"]["zones_touched"] == 1
+
+
+def test_two_exits_join_their_networks(tmp_path):
+    b, ov = _two_storeys(with_stair=True)
+    sem = _semantic_with(b, ov, tmp_path / "e2.ifc",
+                         [_exit("E1", 1, 16, 7, 18, 9), _exit("E2", 2, 10, 5, 12, 7)])
+    con = sem["ifc_semantic"]["connectivity"]
+    assert con["basis"] == "anchors" and con["networks_reached"] == 2
+    assert not con["isolated_zones"]
+
+
+def test_exit_off_the_floor_falls_back_and_is_flagged(tmp_path):
+    from gate_service import evaluate_gate
+    from manual_edits import edit_review_state
+    b, ov = _two_storeys(with_stair=True)
+    sem = _semantic_with(b, ov, tmp_path / "e3.ifc", [_exit("E9", 1, 50, 50, 52, 52)])
+    con = sem["ifc_semantic"]["connectivity"]
+    assert con["basis"] == "largest" and con["anchors"] == {"E9": 0}
+    assert len(con["isolated_zones"]) == 1                                  # same as without exits
+    status = sem["ifc_semantic"]["manual_edits_status"]["E9"]
+    assert edit_review_state(sem["ifc_semantic"]["manual_edits"][0], status)["state"] == "no_effect"
+    items = {i["id"]: i for i in evaluate_gate(sem, None)["items"]}
+    assert "manual_exit_no_effect" in items and items["manual_exit_no_effect"]["policy"] == "check"
+    assert "โครงข่ายใหญ่ที่สุด" in items["isolated_zones"]["detail"]
