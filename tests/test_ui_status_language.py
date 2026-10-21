@@ -6,7 +6,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP_JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+from tests.ui_sources import app_js  # noqa: E402
+
+APP_JS = app_js()
 INDEX = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
 LEGACY_ENGLISH = [
