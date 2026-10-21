@@ -1416,10 +1416,22 @@ def build_semantic_model(
         z_offset = bbmin[2] - level_z_by_key[level_key]
         if abs(z_offset) < 1e-5:
             z_offset = 0.0
-        if (is_a(element, "IfcPlate") or is_a(element, "IfcMember")) and (
-                bbmax[2] - level_z_by_key[level_key] < PLATE_MIN_TOP or z_offset > PLATE_MAX_BOTTOM):
-            plates_off_walking_height += 1
-            continue
+        if is_a(element, "IfcPlate") or is_a(element, "IfcMember"):
+            # Curtain-wall panels belong to the storey of their curtain wall, which
+            # can span many storeys: put each panel on the storey whose walking
+            # zone it stands in, and drop floor decks and overhead panels.
+            walking = [int(lv["key"]) for lv in sorted(levels, key=lambda lv: float(lv["z"]))
+                       if not lv.get("generated")
+                       and bbmax[2] - level_z_by_key[int(lv["key"])] >= PLATE_MIN_TOP
+                       and bbmin[2] - level_z_by_key[int(lv["key"])] <= PLATE_MAX_BOTTOM]
+            if not walking:
+                plates_off_walking_height += 1
+                continue
+            at_or_below = [k for k in walking if level_z_by_key[k] <= bbmin[2] + PLATE_MIN_TOP]
+            level_key = at_or_below[-1] if at_or_below else walking[0]
+            z_offset = bbmin[2] - level_z_by_key[level_key]
+            if abs(z_offset) < 1e-5:
+                z_offset = 0.0
 
         if is_a(element, "IfcColumn"):
             compactness = 0.0
