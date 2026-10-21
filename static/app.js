@@ -126,7 +126,8 @@ const dock = (() => {
 
   // Tab counts follow what the panels actually contain.
   const COUNTS = {
-    checks: () => [document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length,
+    checks: () => [document.getElementById('gateSection').classList.contains('hidden') ? 0
+                   : document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length,
                    document.querySelectorAll('#gateList .gate-row.block').length ? 'block' : 'warn'],
     model: () => [0, ''],
     choices: () => [document.querySelectorAll('#openingCandidateList .opening-row, #offLevelList .check-row').length, ''],
@@ -148,7 +149,7 @@ const dock = (() => {
   }
   new MutationObserver(() => {
     if (!pending) { pending = true; requestAnimationFrame(updateCounts); }
-  }).observe(body, { childList: true, subtree: true, characterData: true });
+  }).observe(body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class'] });
 
   select(active, { open: false });
   setOpen(store.get('open') === '1');
@@ -185,9 +186,97 @@ function formatBytes(bytes) {
 async function api(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
+  // Any change on the server can make the pedestrian model stale or move the
+  // workflow on: re-read the project state once things settle.
+  if ((options.method || 'GET') !== 'GET' && !url.startsWith('/api/project')) scheduleWorkflowRefresh();
   if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
   return payload;
 }
+
+// ---------------------------------------------------------------------------
+// Workflow state (UX-05, UX-09): the four command buttons carry their step
+// state (done / stale / next), and a banner in the viewport says when the
+// pedestrian model on screen does not include the latest changes.
+// ---------------------------------------------------------------------------
+let workflowTimer = null;
+function scheduleWorkflowRefresh() {
+  clearTimeout(workflowTimer);
+  workflowTimer = setTimeout(refreshWorkflowState, 250);
+}
+
+async function refreshWorkflowState() {
+  let state;
+  try { state = await (await fetch('/api/project')).json(); } catch { return; }
+  const semantic = state.semantic || {};
+  const build = state.build || {};
+  const ready = semantic.status === 'ready';
+  const stale = ready && !!semantic.stale;
+  const current = ready && !stale;
+  const steps = {
+    file: state.upload ? 'done' : 'next',
+    prepare: !state.upload ? 'idle' : stale ? 'stale' : current ? 'done' : 'next',
+    validate: !current ? 'idle' : ['validated', 'success'].includes(build.status) ? 'done' : 'next',
+    build: !current || !['validated', 'success'].includes(build.status) ? 'idle' : build.status === 'success' ? 'done' : 'next',
+  };
+  const targets = { file: document.querySelector('.file-picker'), prepare: generateSemanticBtn, validate: validateBtn, build: buildViswalkBtn };
+  const words = { done: 'เสร็จแล้ว', stale: 'ต้องทำใหม่', next: 'ขั้นถัดไป', idle: '' };
+  for (const [step, el] of Object.entries(targets)) {
+    if (!el) continue;
+    el.dataset.step = steps[step];
+    el.setAttribute('aria-description', words[steps[step]]);
+  }
+  document.getElementById('staleBanner').classList.toggle('hidden', !stale);
+}
+
+document.getElementById('staleRegenerateBtn').addEventListener('click', () => generateSemanticBtn.click());
+setTimeout(refreshWorkflowState, 0);
+
+// Left-panel search over the loaded IFC objects.
+(() => {
+  const input = document.getElementById('modelSearch');
+  const list = document.getElementById('modelSearchResults');
+  function render() {
+    const v = viewer();
+    const hits = v?.searchSource ? v.searchSource(input.value) : [];
+    list.innerHTML = '';
+    list.classList.toggle('hidden', input.value.trim().length < 2);
+    if (input.value.trim().length < 2) return;
+    if (!hits.length) {
+      const li = document.createElement('li');
+      li.className = 'search-empty';
+      li.textContent = 'ไม่พบในส่วนที่โหลดแล้ว';
+      list.appendChild(li);
+      return;
+    }
+    for (const hit of hits) {
+      const li = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'option');
+      button.title = `${hit.name} · ${hit.guid}`;
+      const name = document.createElement('span');
+      name.className = 'search-name';
+      name.textContent = hit.name || hit.guid;
+      const meta = document.createElement('span');
+      meta.className = 'search-meta';
+      meta.textContent = [hit.type, hit.storey].filter(Boolean).join(' · ');
+      button.append(name, meta);
+      button.addEventListener('click', () => {
+        document.getElementById('sourceModeBtn').click();
+        v.showSource(hit.guid);
+        setMessage(`แสดง ${hit.name || hit.guid} ในโมเดลต้นฉบับ`);
+      });
+      li.appendChild(button);
+      list.appendChild(li);
+    }
+  }
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 120); });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') list.querySelector('button')?.click();
+    if (event.key === 'Escape') { input.value = ''; render(); }
+  });
+})();
 
 function viewer() {
   return window.IFCViewer || null;
@@ -1186,7 +1275,7 @@ window.addEventListener('semantic-element-selected', event => {
     : (src.rise != null ? `สูงขึ้น ${Number(src.rise).toFixed(2)} ม. · ${src.steps ?? '?'} ขั้น` : '—');
   const override = single ? (selectionState.overrides?.[single.global_id] || 'auto') : null;
   document.getElementById('effectiveStatus').textContent = single
-    ? `กำหนดเอง: ${override} · ผลจริง: ${effectiveStatus(single)}`
+    ? `กำหนดเอง: ${STATUS_TH[override] || override} · ผลที่ใช้: ${STATUS_TH[effectiveStatus(single)] || effectiveStatus(single)}`
     : (sourceGuids?.length > 1 ? `รวมจาก ${sourceGuids.length} ชิ้น · เปลี่ยนสถานะได้ที่ชิ้นต้นฉบับ` : 'สร้างโดยระบบ ไม่มีชิ้นต้นฉบับ');
   document.querySelectorAll('.status-btn').forEach(button => {
     button.disabled = !single;
@@ -1219,6 +1308,8 @@ window.addEventListener('semantic-element-selected', event => {
   }
 });
 
+const STATUS_TH = { auto: 'อัตโนมัติ', include: 'นำเข้า', review: 'รอตรวจ', exclude: 'ไม่ใช้' };
+
 function renderInspector(item) {
   if (!item) return;
   document.querySelectorAll('.status-btn').forEach(button => { button.disabled = false; });
@@ -1226,7 +1317,7 @@ function renderInspector(item) {
   document.getElementById('inspectorContent').classList.remove('hidden');
   document.getElementById('selectedName').textContent = item.name || item.ifc_type;
   document.getElementById('selectedType').textContent = item.ifc_type || '—';
-  document.getElementById('selectedStorey').textContent = item.storey_name || 'Unassigned';
+  document.getElementById('selectedStorey').textContent = item.storey_name || 'ไม่ระบุชั้น';
   document.getElementById('selectedGuid').textContent = item.global_id || '—';
   document.getElementById('selectedAuto').textContent = item.recommendation || 'review';
   document.getElementById('selectedMapping').textContent = item.viswalk_mapping || '—';
@@ -1235,7 +1326,7 @@ function renderInspector(item) {
   const override = selectionState.overrides?.[item.global_id] || 'auto';
   const effective = effectiveStatus(item);
   document.getElementById('effectiveStatus').textContent =
-    `Manual: ${override} · Effective: ${effective}`;
+    `กำหนดเอง: ${STATUS_TH[override] || override} · ผลที่ใช้: ${STATUS_TH[effective] || effective}`;
 
   document.querySelectorAll('.status-btn').forEach(button => {
     button.classList.toggle('active', button.dataset.status === override);

@@ -1145,6 +1145,22 @@ window.IFCViewer = {
     clearGroup(focusGroup);
   },
 
+  // Loaded IFC objects whose name, type or GlobalId contains the query (left-panel search).
+  searchSource(query, limit = 25) {
+    const q = String(query || '').trim().toLowerCase();
+    if (q.length < 2) return [];
+    const out = [];
+    for (const [guid, mesh] of meshes) {
+      const item = mesh.userData.item || {};
+      const hay = `${guid} ${item.name || ''} ${item.ifc_type || ''}`.toLowerCase();
+      if (hay.includes(q)) {
+        out.push({ guid, name: item.name || '', type: item.ifc_type || '', storey: item.storey_name || '' });
+        if (out.length >= limit) break;
+      }
+    }
+    return out;
+  },
+
   hasSource(guid) {
     return !!guid && meshes.has(guid);
   },
