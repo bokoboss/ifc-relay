@@ -43,7 +43,7 @@ jobs:
             requirements-dev.txt
       - name: Install
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt playwright
+          pip install -r requirements.txt -r requirements-dev.txt playwright==1.64.0   # pinned: visual references were taken with its Chromium
           python -m playwright install --with-deps chromium
       - name: Three.js runtime (same files install.bat downloads)
         run: |
@@ -65,3 +65,10 @@ jobs:
       - name: Report E2E failures
         if: failure()
         run: grep -E "^(E  |FAILED|ERROR)" e2e.log | head -40 | sed 's/^/::error::/' || true
+      - name: Upload visual differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-out
+          path: tests/e2e/visual-out/
+          if-no-files-found: ignore
