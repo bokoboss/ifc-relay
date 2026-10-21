@@ -10,7 +10,8 @@ def test_plan_controls_exist_and_are_wired():
         assert f'id="{element_id}"' in html
     for tool in ("select", "measure", "walkable", "obstacle", "passage"):
         assert f'data-tool="{tool}"' in html
-    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    from tests.ui_sources import app_js
+    app = app_js()
     assert "window.addEventListener('plan-shape'" in app and "'/api/edits'" in app
     for element_id in ('planConfirmBtn', 'planUndoBtn', 'planRedoBtn', 'planSizeInput'):
         assert f'id="{element_id}"' in html

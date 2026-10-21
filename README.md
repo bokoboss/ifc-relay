@@ -132,6 +132,7 @@ vissim_build_service.py     validation and build orchestration
 vissim_build_adapter.py     subprocess adapter around the Geometry Engine (COM)
 state_store.py  project_paths.py  fixture_paths.py
 static/                     browser UI (Three.js runtime downloaded to static/vendor/)
+                            app.js core + app-plan / app-model / app-review / app-build.js, app3d.js viewer
 engine/                     bundled Geometry Engine v0.3
 scripts/                    installer, launcher, verify and IFC dry-run scripts
 tests/                      pytest suite on synthetic IFC (runs in CI)

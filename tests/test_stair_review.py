@@ -121,7 +121,8 @@ def test_bulk_auto_returns_stairs_to_review(client, tmp_path):
 
 def test_ui_wiring_for_stair_review():
     html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-    js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+    from tests.ui_sources import app_js
+    js = app_js()
     js3d = (ROOT / "static" / "app3d.js").read_text(encoding="utf-8")
     for el in ("stairBulkBtn", "stairConfirm", "stairConfirmBtn", "stairCancelBtn", "stairResetBtn",
                "stairUnits", "stairIncluded", "stairReview", "verticalSection", "verticalList"):

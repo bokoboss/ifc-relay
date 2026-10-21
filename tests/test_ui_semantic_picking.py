@@ -17,6 +17,7 @@ def test_inspector_has_source_links_and_review_lists():
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     for element_id in ("semanticSourceList", "offLevelList", "openingCandidateList"):
         assert f'id="{element_id}"' in html
-    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    from tests.ui_sources import app_js
+    app = app_js()
     assert "window.addEventListener('semantic-element-selected'" in app
     assert "markSemanticStale()" in app
