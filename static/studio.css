@@ -781,3 +781,43 @@ html {scroll-behavior:auto;}
 .plan-toolbar {gap:4px;}
 .plan-toolbar .plan-level select {max-width:128px;}
 .plan-toolbar .plan-tools {gap:3px;}
+
+/* Review queue rows (UX-03) and grouped Engine findings (UX-02) */
+.gate-row {padding:0;gap:0;}
+.gate-row > summary,.issue-group > summary {
+  display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;list-style:none;
+}
+.gate-row > summary::-webkit-details-marker,.issue-group > summary::-webkit-details-marker {display:none;}
+.gate-row > summary::after,.issue-group > summary::after {
+  content:"";margin-left:auto;width:7px;height:7px;flex:0 0 auto;
+  border-right:1.5px solid #7d9097;border-bottom:1.5px solid #7d9097;transform:rotate(45deg) translateY(-2px);
+  transition:transform .15s;
+}
+.gate-row[open] > summary::after,.issue-group[open] > summary::after {transform:rotate(-135deg) translateY(-2px);}
+.gate-row > summary:hover,.issue-group > summary:hover {background:#f2f7f6;}
+.gate-row > summary:focus-visible,.issue-group > summary:focus-visible {outline:2px solid var(--accent);outline-offset:-2px;}
+.gate-count {
+  font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:#4b636c;
+  background:#eef3f3;border-radius:4px;padding:0 6px;line-height:20px;
+}
+.gate-detail {display:block;padding:0 10px 8px;color:#5b6b6d;font-size:12px;}
+.gate-items {list-style:none;margin:0;padding:2px 10px 8px;border-top:1px solid #e8eeee;max-height:260px;overflow:auto;}
+.gate-items li {display:flex;align-items:center;gap:10px;padding:5px 4px;border-bottom:1px solid #f0f4f4;font-size:12px;}
+.gate-items li:last-child {border-bottom:0;}
+.gate-items li.current {background:#fdf4ec;box-shadow:inset 2px 0 0 #c8743f;}
+.gate-item-label {flex:1 1 auto;min-width:0;color:#33494f;overflow-wrap:anywhere;}
+.gate-item-label.mono {font:11.5px/1.5 Consolas,ui-monospace,monospace;}
+.gate-items-more {color:#7d9097;}
+.gate-locate {
+  flex:0 0 auto;border:1px solid #c9dadb;background:#fff;color:#14707a;border-radius:4px;
+  font-size:11.5px;font-weight:650;padding:2px 9px;cursor:pointer;
+}
+.gate-locate:hover {background:#eaf5f4;border-color:#8fc1c2;}
+.build-issue-list {display:flex;flex-direction:column;gap:6px;margin-top:10px;}
+.issue-group {border:1px solid #dde5e5;border-left:4px solid #9aa8aa;border-radius:4px;background:#fbfcfc;font-size:12px;}
+.issue-group.error {border-left-color:#c0392b;} .issue-group.warning {border-left-color:#d98e04;}
+.issue-sev {font-size:11px;padding:1px 6px;border-radius:3px;color:#fff;background:#8a9696;}
+.issue-sev.error {background:#c0392b;} .issue-sev.warning {background:#b9790a;}
+.tech-notes {margin-top:10px;font-size:12px;}
+.tech-notes > summary {cursor:pointer;color:#5b6f77;font-weight:650;padding:4px 0;}
+.tech-notes .warning-item {margin-top:6px;}

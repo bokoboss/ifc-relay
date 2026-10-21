@@ -116,6 +116,13 @@ def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     _open(page, b.write(tmp_path / "room.ifc"))
     _prepare_and_validate(page)
     assert page.locator("#gateList .gate-row.check", has_text="พื้นที่ที่เดินไปไม่ถึง").count() == 1
+    # UX-03: the item opens to its places; "ดูตำแหน่ง" takes the viewer there
+    row = page.locator("#gateList .gate-row.check", has_text="พื้นที่ที่เดินไปไม่ถึง")
+    row.locator("summary").click()
+    row.locator(".gate-locate").first.click()
+    page.wait_for_function("window.IFCViewer.isPlan()")
+    assert "วงสีส้ม" in page.text_content("#messageText")
+    row.locator("summary").click()                                 # fold it again
     assert page.locator("#gateList input").count() == 0           # nothing to tick
     assert "ต้องตรวจ/แก้ใน Viswalk" in page.text_content("#gateSummary")
     assert page.is_enabled("#buildViswalkBtn")

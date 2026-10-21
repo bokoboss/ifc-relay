@@ -554,6 +554,8 @@ const editsGroup = new THREE.Group();
 planOverlay.add(editsGroup);
 const draftGroup = new THREE.Group();
 planOverlay.add(draftGroup);
+const focusGroup = new THREE.Group();     // "ดูตำแหน่ง" marker from the review queue
+planOverlay.add(focusGroup);
 const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, measure: 0xd35400 };
 let manualEdits = [];
 
@@ -1040,6 +1042,7 @@ window.IFCViewer = {
   exitPlan() {
     planActive = false;
     planPoints = [];
+    clearGroup(focusGroup);
     clearGroup(draftGroup);
     planControls.enabled = false;
     controls.enabled = true;
@@ -1051,6 +1054,7 @@ window.IFCViewer = {
   setPlanLevel(levelKey) {
     planLevelKey = Number(levelKey);
     planPoints = [];
+    clearGroup(focusGroup);
     clearGroup(draftGroup);
     applyVisibility();
     drawEdits();
@@ -1113,6 +1117,36 @@ window.IFCViewer = {
     const v = new THREE.Vector3(Number(x), levelZ(planLevelKey), -Number(y)).project(activeCam());
     const rect = renderer.domElement.getBoundingClientRect();
     return { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height };
+  },
+
+  // Centre the plan on (x, y) of the current plan level and ring it (review queue).
+  focusPlanPoint(x, y, radius = 1.5, halfHeight = 9) {
+    if (!planActive) return false;
+    clearGroup(focusGroup);
+    const z = levelZ(planLevelKey) + 0.05;
+    const ring = [];
+    for (let i = 0; i < 48; i += 1) {
+      const a = (i / 48) * Math.PI * 2;
+      ring.push([Number(x) + Math.cos(a) * radius, Number(y) + Math.sin(a) * radius]);
+    }
+    focusGroup.add(outline(ring, z, 0xc8743f, 0.3));
+    const cx = Number(x), cz = -Number(y);
+    orthoHalfHeight = Math.max(halfHeight, radius * 3);
+    orthoCamera.zoom = 1;
+    orthoCamera.position.set(cx, levelZ(planLevelKey) + 200, cz);
+    planControls.target.set(cx, levelZ(planLevelKey), cz);
+    orthoCamera.lookAt(planControls.target);
+    resize();
+    planControls.update();
+    return true;
+  },
+
+  clearFocus() {
+    clearGroup(focusGroup);
+  },
+
+  hasSource(guid) {
+    return !!guid && meshes.has(guid);
   },
 
   // Jump from a pedestrian-model object to the IFC element it came from.
