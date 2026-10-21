@@ -162,6 +162,8 @@ The app reports these in *Engine ในเครื่อง* and writes them in
 
 Orchestrated by **KITTIPAT TANGITTINUNT** — product direction, engineering review and Vissim/Viswalk verification.
 
+Interface type: IBM Plex Sans Thai and IBM Plex Mono (© IBM Corp., SIL Open Font License 1.1), bundled in `static/fonts/` so the app works offline.
+
 ## Data, trademark and licensing
 
 - **Do not commit real client/project BIM data** (including IFC/DXF/PDF), proprietary Vissim models, credentials, cached geometry, logs or generated outputs.

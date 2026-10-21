@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
-STUDIO = (ROOT / "static" / "studio.css").read_text(encoding="utf-8")
+STUDIO = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
 
 
 class IdAndElementParser(HTMLParser):
@@ -73,8 +73,8 @@ def test_no_permanent_workflow_sidebar() -> None:
     assert dom.tags["healthText"] == "div"
     assert "command-index" not in HTML
     assert 'class="workspace-toolbar"' in HTML
-    assert ".app-shell {display:block;" in STUDIO
-    assert ".workflow-state {display:none!important;}" in STUDIO
+    assert ".app-shell {display:flex;" in STUDIO          # no sidebar column
+    assert ".workflow-state {display:none !important;}" in STUDIO
 
 
 def test_primary_engineering_layout_preserved() -> None:
@@ -115,7 +115,7 @@ def test_compact_toolbar_has_direct_primary_actions_and_secondary_tools() -> Non
     assert "command-group" not in HTML
     assert "command-index" not in HTML
     assert "workspace-toolbar" in STUDIO
-    assert "@media (max-width:1120px)" in STUDIO
+    assert "@media (max-width:1180px)" in STUDIO
 
 
 def test_semantic_preparation_activates_simulation_preview_automatically() -> None:
@@ -131,9 +131,8 @@ def test_semantic_preparation_activates_simulation_preview_automatically() -> No
 
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
-    assert "/static/styles.css" in dom.anchors
-    assert "/static/studio.css?v=4" in dom.anchors
-    assert dom.anchors.index("/static/studio.css?v=4") > dom.anchors.index("/static/styles.css")
+    assert "/static/app.css?v=5" in dom.anchors                    # one stylesheet, fonts bundled
+    assert (ROOT / "static" / "fonts" / "OFL.txt").exists()
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
     assert "@import" not in STUDIO

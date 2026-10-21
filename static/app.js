@@ -773,10 +773,10 @@ function setViewerBadge(mode) {
   const badge = document.getElementById('viewportIdentLabel');
   if (!badge) return;
   badge.innerHTML = {
-    simulation: '3D MODEL SPACE <small> / โมเดลคนเดิน (Viswalk geometry)</small>',
-    overlay: '3D MODEL SPACE <small> / ซ้อนภาพ: โมเดลคนเดินบน IFC ต้นฉบับ</small>',
-    plan: 'PLAN 2D <small> / แปลนรายระดับของโมเดลคนเดิน</small>',
-  }[mode] || '3D MODEL SPACE <small> / IFC ต้นฉบับ</small>';
+    simulation: '3D <small>· โมเดลคนเดิน (Viswalk)</small>',
+    overlay: '3D <small>· ซ้อนภาพ โมเดลคนเดินบน IFC ต้นฉบับ</small>',
+    plan: 'แปลน <small>· รายระดับของโมเดลคนเดิน</small>',
+  }[mode] || '3D <small>· IFC ต้นฉบับ</small>';
 }
 
 document.getElementById('overlayModeBtn').addEventListener('click', () => {
@@ -1817,7 +1817,7 @@ function renderValidation(result) {
   document.getElementById('buildErrors').textContent = counts.error ?? 0;
   document.getElementById('buildWarnings').textContent = counts.warning ?? 0;
   document.getElementById('buildInfo').textContent = counts.info ?? 0;
-  document.getElementById('buildStatus').textContent = result.build_allowed ? 'Validated' : 'Blocked';
+  document.getElementById('buildStatus').textContent = result.build_allowed ? 'ตรวจแล้ว · สร้างได้' : 'สร้างไม่ได้';
 
   const root = document.getElementById('buildIssueList');
   root.innerHTML = '';
