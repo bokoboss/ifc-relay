@@ -162,6 +162,14 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
                            f"พื้นที่เดินเพิ่ม {kinds['walkable']} · สิ่งกีดขวางเพิ่ม {kinds['obstacle']} · "
                            f"ทางผ่าน {kinds['passage']} · บันทึกใน build manifest"))
 
+    repairs = info.get("gap_repairs") or []
+    if repairs:
+        ids = [f"L{r['level_key']}@{r['centroid'][0]:.1f},{r['centroid'][1]:.1f}~{max(round(r['area_m2'] * 2) / 2, 0.5)}"
+               for r in repairs]
+        items.append(_item("gap_repairs", "info", ids, "รอยต่อพื้นที่ระบบปิดให้อัตโนมัติ",
+                           f"ช่องว่างระหว่างแผ่นพื้นแคบกว่า 50 มม. ถูกเติมให้พื้นเดินต่อกัน (Viswalk ต้องให้พื้นที่แตะกัน) · "
+                           f"กด \"ดูตำแหน่ง\" เพื่อดูว่าไม่ใช่ช่องที่ตั้งใจเว้นไว้", count=len(repairs)))
+
     if issues:
         by_key = {int(r["key"]): r for k in ("walls", "columns", "obstacles") for r in semantic.get(k, [])}
         no_floor, edge = [], []

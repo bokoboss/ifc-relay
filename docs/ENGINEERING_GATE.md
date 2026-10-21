@@ -18,6 +18,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Walkable-looking openings still closed | check | Open real passages in the app or in Viswalk |
 | Multi-storey wall copies without door gaps | check | Upper storeys may need doors |
 | Obstacles with (almost) no floor under them | check | Wrong level or missing slab |
+| Slab gaps < 50 mm closed automatically | info | Each repair is listed with its place; "ดูตำแหน่ง" shows it on the plan so an intended gap is not hidden |
 | Obstacles across the floor edge | info | Walls/columns on the slab edge |
 | Overlapping obstacles | info | Usually joined walls; many overlaps can mean duplicates - check in the plan |
 

@@ -13,7 +13,9 @@ def test_slab_joint_gap_is_closed_but_real_gap_is_kept():
     stats: dict[str, int] = {}
     joined = merge_walkable_components([Polygon([(0, 0), (5, 0), (5, 5), (0, 5)]),
                                         Polygon([(5.01, 0), (10, 0), (10, 5), (5.01, 5)])], stats=stats)
-    assert len(joined) == 1 and stats == {"gaps_closed": 1}
+    assert len(joined) == 1 and stats["gaps_closed"] == 1
+    repair = stats["repairs"][0]                                 # ENG-03: where the floor was added
+    assert abs(repair.centroid.x - 5.005) < 0.01 and abs(repair.area - 0.05) < 0.01
     assert abs(joined[0].area - 50.0) < 0.06                     # outer edges unchanged
     apart = merge_walkable_components([Polygon([(0, 0), (5, 0), (5, 5), (0, 5)]),
                                        Polygon([(5.2, 0), (10, 0), (10, 5), (5.2, 5)])])
@@ -29,6 +31,11 @@ def test_building_with_slab_joints_has_one_continuous_floor(tmp_path):
     assert len([a for a in sem["areas"] if a["level_key"] == 1]) == 1
     assert any("closed 2 gap(s)" in w for w in sem["ifc_semantic"]["warnings"])
     assert not sem["ifc_semantic"]["connectivity"]["isolated_zones"]
+    repairs = sem["ifc_semantic"]["gap_repairs"]
+    assert sorted(round(r["centroid"][0], 1) for r in repairs) == [6.0, 12.0]
+    from gate_service import evaluate_gate
+    item = next(i for i in evaluate_gate(sem, None)["items"] if i["id"] == "gap_repairs")
+    assert item["policy"] == "info" and item["count"] == 2 and item["identities"][0].startswith("L1@")
 
 
 @requires_engine
