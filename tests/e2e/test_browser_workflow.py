@@ -101,6 +101,12 @@ def test_clean_model_enables_build_without_acknowledgement(page, tmp_path):
     _open(page, b.write(tmp_path / "clean.ifc"))
     _prepare_and_validate(page)
     assert "สร้างไฟล์ได้" in page.text_content("#gateSummary")
+    page.wait_for_function("document.getElementById('validateBtn').dataset.step === 'done'"
+                           " && document.getElementById('buildViswalkBtn').dataset.step === 'next'")
+    page.fill("#modelSearch", "IfcSlab")                            # search the loaded IFC objects
+    page.wait_for_selector("#modelSearchResults button")
+    page.click("#modelSearchResults button")
+    page.wait_for_function("!document.getElementById('inspectorContent').classList.contains('hidden')")
     # UX-01: at 1366x768 the page itself does not scroll; the list is in the dock
     # and the viewer stays on screen with a usable height.
     assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
@@ -238,10 +244,15 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         raise AssertionError(f"no edit saved: hits={hits} hint={page.text_content('#planHint')} "
                              f"plan={page.evaluate('window.IFCViewer.isPlan()')} {_diag(page)}") from exc
     assert page.is_disabled("#validateBtn")
+    # UX-05/09: the change is visible in the viewport and on the prepare button
+    page.wait_for_selector("#staleBanner:not(.hidden)")
+    assert page.get_attribute("#generateSemanticBtn", "data-step") == "stale"
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
     page.wait_for_timeout(500)
     assert "ที่เดินไปไม่ถึง 1 แห่ง" in page.text_content("#connectivityNote")   # only the other floor (no stair)
+    page.wait_for_selector("#staleBanner", state="hidden")
+    page.wait_for_function("document.getElementById('generateSemanticBtn').dataset.step === 'done'")
     _dock(page, "edits")
     page.wait_for_selector("#editsList .edit-review-applied")          # F-19: the run used the passage
     assert "ใช้ครบ" in page.text_content("#editsReview")

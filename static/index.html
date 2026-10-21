@@ -113,6 +113,12 @@
             </div>
           </div>
 
+          <div class="filter-block model-search">
+            <label class="sr-only" for="modelSearch">ค้นหาองค์ประกอบด้วยชื่อ ประเภท หรือ GlobalId</label>
+            <input id="modelSearch" type="search" placeholder="ค้นหาชื่อ ประเภท หรือ GlobalId" autocomplete="off" />
+            <ul id="modelSearchResults" class="search-results hidden" role="listbox" aria-label="ผลการค้นหา"></ul>
+          </div>
+
           <div class="filter-block">
             <div class="filter-title">ชั้นอาคาร</div>
             <div id="storeyFilters" class="check-list"><div class="tree-empty">ชั้นอาคารจะแสดงหลังนำเข้า IFC</div></div>
@@ -196,6 +202,10 @@
             <div class="viewport-ident" aria-hidden="true">
               <span class="viewport-ident-mark"></span>
               <span id="viewportIdentLabel">3D <small>· IFC ต้นฉบับ</small></span>
+            </div>
+            <div id="staleBanner" class="stale-banner hidden" role="status">
+              <span>โมเดลคนเดินยังไม่รวมการแก้ไขล่าสุด</span>
+              <button id="staleRegenerateBtn" type="button" class="prepare-btn secondary-btn">เตรียมโมเดลคนเดินใหม่</button>
             </div>
             <div id="viewerEmpty" class="viewer-empty">
               <div class="viewer-empty-illustration" aria-hidden="true">
