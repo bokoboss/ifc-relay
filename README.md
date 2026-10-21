@@ -100,6 +100,16 @@ Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (th
 4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
 5. On the Vissim machine, double-click **`verify_vissim.bat`**: runs the automated tests (including engine-contract tests), Fixture #1 if `local\TallBuilding.ifc` exists, builds a synthetic verification model (straight stair, U-stair with landing, partial flight, L-wall, closed wall loop, door-less opening) through Vissim COM, and writes `output\verify_<time>\report.md` with a short manual checklist for Vissim. Use `verify_vissim.bat -SkipBuild` to skip the COM build.
 
+**Qualify the installed Vissim releases** (after a Vissim update, or before trusting a new release):
+
+```bat
+qualify_vissim.bat                                        &REM every registered release
+qualify_vissim.bat -Release 2026                          &REM one release
+qualify_vissim.bat -Ifc "D:\Models\building.ifc" -Redact  &REM also a real IFC; report without names/paths
+```
+
+For each release it builds the verification model (and the real IFC, stairs included) with that release only, reopens the `.inpx` in the same release and reads back every level, area, obstacle and ramp/stair through COM (`vissim_readback.py`). Each must match what the Geometry Engine reported creating (level, height, z offsets within 1 mm). With two releases the read-backs are also compared with each other. Result: `output\qualify_<time>\report.md` and `report.json`. A PASS says the file holds what was built; an engineer still looks at the model in Viswalk.
+
 **Check a real IFC without Vissim** (no `base_empty.inpx` needed):
 
 ```bat
@@ -115,7 +125,7 @@ Lookup order (`project_paths.py`): engine `VBB_GEOMETRY_ENGINE` -> `local\` -> b
 ## Repository layout
 
 ```text
-install.bat  start.bat  verify_vissim.bat   Windows entry points (no .exe)
+install.bat  start.bat  verify_vissim.bat  qualify_vissim.bat   Windows entry points (no .exe)
 app.py                      FastAPI server (uvicorn app:app)
 ifc_service.py              IFC audit and storey/mesh listing
 ifc_geometry_service.py     IFC geometry extraction
@@ -130,6 +140,7 @@ ifc_vertical_service.py     stairs/ramps, landings, up-direction review
 revision_service.py         carry review decisions across IFC revisions
 vissim_build_service.py     validation and build orchestration
 vissim_build_adapter.py     subprocess adapter around the Geometry Engine (COM)
+vissim_readback.py          reopen a built .inpx via COM and compare with the engine report
 state_store.py  project_paths.py  fixture_paths.py
 static/                     browser UI (Three.js runtime downloaded to static/vendor/)
                             app.js core + app-plan / app-model / app-review / app-build.js, app3d.js viewer
