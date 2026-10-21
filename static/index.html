@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=5" />
+  <link rel="stylesheet" href="/static/app.css?v=6" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -187,6 +187,7 @@
                 <button data-tool="walkable" class="plan-tool walkable" title="คลิกสองมุมเพื่อเพิ่มพื้นที่เดิน">+ พื้นที่เดิน</button>
                 <button data-tool="obstacle" class="plan-tool obstacle" title="คลิกสองมุมเพื่อเพิ่มสิ่งกีดขวาง">+ สิ่งกีดขวาง</button>
                 <button data-tool="passage" class="plan-tool passage" title="คลิกสองมุมคร่อมผนังเพื่อเปิดทางผ่าน (เช่นประตูที่ IFC ไม่ได้ผูก)">เปิดทางผ่าน</button>
+                <button data-tool="exit" class="plan-tool exit" title="วาดทับพื้นที่ทางออกหรือจุดที่คนเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง ไม่เปลี่ยนรูปทรงโมเดล">ทางออก</button>
               </div>
               <div class="plan-tools" role="group" aria-label="รูปทรง">
                 <button data-shape="rect" class="plan-shape active" title="คลิกสองมุม">สี่เหลี่ยม</button>
@@ -538,6 +539,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=050" defer></script>
+  <script src="/static/app.js?v=051" defer></script>
 </body>
 </html>

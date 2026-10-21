@@ -1611,10 +1611,11 @@ def build_semantic_model(
     # Engineer's manual plan edits (added floor / obstacles / passages).
     from manual_edits import apply_manual_edits
     manual_status: dict[str, dict[str, Any]] = {}
+    exit_anchors: list[dict[str, Any]] = []
     manual_applied = apply_manual_edits(
         manual_edits or [], areas=areas, walls=walls, obstacles=obstacles,
         level_z={int(lv["key"]): float(lv["z"]) for lv in levels}, warnings=warnings,
-        status=manual_status,
+        status=manual_status, anchors=exit_anchors,
     )
     if any(manual_applied[k] for k in ("walkable", "obstacle", "passage")):
         warnings.append(
@@ -1637,8 +1638,12 @@ def build_semantic_model(
             "levels": levels + [lv for lv in landing_levels],
             "areas": areas, "walls": walls, "columns": columns, "obstacles": obstacles,
             "vertical_connections": vertical_connections,
+            "anchors": exit_anchors,
         })
         warnings.extend(connectivity_warnings(connectivity))
+        for aid, hits in (connectivity.get("anchors") or {}).items():
+            if aid in manual_status:
+                manual_status[aid]["zones_touched"] = hits
     except Exception as exc:  # noqa: BLE001 - never block conversion on a diagnostic
         connectivity = {"error": f"{type(exc).__name__}: {exc}"}
 

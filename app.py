@@ -115,7 +115,7 @@ class GeometryRequest(BaseModel):
     tier: Literal["all", "core", "review"] = "all"
 
 class ManualEdit(BaseModel):
-    kind: Literal["walkable", "obstacle", "passage"]
+    kind: Literal["walkable", "obstacle", "passage", "exit"]
     level_key: int
     polygon: list[list[float]]
     note: str = ""

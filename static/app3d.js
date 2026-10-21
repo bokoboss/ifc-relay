@@ -556,7 +556,7 @@ const draftGroup = new THREE.Group();
 planOverlay.add(draftGroup);
 const focusGroup = new THREE.Group();     // "ดูตำแหน่ง" marker from the review queue
 planOverlay.add(focusGroup);
-const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, measure: 0xd35400 };
+const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, exit: 0xb86c4d, measure: 0xd35400 };
 let manualEdits = [];
 
 function levelZ(key) {

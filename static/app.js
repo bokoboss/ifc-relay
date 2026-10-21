@@ -953,6 +953,7 @@ const PLAN_HINTS = {
   walkable: 'คลิกสองมุมของพื้นที่เดินที่ต้องการเพิ่ม',
   obstacle: 'คลิกสองมุมของสิ่งกีดขวางที่ต้องการเพิ่ม',
   passage: 'คลิกสองมุมคร่อมผนังตรงที่ต้องการเปิดทางผ่าน',
+  exit: 'คลิกสองมุมทับพื้นที่ทางออก/จุดเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง',
 };
 document.querySelectorAll('.plan-tool').forEach(button => {
   button.addEventListener('click', () => {
@@ -969,7 +970,7 @@ window.addEventListener('plan-measure', event => {
   if (final) setMessage(`วัดระยะบนแปลน: ${Number(distance).toFixed(3)} ม.`);
 });
 
-const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน' };
+const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน', exit: 'ทางออก' };
 // F-19: what the last pedestrian-model run did with each edit
 const EDIT_REVIEW_TH = {
   applied: 'ใช้แล้ว',
@@ -1025,6 +1026,12 @@ function previewSummary(shape) {
       && o.type === 'IfcWall' && o.polygon && o.polygon.some((p, i, arr) => segmentHitsPolygon(p, arr[(i + 1) % arr.length], shape.polygon))).length;
     const n = walls + polys;
     return `${label} ${area.toFixed(2)} ตร.ม. · ตัดผนัง ${n} ชิ้น` + (n ? '' : ' (ไม่โดนผนังเลย)');
+  }
+  if (shape.tool === 'exit') {
+    const floors = (currentSemantic?.areas || []).filter(a => Number(a.level_key) === Number(shape.level_key)
+      && a.polygon && a.polygon.some((p, i, arr) => segmentHitsPolygon(p, arr[(i + 1) % arr.length], shape.polygon)
+        || segmentHitsPolygon(shape.polygon[0], shape.polygon[0], a.polygon))).length;
+    return `${label} ${area.toFixed(2)} ตร.ม. · ` + (floors ? 'ทับพื้นที่เดิน · ไม่เปลี่ยนรูปทรงโมเดล' : 'ไม่ทับพื้นที่เดินเลย');
   }
   return `${label} ${shape.polygon.length} มุม · ${area.toFixed(2)} ตร.ม.`;
 }
@@ -1574,10 +1581,14 @@ function renderConnectivity(con) {
   const iso = con.isolated_zones || [];
   const loose = con.stairs_not_linked || [];
   const ok = !iso.length && !loose.length;
+  const exits = Object.keys(con.anchors || {}).length;
+  const basis = con.basis === 'anchors'
+    ? `วัดจากทางออกที่กำหนด ${exits} จุด`
+    : (exits ? 'ทางออกที่วาดไม่แตะพื้นที่เดิน · วัดจากโครงข่ายใหญ่ที่สุดแทน' : 'วัดจากโครงข่ายใหญ่ที่สุด · วาด "ทางออก" บนแปลนเพื่อวัดจากทางออกจริง');
   note.className = `connectivity-note ${ok ? 'ok' : 'warn'}`;
   note.textContent = ok
-    ? `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่เดินต่อถึงกันหมด · บันไดเชื่อม ${con.stairs_linked} ตัว (ยังไม่ใช่การตรวจเส้นทางเดินใน Viswalk)`
-    : `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่ที่เดินไปไม่ถึง ${iso.length} แห่ง (${Number(con.isolated_area_m2).toFixed(1)} ตร.ม., แสดงเป็นสีแดงใน 3D)` +
+    ? `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่เดินต่อถึงกันหมด · บันไดเชื่อม ${con.stairs_linked} ตัว · ${basis} (ยังไม่ใช่การตรวจเส้นทางเดินใน Viswalk)`
+    : `ตรวจการเชื่อมต่อทางเรขาคณิต: พื้นที่ที่เดินไปไม่ถึง ${iso.length} แห่ง (${Number(con.isolated_area_m2).toFixed(1)} ตร.ม., แสดงเป็นสีแดงใน 3D) · ${basis}` +
       (loose.length ? ` · บันไดที่ปลายไม่ถึงพื้นที่เดิน ${loose.length} ตัว` : '') +
       ` · บันไดเชื่อมแล้ว ${con.stairs_linked} ตัว`;
 }

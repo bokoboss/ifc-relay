@@ -2,7 +2,7 @@
 
 Covers the review's acceptance scenarios that need a real browser:
 E2E-01 clean model -> Build enabled; a model with Viswalk checks still builds
-(listed, one confirmation); plan passage -> regenerate -> zone reachable.
+(listed, one confirmation); plan passage -> regenerate -> zone reachable; exit mark -> measured from it.
 """
 from __future__ import annotations
 
@@ -256,4 +256,19 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     _dock(page, "edits")
     page.wait_for_selector("#editsList .edit-review-applied")          # F-19: the run used the passage
     assert "ใช้ครบ" in page.text_content("#editsReview")
+    assert "วัดจากโครงข่ายใหญ่ที่สุด" in page.text_content("#connectivityNote")
+
+    # An exit mark changes no geometry; reachability is then measured from it.
+    page.click(".plan-tool[data-tool=exit]")
+    for x, y in ((4.0, 4.0), (6.0, 6.0)):
+        pt = _plan_point(page, x, y)
+        page.mouse.click(pt["x"], pt["y"])
+        page.wait_for_timeout(300)
+    page.wait_for_selector("#planConfirm:not(.hidden)", timeout=10000)
+    assert "ทับพื้นที่เดิน" in page.text_content("#planConfirmText")
+    page.click("#planConfirmBtn")
+    page.wait_for_selector("#staleBanner:not(.hidden)")
+    page.click("#generateSemanticBtn")
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากทางออกที่กำหนด 1 จุด')")
     assert page.errors == []

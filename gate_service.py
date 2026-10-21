@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-21.2"
+POLICY_VERSION = "2026-10-21.3"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -96,10 +96,16 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
         items.append(_item("stairs_not_linked", "check", loose, "ปลายบันไดไม่ถึงพื้นที่เดินว่าง",
                            "ปลายบันไดชนผนัง/สิ่งกีดขวาง หรือไม่มีพื้นรองรับ · คนจะใช้บันไดนี้ไม่ได้"))
     zones = [_zone_id(z) for z in con.get("isolated_zones", [])]
-    if zones:
+    if zones and con.get("basis") == "anchors":
+        items.append(_item("isolated_zones", "check", zones,
+                           f"พื้นที่ที่เดินไปไม่ถึงทางออกที่กำหนด ({con.get('isolated_area_m2', 0):.1f} ตร.ม.)",
+                           f"วัดจากทางออก/จุดหลัก {len(con.get('anchors') or {})} จุดที่วาดบนแปลน · พื้นที่สีแดงใน 3D · "
+                           "ประตู/ช่องเปิดหรือบันไดที่ขาด หรือเป็นห้องปิด/ช่องท่อ"))
+    elif zones:
         items.append(_item("isolated_zones", "check", zones,
                            f"พื้นที่ที่เดินไปไม่ถึง ({con.get('isolated_area_m2', 0):.1f} ตร.ม.)",
-                           "พื้นที่สีแดงใน 3D · ประตู/ช่องเปิดหรือบันไดที่ขาด หรือเป็นห้องปิด/ช่องท่อ"))
+                           "พื้นที่สีแดงใน 3D · วัดจากโครงข่ายใหญ่ที่สุด (ยังไม่ได้กำหนดทางออก) · "
+                           "ประตู/ช่องเปิดหรือบันไดที่ขาด หรือเป็นห้องปิด/ช่องท่อ"))
 
     review_dir = [str(v.get("ifc_global_id") or v.get("key")) for v in vcs if v.get("direction_status") == "needs_review"]
     if review_dir:
@@ -156,11 +162,17 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     if no_effect:
         items.append(_item("manual_passage_no_effect", "check", no_effect, "ทางผ่านที่วาดแล้วไม่ได้ตัดผนัง",
                            "ทางผ่านเหล่านี้ไม่คร่อมผนังใดเลย · ไฟล์ไม่มีช่องทางเดินตรงนั้น · วาดใหม่ให้คร่อมผนัง หรือเปิดใน Viswalk"))
+    stray_exits = [eid for eid, st in status.items()
+                   if st.get("applied") and st.get("zones_touched") == 0
+                   and any(str(e.get("id")) == eid and e.get("kind") == "exit" for e in edits)]
+    if stray_exits:
+        items.append(_item("manual_exit_no_effect", "check", stray_exits, "ทางออกที่วาดไม่แตะพื้นที่เดิน",
+                           "จุดเหล่านี้ไม่ถูกใช้ในการตรวจการเชื่อมต่อ · วาดใหม่ให้ทับพื้นที่เดินว่าง"))
     if edits:
-        kinds = {k: sum(1 for e in edits if e.get("kind") == k) for k in ("walkable", "obstacle", "passage")}
+        kinds = {k: sum(1 for e in edits if e.get("kind") == k) for k in ("walkable", "obstacle", "passage", "exit")}
         items.append(_item("manual_edits", "info", [str(e.get("id")) for e in edits], "แก้ไขบนแปลนโดยวิศวกร",
                            f"พื้นที่เดินเพิ่ม {kinds['walkable']} · สิ่งกีดขวางเพิ่ม {kinds['obstacle']} · "
-                           f"ทางผ่าน {kinds['passage']} · บันทึกใน build manifest"))
+                           f"ทางผ่าน {kinds['passage']} · ทางออก {kinds['exit']} · บันทึกใน build manifest"))
 
     repairs = info.get("gap_repairs") or []
     if repairs:
