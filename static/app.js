@@ -128,7 +128,7 @@ const dock = (() => {
   const COUNTS = {
     checks: () => [document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length,
                    document.querySelectorAll('#gateList .gate-row.block').length ? 'block' : 'warn'],
-    model: () => [document.querySelectorAll('#semanticWarningList .warning-item:not(.info)').length, ''],
+    model: () => [0, ''],
     choices: () => [document.querySelectorAll('#openingCandidateList .opening-row, #offLevelList .check-row').length, ''],
     edits: () => [document.querySelectorAll('#editsList .edit-row').length,
                   document.querySelector('#editsReview.needs-review') ? 'warn' : ''],
@@ -1051,8 +1051,10 @@ window.addEventListener('keydown', event => {
   }
 });
 
+let lastEdits = [];
 function renderEdits(edits) {
   const list = Array.isArray(edits) ? edits : [];
+  lastEdits = list;
   viewer()?.setManualEdits(list);
   const section = document.getElementById('editsSection');
   const root = document.getElementById('editsList');
@@ -1316,12 +1318,20 @@ function renderSemanticSummary(result) {
     item.textContent = 'เตรียมโมเดลคนเดินโดยไม่มีข้อควรระวัง';
     root.appendChild(item);
   } else {
+    // Raw converter notes (English, technical). What needs action is already in
+    // the "ตรวจใน Viswalk" tab, so these stay folded.
+    const box = document.createElement('details');
+    box.className = 'tech-notes';
+    const head = document.createElement('summary');
+    head.textContent = `บันทึกทางเทคนิคจากการแปลง (${warnings.length})`;
+    box.appendChild(head);
     for (const warning of warnings) {
       const item = document.createElement('div');
       item.className = 'warning-item';
       item.textContent = warning;
-      root.appendChild(item);
+      box.appendChild(item);
     }
+    root.appendChild(box);
   }
 }
 
@@ -1643,28 +1653,151 @@ async function refreshGate() {
   return currentGate;
 }
 
+// ---------------------------------------------------------------------------
+// Review queue (UX-03): every check item opens to the objects or places it is
+// about, and "ดูตำแหน่ง" takes the viewer there. Items without a location say so.
+// ---------------------------------------------------------------------------
+const GUID_RX = /^[0-9A-Za-z_$]{22}$/;
+const ZONE_RX = /^L(-?\d+)@(-?[\d.]+),(-?[\d.]+)~([\d.]+)$/;
+const END_TH = { start: 'ปลายล่าง', end: 'ปลายบน', bottom: 'ปลายล่าง', top: 'ปลายบน' };
+const ITEMS_SHOWN = 60;
+const ENGINE_ISSUE_TH = {
+  obstacle_outside_walkable: 'สิ่งกีดขวางอยู่นอกพื้นที่เดิน',
+  obstacle_overlap: 'สิ่งกีดขวางซ้อนกัน',
+  level_without_walkable_area: 'ระดับที่ไม่มีพื้นที่เดิน',
+  vertical_connection_not_on_start_area: 'ปลายล่างบันได/ทางลาดไม่แตะพื้นที่เดิน',
+  vertical_connection_not_on_end_area: 'ปลายบนบันได/ทางลาดไม่แตะพื้นที่เดิน',
+};
+
+function levelNameOf(key) {
+  return (currentSemantic?.levels || []).find(l => Number(l.key) === Number(key))?.name || `ระดับ ${key}`;
+}
+
+function describeIdentity(id) {
+  const zone = String(id).match(ZONE_RX);
+  if (zone) {
+    const [, level, x, y, area] = zone;
+    return { kind: 'zone', level: Number(level), x: Number(x), y: Number(y),
+      radius: Math.min(Math.max(Math.sqrt(Number(area) / Math.PI), 1), 10),
+      label: `${levelNameOf(level)} · ${Number(area).toFixed(1)} ตร.ม. ที่ (${Number(x).toFixed(1)}, ${Number(y).toFixed(1)})` };
+  }
+  if (/^E\d+$/.test(id)) {
+    const edit = lastEdits.find(e => e.id === id);
+    if (!edit) return { kind: 'none', label: `${id} (ลบไปแล้ว)` };
+    const xs = edit.polygon.map(p => p[0]), ys = edit.polygon.map(p => p[1]);
+    return { kind: 'zone', level: Number(edit.level_key),
+      x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2,
+      radius: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1) / 2 + 0.5,
+      label: `${id} · ${EDIT_KIND_TH[edit.kind] || edit.kind} · ${levelNameOf(edit.level_key)}` };
+  }
+  const [head, rest] = String(id).split(/[:@]/);
+  if (GUID_RX.test(head)) {
+    const suffix = rest ? (END_TH[rest] || (rest.startsWith('L') ? levelNameOf(rest.slice(1)) : rest)) : '';
+    return { kind: 'source', guid: head, label: head + (suffix ? ` · ${suffix}` : '') };
+  }
+  return { kind: 'none', label: String(id) };
+}
+
+function focusIdentity(target) {
+  const v = viewer();
+  if (!v) return;
+  if (target.kind === 'source') {
+    if (!v.hasSource(target.guid)) {
+      setMessage(`ยังไม่ได้โหลด ${target.guid} ใน 3D · เปิดชั้นหรือประเภทขององค์ประกอบนี้ในแผงซ้ายแล้วลองอีกครั้ง หรือค้นด้วย GlobalId ใน Viswalk`);
+      return;
+    }
+    document.getElementById('sourceModeBtn').click();
+    v.showSource(target.guid);
+    setMessage(`แสดง ${target.guid} ในโมเดลต้นฉบับ`);
+    return;
+  }
+  if (target.kind === 'zone') {
+    if (!v.isPlan()) document.getElementById('planModeBtn').click();
+    const select = document.getElementById('planLevelSelect');
+    if (![...select.options].some(o => Number(o.value) === target.level)) {
+      setMessage(`${levelNameOf(target.level)} ไม่มีพื้นที่เดินให้แสดงในแปลน`);
+      return;
+    }
+    if (Number(select.value) !== target.level) {
+      select.value = String(target.level);
+      select.dispatchEvent(new Event('change'));
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => v.focusPlanPoint(target.x, target.y, target.radius)));
+    setMessage(`แปลน ${levelNameOf(target.level)}: วงสีส้มคือตำแหน่งที่ต้องตรวจ`);
+  }
+}
+
 function renderGate(gate) {
   const section = document.getElementById('gateSection');
   const root = document.getElementById('gateList');
   if (!section || !root) return;
   section.classList.toggle('hidden', !gate);
+  const open = new Set([...root.querySelectorAll('details[open]')].map(d => d.dataset.item));
   root.innerHTML = '';
   if (!gate) return;
   const order = { block: 0, check: 1, info: 2 };
   for (const item of [...gate.items].sort((a, b) => order[a.policy] - order[b.policy])) {
-    const row = document.createElement('div');
+    const row = document.createElement('details');
     row.className = `gate-row ${item.policy}`;
-    const head = document.createElement('div');
+    row.dataset.item = item.id;
+    row.open = open.has(item.id);
+    const head = document.createElement('summary');
     head.className = 'gate-head';
     const chip = document.createElement('span');
     chip.className = `gate-chip ${item.policy}`;
     chip.textContent = { block: 'ต้องแก้', check: 'ตรวจใน Viswalk', info: 'ข้อมูล' }[item.policy];
     const title = document.createElement('strong');
-    title.textContent = `${item.title} · ${item.count}`;
-    head.append(chip, title);
+    title.textContent = item.title;
+    const count = document.createElement('span');
+    count.className = 'gate-count';
+    count.textContent = item.count;
+    head.append(chip, title, count);
     const detail = document.createElement('small');
+    detail.className = 'gate-detail';
     detail.textContent = item.detail;
     row.append(head, detail);
+    // The object list is built on first open: big models have thousands.
+    row.addEventListener('toggle', () => {
+      if (!row.open || row.querySelector('.gate-items')) return;
+      const list = document.createElement('ul');
+      list.className = 'gate-items';
+      const ids = item.identities || [];
+      for (const id of ids.slice(0, ITEMS_SHOWN)) {
+        const target = describeIdentity(id);
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.className = target.kind === 'source' ? 'gate-item-label mono' : 'gate-item-label';
+        label.textContent = target.label;
+        li.appendChild(label);
+        if (target.kind !== 'none') {
+          const go = document.createElement('button');
+          go.type = 'button';
+          go.className = 'gate-locate';
+          go.textContent = target.kind === 'source' ? 'ดูในโมเดล' : 'ดูตำแหน่ง';
+          go.addEventListener('click', () => {
+            root.querySelectorAll('.gate-items li.current').forEach(n => n.classList.remove('current'));
+            li.classList.add('current');
+            focusIdentity(target);
+          });
+          li.appendChild(go);
+        }
+        list.appendChild(li);
+      }
+      const more = item.count - Math.min(ids.length, ITEMS_SHOWN);
+      if (more > 0) {
+        const li = document.createElement('li');
+        li.className = 'gate-items-more';
+        li.textContent = `และอีก ${more} รายการ · ครบทุกรายการใน checklist ที่ได้ตอนสร้างไฟล์`;
+        list.appendChild(li);
+      }
+      if (!ids.length) {
+        const li = document.createElement('li');
+        li.className = 'gate-items-more';
+        li.textContent = 'รายการนี้ไม่มีตำแหน่งในโมเดลให้ชี้';
+        list.appendChild(li);
+      }
+      row.appendChild(list);
+    });
     root.appendChild(row);
   }
   const summary = document.getElementById('gateSummary');
@@ -1696,15 +1829,66 @@ function renderValidation(result) {
     return;
   }
 
+  // Grouped by what the Engine found (UX-02): one row per kind with a count,
+  // opening to the objects; raw technical text stays in each object line.
+  const groups = new Map();
   for (const issue of result.issues || []) {
-    const item = document.createElement('div');
-    item.className = `build-issue ${issue.severity || 'warning'}`;
-    const detail = issue.name || issue.type || 'Validation issue';
-    const extra = issue.rationale || (issue.outside_area_m2 != null ? `Outside area: ${issue.outside_area_m2} m²` : '');
-    item.innerHTML = `<strong>${escapeHtml((issue.severity || 'warning').toUpperCase())}</strong><span>${escapeHtml(detail)}</span><small>${escapeHtml(extra)}</small>`;
-    root.appendChild(item);
+    const key = `${issue.severity || 'warning'}|${issue.type || 'issue'}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(issue);
+  }
+  const sevOrder = { error: 0, warning: 1, info: 2 };
+  const ordered = [...groups.entries()].sort(([a, x], [b, y]) =>
+    (sevOrder[a.split('|')[0]] ?? 3) - (sevOrder[b.split('|')[0]] ?? 3) || y.length - x.length);
+  for (const [key, issues] of ordered) {
+    const [severity, type] = key.split('|');
+    const row = document.createElement('details');
+    row.className = `issue-group ${severity}`;
+    const head = document.createElement('summary');
+    const sev = document.createElement('span');
+    sev.className = `issue-sev ${severity}`;
+    sev.textContent = { error: 'ข้อผิดพลาด', warning: 'คำเตือน', info: 'ข้อมูล' }[severity] || severity;
+    const title = document.createElement('strong');
+    title.textContent = ENGINE_ISSUE_TH[type] || type;
+    const count = document.createElement('span');
+    count.className = 'gate-count';
+    count.textContent = issues.length;
+    head.append(sev, title, count);
+    row.appendChild(head);
+    if (issues[0].rationale) {
+      const why = document.createElement('small');
+      why.className = 'gate-detail';
+      why.textContent = issues[0].rationale;
+      row.appendChild(why);
+    }
+    row.addEventListener('toggle', () => {
+      if (!row.open || row.querySelector('.gate-items')) return;
+      const list = document.createElement('ul');
+      list.className = 'gate-items';
+      for (const issue of issues.slice(0, ITEMS_SHOWN)) {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.className = 'gate-item-label';
+        const names = issue.names ? issue.names.join(' ↔ ') : (issue.name || '');
+        const where = issue.level_key != null ? levelNameOf(issue.level_key) : '';
+        const extra = issue.overlap_area_m2 != null ? `ซ้อน ${issue.overlap_area_m2} ตร.ม.`
+          : issue.outside_area_m2 != null ? `นอกพื้นที่เดิน ${issue.outside_area_m2} ตร.ม.` : '';
+        label.textContent = [names, where, extra].filter(Boolean).join(' · ') || JSON.stringify(issue);
+        li.appendChild(label);
+        list.appendChild(li);
+      }
+      if (issues.length > ITEMS_SHOWN) {
+        const li = document.createElement('li');
+        li.className = 'gate-items-more';
+        li.textContent = `และอีก ${issues.length - ITEMS_SHOWN} รายการ · ครบใน "รายงานการตรวจ"`;
+        list.appendChild(li);
+      }
+      row.appendChild(list);
+    });
+    root.appendChild(row);
   }
 }
+
 
 function renderBuildResult(payload) {
   const result = payload.result || payload;
