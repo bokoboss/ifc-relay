@@ -42,3 +42,4 @@ geometry_ifc_*.json
 
 # Local engine, base network, fixtures and outputs (never committed)
 local/
+tests/e2e/visual-out/

@@ -158,6 +158,8 @@ python -m pytest tests
 
 The same suite runs on every pull request via GitHub Actions. Large-IFC regression scripts (`checks/41`, `43`, `45`, `46`) read the fixture path from `VBB_LARGE_IFC`, so project file names never need to appear in the repository. Engine-contract tests run the bundled `engine/05_geometry_engine_v03.py` in validate-only mode (no Vissim, no base network) on every run, including CI; `VBB_GEOMETRY_ENGINE` can point to another copy.
 
+Browser tests (Playwright + Chromium, `VBB_E2E=1`) cover the workflow and compare the main screens with reference images in `tests/e2e/visual/` (3D canvas hidden; compared over 4x4-pixel blocks so font rendering differences between Linux images do not count). The references are taken in CI by the **visual references** workflow (Actions tab, or a commit message containing `[visual-refs]`) and record their Chromium build; a run with another build skips the comparison. CI uploads the actual and diff images when a screen differs.
+
 ## Versions
 
 | | |
