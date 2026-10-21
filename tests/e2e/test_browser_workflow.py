@@ -112,7 +112,7 @@ def test_clean_model_enables_build_without_acknowledgement(page, tmp_path):
     assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1")
     box = page.locator("#viewerCanvasHost").bounding_box()
     assert box["y"] >= 0 and box["y"] + box["height"] <= 768 and box["height"] >= 200
-    assert page.get_attribute('.dock-tab[data-tab="checks"]', "aria-selected") == "true"
+    assert page.get_attribute('.dock-tab[data-tab="issues"]', "aria-selected") == "true"
     assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
 
@@ -137,7 +137,7 @@ def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     assert "พื้นที่ที่เดินไปไม่ถึง" in page.text_content("#buildConfirmList")
     page.click("#buildConfirmReview")                              # go back: no build, checks tab shown
     page.wait_for_selector("#buildConfirm", state="hidden")
-    assert page.get_attribute('.dock-tab[data-tab="checks"]', "aria-selected") == "true"
+    assert page.get_attribute('.dock-tab[data-tab="issues"]', "aria-selected") == "true"
     assert page.is_enabled("#buildViswalkBtn")
     assert page.errors == []
 
