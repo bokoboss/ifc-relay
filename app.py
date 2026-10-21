@@ -155,6 +155,12 @@ def current_upload_or_404() -> Path:
 _GEOMETRY_POOL = None
 
 
+# The 12,000-element guard protects the browser, which receives every mesh.
+# Preparing the pedestrian model runs in a worker process and never sends the
+# meshes to the browser, so it gets a much higher, configurable ceiling (PERF-01).
+SEMANTIC_MAX_ELEMENTS = int(os.environ.get("VBB_SEMANTIC_MAX_ELEMENTS", "80000"))
+
+
 def extract_geometry_isolated(path: Path, **kwargs: Any) -> dict[str, Any]:
     global _GEOMETRY_POOL
     from concurrent.futures import ProcessPoolExecutor
@@ -684,6 +690,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
             storey_ids=[],
             tier="core",
             extra_guids=included,
+            max_elements=SEMANTIC_MAX_ELEMENTS,
         )
         semantic = build_semantic_model(path, geometry, overrides, state.get("manual_edits") or [])
         output_path = ifc_semantic_path(path)
