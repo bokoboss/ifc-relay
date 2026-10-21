@@ -1,6 +1,6 @@
 # Before the build: what stops it, what to check in Viswalk
 
-This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-21.1). The build endpoint re-validates and re-evaluates the list before starting Vissim.
+This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-21.2). The build endpoint re-validates and re-evaluates the list before starting Vissim.
 
 | Item | Policy | Why |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Walking zones not reachable from the main network | check | Missing door/stair, or a closed room/shaft |
 | Stair up-direction not derivable from geometry | check | Check the direction in Vissim |
 | Stair ends using a z offset | check | Check the connection in Vissim |
+| Slabs 0.25–0.40 m off the floor merged into it (a step people may not walk over) | check | Add an obstacle or ramp in Viswalk if it is a real step |
 | Far off-level slabs left out of the floor | check | Usually sunscreens/canopies; include them if walkable |
 | Doors that could not become openings | check | The wall stays closed there |
 | Walkable-looking openings still closed | check | Open real passages in the app or in Viswalk |
@@ -20,7 +21,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Obstacles across the floor edge | info | Walls/columns on the slab edge |
 | Overlapping obstacles | info | Usually joined walls; many overlaps can mean duplicates - check in the plan |
 
-With check items present, Build asks for one confirmation listing them; nothing has to be ticked. Each item carries a **fingerprint** (policy version + the identities of the problems: IFC GlobalIds, zone level/location/area, edit ids), so the manifest records exactly which problems were known at build time.
+With check items present, Build asks for one confirmation listing them; nothing has to be ticked. Items are built from structured diagnostics (`ifc_semantic.diagnostics`: code, object ids, metrics), never from the wording of warnings. Each item carries a **fingerprint** (policy version + the identities of the problems: IFC GlobalIds, zone level/location/area, edit ids), so the manifest records exactly which problems were known at build time.
 
 The connectivity check is a geometry-only diagnostic (free walking space touching); it is not routing verification and says nothing about origins, exits or clear widths.
 

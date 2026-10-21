@@ -44,6 +44,8 @@ SIMULATION_RELEVANT_TYPES = (
     "IfcFurnishingElement",
     "IfcBuildingElementProxy",
     "IfcCurtainWall",
+    "IfcPlate",
+    "IfcMember",
 )
 
 

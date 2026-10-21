@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-21.1"
+POLICY_VERSION = "2026-10-21.2"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -114,8 +114,12 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     if left_out:
         items.append(_item("off_level_left_out", "check", left_out, "แผ่นพื้นต่างระดับมากที่ยังไม่ใช้เป็นพื้นเดิน",
                            "ส่วนใหญ่เป็นแผงบังแดด/กันสาด · ถ้าเป็นพื้นเดิน ติ๊กใช้ในรายการแผ่นพื้นต่างระดับ"))
-    doors = [re.search(r"Door (\S+)", w).group(1) if re.search(r"Door (\S+)", w) else w for w in
-             _matching(warnings, r"no IfcRelFillsElement|not hosted by an IfcWall|no usable opening or mesh geometry")]
+    diagnostics = info.get("diagnostics")
+    if diagnostics is not None:
+        doors = [i for d in diagnostics if d.get("code") == "door_not_converted" for i in d.get("ids", [])]
+    else:   # pedestrian model written before structured diagnostics (v0.6.0)
+        doors = [re.search(r"Door (\S+)", w).group(1) if re.search(r"Door (\S+)", w) else w for w in
+                 _matching(warnings, r"no IfcRelFillsElement|not hosted by an IfcWall|no usable opening or mesh geometry")]
     if doors:
         items.append(_item("doors_not_converted", "check", doors, "ประตูที่แปลงเป็นช่องเปิดไม่ได้",
                            "ประตูไม่ผูกกับช่องเปิด/ผนังใน IFC · ผนังตรงนั้นยังปิดอยู่ · ใช้ \"เปิดทางผ่าน\" ในแปลน 2D ได้"))
@@ -124,11 +128,20 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     if closed:
         items.append(_item("passages_closed", "check", closed, "ช่องเปิดที่ดูเหมือนทางเดินแต่ยังปิดไว้",
                            "ถ้าเป็นทางเดินจริง ติ๊กเปิดในรายการช่องเปิด หรือเปิดใน Viswalk"))
-    legacy = _matching(warnings, r"multi-storey wall copies are exported without door gaps")
-    if legacy:
+    if diagnostics is not None:
+        n = sum(int(d.get("count", 0)) for d in diagnostics if d.get("code") == "multi_storey_no_doors")
+        multi_ids = [f"multi_storey_no_doors:{n}"] if n else []
+    else:
+        legacy = _matching(warnings, r"multi-storey wall copies are exported without door gaps")
         n = sum(int(re.match(r"(\d+)", w).group(1)) for w in legacy if re.match(r"(\d+)", w))
-        items.append(_item("multi_storey_no_doors", "check", legacy, "ผนังหลายชั้น: ชั้นบนไม่มีช่องประตู",
+        multi_ids = legacy
+    if n:
+        items.append(_item("multi_storey_no_doors", "check", multi_ids, "ผนังหลายชั้น: ชั้นบนไม่มีช่องประตู",
                            "ผนังที่คัดลอกขึ้นชั้นบนปิดทึบ · ตรวจว่าชั้นบนมีประตูในแนวผนังนี้หรือไม่", count=n))
+    steps = [str(st.get("global_id")) for st in info.get("flattened_steps", []) if st.get("global_id")]
+    if steps:
+        items.append(_item("floor_step_flattened", "check", steps, "พื้นต่างระดับที่ถูกปรับรวมเป็นพื้นชั้น",
+                           "แผ่นพื้นสูงหรือต่ำกว่าพื้นชั้น 0.25–0.40 ม. ถูกรวมเป็นพื้นเรียบ · ถ้าเป็นขั้นที่เดินข้ามไม่ได้ ให้ใส่สิ่งกีดขวางหรือทางลาดใน Viswalk"))
 
     # Manual plan edits that could not be applied: the file will not contain them.
     edits = info.get("manual_edits") or []
