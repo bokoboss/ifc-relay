@@ -204,7 +204,7 @@ PLATE_MAX_BOTTOM = 2.00
 
 def merge_walkable_components(components: list[Polygon], grid_size: float = 0.005,
                               close_gap: float = WALKABLE_GAP_CLOSE,
-                              stats: dict[str, int] | None = None) -> list[Polygon]:
+                              stats: dict[str, Any] | None = None) -> list[Polygon]:
     cleaned: list[Polygon] = []
     for poly in components:
         cleaned.extend(polygon_components(precision_clean_polygon(poly, grid_size=grid_size)))
@@ -223,9 +223,14 @@ def merge_walkable_components(components: list[Polygon], grid_size: float = 0.00
             closed = closed if closed.is_valid else closed.buffer(0)
             after = len(polygon_components(closed))
             if after < before:
-                merged = closed
                 if stats is not None:
                     stats["gaps_closed"] = stats.get("gaps_closed", 0) + (before - after)
+                    # Where the closing added floor (ENG-03): kept so the engineer can
+                    # see every automatic repair on the plan.
+                    added = closed.difference(merged)
+                    stats.setdefault("repairs", []).extend(
+                        piece for piece in polygon_components(added) if piece.area > 1e-5)
+                merged = closed
     return polygon_components(merged)
 
 
@@ -1098,10 +1103,16 @@ def build_semantic_model(
     walkable_void_count = 0
     ignored_void_count = 0
 
+    gap_repairs: list[dict[str, Any]] = []
     for level_key in sorted(walkable_components_by_level):
         source_components = walkable_components_by_level[level_key]
-        gap_stats: dict[str, int] = {}
+        gap_stats: dict[str, Any] = {}
         merged_regions = merge_walkable_components(source_components, grid_size=0.005, stats=gap_stats)
+        for piece in gap_stats.get("repairs", []):
+            c = piece.centroid
+            gap_repairs.append({"level_key": level_key, "centroid": [round(c.x, 2), round(c.y, 2)],
+                                "area_m2": round(piece.area, 4),
+                                "length_m": round(max(piece.length / 2, 0.0), 2)})
         if gap_stats.get("gaps_closed"):
             warnings.append(
                 f"Level {level_key}: closed {gap_stats['gaps_closed']} gap(s) narrower than {WALKABLE_GAP_CLOSE * 1000:.0f} mm "
@@ -1678,6 +1689,7 @@ def build_semantic_model(
             "opening_candidates": opening_candidates,
             "off_level_slabs": off_level_slabs,
             "flattened_steps": flattened_steps,
+            "gap_repairs": gap_repairs,
             "diagnostics": diagnostics,
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
