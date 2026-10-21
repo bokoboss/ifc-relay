@@ -15,7 +15,7 @@ import os
 import sys
 
 SUPPORTED_RELEASES = (2026, 2025)          # newest first
-TESTED_RELEASES = (2025,)                   # built + reopened + checked by an engineer
+TESTED_RELEASES = (2026, 2025)             # built + reopened + checked by an engineer (2026: 21 Oct 2026)
 VERSION_INDEPENDENT = "Vissim.Vissim"
 
 

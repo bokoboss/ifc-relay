@@ -17,7 +17,7 @@ def test_newest_registered_release_wins(monkeypatch):
     _fake(monkeypatch, {"Vissim.Vissim.2025", "Vissim.Vissim.2026", "Vissim.Vissim"})
     assert vissim_com.resolve_prog_id()[0] == "Vissim.Vissim.2026"
     info = vissim_com.describe()
-    assert info["vissim_release"] == 2026 and info["vissim_release_tested"] is False
+    assert info["vissim_release"] == 2026 and info["vissim_release_tested"] is True
 
 
 def test_2025_only_and_fallbacks(monkeypatch):
