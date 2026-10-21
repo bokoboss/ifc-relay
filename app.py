@@ -204,6 +204,58 @@ def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# ---- Vissim release choice (engineer's, kept across projects) -----------------
+SETTINGS_FILE = RUNTIME_DIR / "settings.json"
+_LAUNCH_PROGID = os.environ.get("VBB_VISSIM_PROGID", "").strip()   # set outside the app wins
+
+
+def _read_settings() -> dict[str, Any]:
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _apply_vissim_choice(release: int | None) -> None:
+    """The adapter reads VBB_VISSIM_PROGID; the build subprocess inherits it."""
+    if _LAUNCH_PROGID:
+        return
+    if release:
+        os.environ["VBB_VISSIM_PROGID"] = f"Vissim.Vissim.{int(release)}"
+    else:
+        os.environ.pop("VBB_VISSIM_PROGID", None)
+
+
+_apply_vissim_choice(_read_settings().get("vissim_release"))
+
+
+class VissimChoice(BaseModel):
+    release: int | None = None
+
+
+@app.get("/api/vissim")
+def get_vissim() -> dict[str, Any]:
+    from vissim_com import registered_releases
+
+    return {**vissim_describe(), "choice": _read_settings().get("vissim_release"),
+            "registered": registered_releases(), "fixed_by_environment": bool(_LAUNCH_PROGID)}
+
+
+@app.post("/api/vissim")
+def set_vissim(choice: VissimChoice) -> dict[str, Any]:
+    from vissim_com import registered_releases
+
+    if _LAUNCH_PROGID:
+        raise HTTPException(status_code=409, detail=f"รุ่น Vissim ถูกกำหนดไว้ตอนเปิดแอป (VBB_VISSIM_PROGID={_LAUNCH_PROGID})")
+    if choice.release is not None and choice.release not in registered_releases():
+        raise HTTPException(status_code=400, detail=f"ไม่พบ Vissim {choice.release} ที่ลงทะเบียน COM ในเครื่องนี้")
+    settings = _read_settings()
+    settings["vissim_release"] = choice.release
+    SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    _apply_vissim_choice(choice.release)
+    return get_vissim()
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     vendor_three = STATIC_DIR / "vendor" / "three.module.js"

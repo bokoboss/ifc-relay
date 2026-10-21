@@ -1176,7 +1176,7 @@ def send_to_vissim(
     vertical_connections,
 ):
     print(
-        "\nConnecting to Vissim 2025..."
+        f"\nConnecting to Vissim ({PROG_ID})..."
     )
 
     vissim = (

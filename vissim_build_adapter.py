@@ -28,6 +28,28 @@ def _ensure_validation_import_compatibility(validate_only: bool) -> None:
         sys.modules['win32com.client'] = client
 
 
+# COM errors meaning "this Vissim release did not start / is not usable".
+CANNOT_START = ('-2146959355', '-2147221005', '-2147221164')
+
+
+def run_with_fallback(engine: Any, progs: list[str]) -> str:
+    """Run the engine build against each ProgID in turn until one starts.
+    Only start-up failures move on; any other error is raised as is."""
+    for attempt, prog_id in enumerate(progs, start=1):
+        engine.PROG_ID = prog_id
+        print(f'Vissim COM ProgID: {prog_id} (attempt {attempt}/{len(progs)})', flush=True)
+        try:
+            engine.main()
+            return prog_id
+        except Exception as exc:
+            text = repr(exc)
+            if any(code in text for code in CANNOT_START) and attempt < len(progs):
+                print(f'VISSIM_FALLBACK: {prog_id} did not start ({text[:200]}); trying {progs[attempt]}', flush=True)
+                continue
+            raise
+    raise RuntimeError('No Vissim COM ProgID to try.')
+
+
 def load_engine(engine_path: Path, validate_only: bool):
     _ensure_validation_import_compatibility(validate_only)
     spec = importlib.util.spec_from_file_location('viswalk_geometry_engine_v03_runtime', engine_path)
@@ -181,17 +203,17 @@ def main() -> int:
     engine.REPORT_FILE = report_path
 
     # Talk to whichever supported Vissim release is installed (2026, 2025 ...).
-    from vissim_com import resolve_prog_id
-    prog_id, how = resolve_prog_id()
-    if prog_id is None:
+    # A release that is installed but will not start (licence, first-run dialog,
+    # broken registration) is skipped for the next one, unless the engineer chose one.
+    from vissim_com import candidates
+    progs = candidates()
+    if not progs:
         raise RuntimeError('No PTV Vissim COM server is registered on this computer (Vissim 2025/2026 not found).')
-    engine.PROG_ID = prog_id
-    print(f'Vissim COM ProgID: {prog_id} ({how})')
 
     original_input = builtins.input
     builtins.input = lambda prompt='': (print(f'{prompt}[auto-close]'), '')[1]
     try:
-        engine.main()
+        run_with_fallback(engine, progs)
     finally:
         builtins.input = original_input
 

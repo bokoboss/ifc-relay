@@ -143,6 +143,14 @@ def build_preflight(base_network: Path) -> list[str]:
         )
     return problems
 
+def _registered_choices() -> list[int]:
+    try:
+        from vissim_com import registered_releases
+        return registered_releases()
+    except Exception:
+        return []
+
+
 def build_failure_message(returncode: int, log_path: Path, stdout: str, stderr: str) -> str:
     """Error text for a failed build. The traceback (stderr) goes last and is never cut;
     stdout (which can hold thousands of validation warnings) is trimmed to its last lines."""
@@ -152,8 +160,12 @@ def build_failure_message(returncode: int, log_path: Path, stdout: str, stderr: 
     if len(err) > 6000:
         err = '...\n' + err[-6000:]
     hint = com_error_hint(stderr)
+    tried = [line.split(':', 1)[1].split('(')[0].strip() for line in out_lines if line.startswith('Vissim COM ProgID:')]
+    used = f'Vissim ที่ลองเชื่อมต่อ: {", ".join(tried)}\n' if tried else ''
+    if tried and hint and len(tried) == 1 and len(_registered_choices()) > 1:
+        used += 'เครื่องนี้มี Vissim หลายรุ่น · เลือกรุ่นอื่นได้ที่เมนู Engine แล้วลองสร้างไฟล์อีกครั้ง\n'
     return (
-        (f'{hint}\n\n' if hint else '')
+        (f'{hint}\n\n' if hint else '') + used
         + f'Vissim build failed with exit code {returncode}. Log: {log_path}\n'
         f'--- last output ---\n{stdout_tail}\n'
         f'--- error ---\n{err or "(no error text; see log)"}'
