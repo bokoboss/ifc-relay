@@ -890,6 +890,8 @@ function leavePlanIfActive() {
 }
 
 function setViewerBadge(mode) {
+  // The legend explains the pedestrian-model colours (not shown over the source IFC).
+  document.getElementById('viewerLegend')?.classList.toggle('hidden', !['simulation', 'overlay', 'plan'].includes(mode));
   const badge = document.getElementById('viewportIdentLabel');
   if (!badge) return;
   badge.innerHTML = {
