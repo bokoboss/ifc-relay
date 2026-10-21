@@ -1233,6 +1233,21 @@ window.IFCViewer = {
     return out;
   },
 
+  // BIM tree: loaded IFC elements by storey and IFC class, with their current status.
+  sourceTree() {
+    const tree = new Map();
+    for (const [guid, mesh] of meshes) {
+      const item = mesh.userData.item || {};
+      const storey = item.storey_name || 'Unassigned';
+      const type = item.ifc_type || 'IfcElement';
+      if (!tree.has(storey)) tree.set(storey, new Map());
+      const types = tree.get(storey);
+      if (!types.has(type)) types.set(type, []);
+      types.get(type).push({ guid, name: item.name || '', status: effectiveStatus(item) });
+    }
+    return tree;
+  },
+
   hasSource(guid) {
     return !!guid && meshes.has(guid);
   },

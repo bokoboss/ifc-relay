@@ -638,3 +638,30 @@ button[aria-busy="true"]::after {
 .legend-cut {display:inline-block;width:12px;height:6px;background:#f4f7f8;border:1px solid #9aa7ad;border-radius:1px;margin:0 2px;}
 /* on the plan the toolbar owns the bottom of the viewer: the legend stops above it */
 .viewer-host:has(#planToolbar:not(.hidden)) .viewer-legend {max-height:calc(100% - 104px);}
+
+/* BIM tree: storey -> IFC class -> element */
+.model-tree {display:grid;gap:1px;max-height:300px;overflow:auto;overscroll-behavior:contain;}
+.tree-node > summary {
+  display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:6px;
+  padding:5px 6px;border-radius:var(--r-sm);font-size:12.5px;line-height:1.4;cursor:pointer;list-style:none;user-select:none;
+}
+.tree-node > summary::-webkit-details-marker {display:none;}
+.tree-node > summary::before {content:"";width:5px;height:5px;margin-left:1px;border-right:1.5px solid var(--text-faint);
+  border-bottom:1.5px solid var(--text-faint);transform:rotate(-45deg);transition:transform .12s ease;}
+.tree-node[open] > summary::before {transform:rotate(45deg);}
+.tree-node > summary:hover {background:var(--surface-2);}
+.tree-label {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tree-children {display:grid;gap:1px;padding-left:12px;}
+.tree-type > summary {font-size:12px;color:var(--ink-700);}
+.tree-element,.tree-more {
+  display:grid;grid-template-columns:8px minmax(0,1fr);align-items:center;gap:7px;width:100%;text-align:left;
+  border:0;background:none;padding:4px 6px 4px 18px;border-radius:var(--r-sm);font-size:12px;color:var(--ink-700);cursor:pointer;
+}
+.tree-element span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tree-element:hover,.tree-more:hover {background:var(--surface-2);}
+.tree-more {display:block;padding-left:18px;color:var(--primary-deep);font-weight:500;}
+.tree-dot {width:7px;height:7px;border-radius:50%;background:var(--text-faint);}
+.tree-dot.include {background:var(--success);}
+.tree-dot.review {background:var(--warning);}
+.tree-dot.exclude {background:var(--danger);}
+@media (prefers-reduced-motion: reduce) {.tree-node > summary::before {transition:none;}}

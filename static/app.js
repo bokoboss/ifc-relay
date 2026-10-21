@@ -587,6 +587,7 @@ async function loadReviewTier(baseRequest, seq) {
       render3dFilters(currentGeometry);
       const v = await waitForViewer();
       v.load(geometry, selectionState.overrides || {}, { append: true, keepView: true });
+      renderModelTree();                     // app-tree.js
       applyViewerFilters();
       document.getElementById('viewerStatus').textContent =
         `โหลดแล้ว ${currentGeometry.element_count} ชิ้น · ${currentGeometry.triangle_count || 0} triangles · WebGL พร้อม`;
@@ -644,6 +645,7 @@ async function runLoad3d() {
 
     const v = await waitForViewer();
     v.load(geometry, selectionState.overrides || {}, { append: request.append });
+    renderModelTree();                       // app-tree.js
     // viewer.load() always returns to the source IFC view.
     setViewerBadge('source');
     setActiveModeButton('sourceModeBtn');

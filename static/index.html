@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=9" />
+  <link rel="stylesheet" href="/static/app.css?v=10" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -122,6 +122,11 @@
             <label class="sr-only" for="modelSearch">ค้นหาองค์ประกอบด้วยชื่อ ประเภท หรือ GlobalId</label>
             <input id="modelSearch" type="search" placeholder="ชื่อ ประเภท หรือ GlobalId" title="ค้นหาองค์ประกอบด้วยชื่อ ประเภท หรือ GlobalId" autocomplete="off" />
             <ul id="modelSearchResults" class="search-results hidden" role="listbox" aria-label="ผลการค้นหา"></ul>
+          </div>
+
+          <div class="filter-block">
+            <div class="filter-title">องค์ประกอบตามชั้น</div>
+            <div id="modelTree" class="model-tree"><div class="tree-empty">โครงสร้างจะแสดงหลังเปิดโมเดล 3D</div></div>
           </div>
 
           <div class="filter-block">
@@ -558,10 +563,11 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=054" defer></script>
+  <script src="/static/app.js?v=055" defer></script>
   <script src="/static/app-plan.js?v=055" defer></script>
   <script src="/static/app-model.js?v=054" defer></script>
   <script src="/static/app-review.js?v=054" defer></script>
+  <script src="/static/app-tree.js?v=054" defer></script>
   <script src="/static/app-build.js?v=054" defer></script>
 </body>
 </html>
