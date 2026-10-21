@@ -1,6 +1,8 @@
-# Viswalk BIM Builder
+# IFC Relay
 
-**From BIM and engineering drawings to engineer-reviewed, simulation-ready pedestrian geometry.**
+**IFC → INPX Model Builder.** Review geometry, refine pedestrian areas, and build an INPX network for PTV Viswalk.
+
+> IFC Relay (formerly *Viswalk BIM Builder*) is an independent tool. It is not made, endorsed or supported by PTV Group; PTV, Vissim and Viswalk are trademarks of their owner. It works with a licensed PTV Vissim/Viswalk 2025 or 2026 on the same computer.
 
 **ภาษาไทย:** เครื่องมือช่วยเปลี่ยนแบบอาคาร/BIM ให้เป็นโมเดลเรขาคณิตสำหรับ PTV Viswalk ลดการขึ้นโมเดลซ้ำ โดยให้วิศวกรตรวจสอบและเลือกองค์ประกอบก่อนสร้างโมเดล ไม่ใช่ระบบแปลงไฟล์อัตโนมัติที่รับรองความถูกต้องโดยไม่ต้องตรวจ
 

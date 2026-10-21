@@ -14,6 +14,10 @@ SEMANTIC_SCHEMA_VERSION = "0.6.0"
 ENGINE_CONTRACT = "Geometry Engine v0.3 (engine/05_geometry_engine_v03.py)"
 SUPPORTED_VISSIM = "PTV Vissim 2025 SP15 and 2026 (both tested; picks the newest installed via COM)"
 
+PRODUCT_NAME = "IFC Relay"
+PRODUCT_TAGLINE = "IFC → INPX Model Builder"
+COMPATIBILITY_NOTE = ("Prepares IFC models as INPX files for PTV Viswalk (Vissim 2025/2026). "
+                      "Independent tool; not made, endorsed or supported by PTV Group.")
 CREDIT = "Orchestrated by KITTIPAT TANGITTINUNT"
 
 
@@ -25,5 +29,8 @@ def versions() -> dict[str, str]:
         "semantic_schema_version": SEMANTIC_SCHEMA_VERSION,
         "engine_contract": ENGINE_CONTRACT,
         "supported_vissim": SUPPORTED_VISSIM,
+        "product_name": PRODUCT_NAME,
+        "product_tagline": PRODUCT_TAGLINE,
+        "compatibility_note": COMPATIBILITY_NOTE,
         "credit": CREDIT,
     }

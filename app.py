@@ -44,7 +44,7 @@ SEMANTIC_DIR.mkdir(parents=True, exist_ok=True)
 store = ProjectStateStore(RUNTIME_DIR / "project_state.json")
 
 app = FastAPI(
-    title="Viswalk AI Model Builder",
+    title="IFC Relay",
     version=APP_VERSION,
     description=(
         "Large-model IFC Explorer, consolidated semantic geometry generation, "

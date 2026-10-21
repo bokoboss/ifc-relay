@@ -437,7 +437,7 @@ class DryRun:
                 storey["name"] = f"Storey {i}"
             data = self._scrub(data)
         payload = {
-            "tool": "Viswalk BIM Builder - real IFC dry run",
+            "tool": "IFC Relay - real IFC dry run",
             "generated": datetime.now().isoformat(timespec="seconds"),
             "overall": overall,
             "redacted": self.redact,
@@ -556,7 +556,7 @@ def group_semantic_warnings(warnings: list[str]) -> tuple[list[dict[str, Any]], 
 def render_markdown(p: dict[str, Any]) -> str:
     src, ifc, geo, sem, eng = (p.get(k, {}) for k in ("source", "ifc", "geometry", "semantic", "engine_validation"))
     L = [
-        "# Viswalk BIM Builder - Real IFC check (dry run, no Vissim)",
+        "# IFC Relay - Real IFC check (dry run, no Vissim)",
         "",
         f"**Overall: {p['overall']}** · generated {p['generated']} · total {p.get('total_seconds', '?')} s"
         + (" · redacted" if p.get("redacted") else ""),
@@ -680,7 +680,7 @@ def run_ifc_check(ifc: Path, out_dir: Path | None = None, include_stairs: bool =
         label = "redacted" if redact else re.sub(r"[^A-Za-z0-9._-]+", "_", ifc.stem)[:40] or "ifc"
         out_dir = project_root() / "output" / f"ifc_check_{label}_{datetime.now():%Y%m%d_%H%M%S}"
     run = DryRun(ifc, Path(out_dir), include_stairs=include_stairs, redact=redact)
-    print("Viswalk BIM Builder - real IFC check (no Vissim)")
+    print("IFC Relay - real IFC check (no Vissim)")
     print("=" * 64)
     overall = run.run()
     md = run.report(overall)

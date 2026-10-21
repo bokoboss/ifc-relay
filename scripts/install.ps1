@@ -1,4 +1,4 @@
-# Viswalk BIM Builder - Windows installer (no .exe)
+# IFC Relay - Windows installer (no .exe)
 # Creates .venv inside the app folder, installs Python packages, downloads the
 # local Three.js runtime, prepares the local\ folder for the Geometry Engine and
 # base_empty.inpx, and checks Vissim COM registration.
@@ -26,7 +26,7 @@ function Ok($text) { Write-Host "   OK   $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "   WARN $text" -ForegroundColor Yellow }
 function Fail($text) { Write-Host "   FAIL $text" -ForegroundColor Red }
 
-Write-Host "Viswalk BIM Builder - install" -ForegroundColor White
+Write-Host "IFC Relay - install" -ForegroundColor White
 Write-Host "App folder: $App"
 
 # ---------------------------------------------------------------------------
