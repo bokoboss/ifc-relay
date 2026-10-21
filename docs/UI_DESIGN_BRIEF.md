@@ -65,7 +65,7 @@ Frontend v0.4.1 เดิมเป็นแบบ dashboard: Sidebar แสด�
 ## 4. สิ่งที่แก้ใน PR นี้
 
 - `static/index.html`: Branding และ Local Engine อยู่ใน Top Bar, ไม่มี Sidebar และ Stage numbers; ทำ Single-row Toolbar พร้อมชื่อปุ่ม “เตรียมโมเดลคนเดิน” และเมนู “เพิ่มเติม”; คง DOM IDs และ API contract
-- `static/studio.css`: Full-width Workspace, Compact Toolbar สำหรับ Desktop, พื้นที่ 3D ที่ปรับตามความสูงหน้าจอ และ Responsive Breakpoint (1120/1060/730 px)
+- `static/app.css` (Precision Studio, แทน `styles.css` + `studio.css`): token สี/ตัวอักษร/ระยะ, ฟอนต์ IBM Plex Sans Thai ในเครื่อง, workbench ที่ช่องแสดงโมเดลอยู่บนจอตลอด + แผงตรวจด้านล่าง และ Responsive Breakpoint (1180/1060/730 px)
 - `tests/test_ui_workbench_contract.py`: ทดสอบ DOM IDs, การไม่มี Sidebar ถาวร, Single-row Command Bar, ปุ่ม Semantic ที่เปลี่ยนชื่อ และ Automatic Simulation Preview
 - `static/app.js`: แก้เฉพาะพฤติกรรมแจ้งสถานะหลัง Semantic Generation ให้ยืนยันการสลับ Simulation Preview ใน 3D และแจ้งเหตุหาก Preview ไม่พร้อม โดยไม่แตะ Backend/API
 - ไม่มีการแก้ `app.py`, `app3d.js`, geometry engine, IFC parser, COM adapter หรือระบบ state
