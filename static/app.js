@@ -1313,7 +1313,7 @@ function renderConnectivity(con) {
   if (!note) return;
   if (!con || con.error || !('zones' in con)) {
     note.className = 'connectivity-note warn';
-    note.textContent = `ตรวจการเชื่อมต่อไม่สำเร็จ${con?.error ? ` (${con.error})` : ''} · ยังไม่รู้ว่าพื้นที่เดินต่อถึงกันหรือไม่ · สร้างไฟล์ไม่ได้จนกว่าจะตรวจได้`;
+    note.textContent = `ตรวจการเชื่อมต่อไม่สำเร็จ${con?.error ? ` (${con.error})` : ''} · ยังไม่รู้ว่าพื้นที่เดินต่อถึงกันหรือไม่ · ยังสร้างไฟล์ได้ แต่ต้องตรวจทางเชื่อมใน Viswalk`;
     return;
   }
   const iso = con.isolated_zones || [];
@@ -1376,7 +1376,14 @@ function renderOpeningCandidates(candidates) {
   section.classList.toggle('hidden', !candidates.length);
   const ordered = [...candidates].sort((a, b) =>
     (a.classification === 'passage_candidate' ? 0 : 1) - (b.classification === 'passage_candidate' ? 0 : 1));
-  for (const c of ordered) {
+  const SHOWN = 500;            // the list is complete; only the display is capped
+  if (ordered.length > SHOWN) {
+    const more = document.createElement('p');
+    more.className = 'opening-candidates-note';
+    more.textContent = `แสดง ${SHOWN} จาก ${ordered.length} ช่อง (ที่อาจเป็นทางเดินอยู่ก่อน) · checklist ใช้ครบทุกช่อง`;
+    root.appendChild(more);
+  }
+  for (const c of ordered.slice(0, SHOWN)) {
     const row = document.createElement('label');
     row.className = 'check-row opening-row';
     const input = document.createElement('input');

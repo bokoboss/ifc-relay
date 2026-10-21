@@ -137,6 +137,12 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     if skipped:
         items.append(_item("manual_edits_skipped", "check", skipped, "แก้ไขบนแปลนที่ใช้ไม่ได้",
                            "ไฟล์จะไม่มีรายการเหล่านี้ (ระดับไม่มีในโมเดลนี้) · วาดใหม่ในแปลน 2D หรือแก้ใน Viswalk"))
+    no_effect = [eid for eid, st in status.items()
+                 if st.get("applied") and st.get("walls_cut") == 0
+                 and any(str(e.get("id")) == eid and e.get("kind") == "passage" for e in edits)]
+    if no_effect:
+        items.append(_item("manual_passage_no_effect", "check", no_effect, "ทางผ่านที่วาดแล้วไม่ได้ตัดผนัง",
+                           "ทางผ่านเหล่านี้ไม่คร่อมผนังใดเลย · ไฟล์ไม่มีช่องทางเดินตรงนั้น · วาดใหม่ให้คร่อมผนัง หรือเปิดใน Viswalk"))
     if edits:
         kinds = {k: sum(1 for e in edits if e.get("kind") == k) for k in ("walkable", "obstacle", "passage")}
         items.append(_item("manual_edits", "info", [str(e.get("id")) for e in edits], "แก้ไขบนแปลนโดยวิศวกร",

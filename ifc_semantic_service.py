@@ -49,7 +49,6 @@ PASSAGE_MIN_WIDTH = 0.60
 # obstacles instead of a single rectangular centreline wall. Mitred ends keep
 # the footprint convex, so ordinary straight walls are unaffected.
 WALL_POLYGON_SOLIDITY = 0.95
-CANDIDATE_LIST_LIMIT = 500
 # Interior rings of merged floor regions smaller than this are slab-joint
 # precision gaps, not pedestrian-relevant voids; no void mask is generated.
 MIN_VOID_MASK_AREA = 0.05
@@ -1633,7 +1632,8 @@ def build_semantic_model(
             "summary": summary,
             "warnings": warnings,
             "excluded_detail_preview": excluded_detail[:100],
-            "opening_candidates": opening_candidates[:CANDIDATE_LIST_LIMIT],
+            # Full list: the Viswalk checklist is built from it. The UI pages it.
+            "opening_candidates": opening_candidates,
             "off_level_slabs": off_level_slabs,
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
@@ -1661,8 +1661,13 @@ def build_semantic_model(
 
 
 def write_semantic_model(path: Path, model: dict[str, Any]) -> None:
+    import os
+    import uuid
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(
         json.dumps(model, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    os.replace(tmp, path)          # readers never see a half-written model
