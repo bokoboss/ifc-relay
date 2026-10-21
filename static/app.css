@@ -568,3 +568,44 @@ th {position:sticky;top:0;background:var(--surface-1);font-weight:600;color:var(
 .dock-panel[data-filter="stairs"] .issue-group-block:not([data-group="stairs"]) {display:none;}
 .dock-panel[data-panel="issues"]:not(:has(.issue-group-block > :not(.hidden))) .dock-empty {display:block;}
 .dock-panel[data-panel="issues"]:not(:has(.issue-group-block > :not(.hidden))) .issue-filter {display:none;}
+
+/* Build progress (runs while Vissim builds the .inpx) */
+.job-panel {
+  position:absolute;z-index:8;right:12px;bottom:12px;width:min(340px,calc(100% - 24px));
+  padding:12px 14px 12px;border:1px solid var(--divider-strong);border-radius:var(--r-lg);
+  background:rgba(255,255,255,.97);box-shadow:var(--shadow-float);font-size:12.5px;
+}
+.job-head {display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.job-head strong {font-size:13px;color:var(--ink-900);}
+.job-elapsed {margin-left:auto;font-variant-numeric:tabular-nums;color:var(--text-muted);}
+.job-spinner {
+  width:12px;height:12px;border-radius:50%;flex:0 0 auto;
+  border:2px solid var(--primary-soft);border-top-color:var(--primary);animation:job-spin .8s linear infinite;
+}
+.job-panel[data-state="success"] .job-spinner {animation:none;border-color:var(--success);background:var(--success);}
+.job-panel[data-state="failed"] .job-spinner {animation:none;border-color:var(--danger);background:var(--danger);}
+@keyframes job-spin {to {transform:rotate(360deg);}}
+.job-stages {list-style:none;margin:0 0 10px;padding:0;display:grid;gap:3px;}
+.job-stages li {position:relative;padding-left:18px;color:var(--text-faint);}
+.job-stages li::before {content:"";position:absolute;left:3px;top:6px;width:7px;height:7px;border-radius:50%;border:1.5px solid currentColor;}
+.job-stages li.done {color:var(--text-muted);}
+.job-stages li.done::before {background:var(--success);border-color:var(--success);}
+.job-stages li.current {color:var(--ink-900);font-weight:600;}
+.job-stages li.current::before {border-color:var(--primary);background:var(--primary);box-shadow:0 0 0 3px var(--primary-soft);}
+.job-stages li.failed {color:var(--danger);font-weight:600;}
+.job-stages li.failed::before {background:var(--danger);border-color:var(--danger);}
+.job-bar {height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;}
+.job-bar span {display:block;height:100%;width:0;background:var(--primary);transition:width .4s ease;}
+.job-panel[data-state="success"] .job-bar span {background:var(--success);}
+.job-panel[data-state="failed"] .job-bar span {background:var(--danger);}
+.job-detail {margin-top:7px;font-size:12px;color:var(--text-muted);}
+
+/* Busy buttons while their request runs */
+button[aria-busy="true"] {position:relative;}
+button[aria-busy="true"]::after {
+  content:"";width:10px;height:10px;margin-left:4px;border-radius:50%;
+  border:2px solid currentColor;border-right-color:transparent;animation:job-spin .8s linear infinite;
+}
+@media (prefers-reduced-motion:reduce) {
+  .job-spinner,button[aria-busy="true"]::after {animation:none;}
+}

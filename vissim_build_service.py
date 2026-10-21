@@ -16,6 +16,97 @@ from project_paths import BASE_NETWORK_FILE, engine_path
 
 _BUILD_LOCK = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# Live build progress (read by GET /api/build/progress while a build runs).
+# The adapter's output is read line by line; each line can move the stage on.
+# ---------------------------------------------------------------------------
+BUILD_STAGES = [
+    ("validate", "ตรวจ Geometry"),
+    ("connect", "เปิด Vissim"),
+    ("base", "โหลดเครือข่ายตั้งต้น"),
+    ("levels", "สร้างระดับชั้น"),
+    ("areas", "สร้างพื้นที่เดิน"),
+    ("obstacles", "สร้างสิ่งกีดขวาง"),
+    ("vertical", "สร้างบันไดและทางลาด"),
+    ("save", "บันทึกไฟล์ .inpx"),
+]
+_STAGE_INDEX = {key: i for i, (key, _) in enumerate(BUILD_STAGES)}
+_progress_lock = threading.Lock()
+_progress: dict[str, Any] = {"running": False}
+
+
+def progress_start() -> None:
+    with _progress_lock:
+        _progress.clear()
+        _progress.update({"running": True, "started": time.time(), "stage": "validate",
+                          "done": 0, "total": 0, "totals": {}, "prog_id": None, "fallback": None,
+                          "result": None, "message": ""})
+
+
+def progress_finish(ok: bool, message: str = "") -> None:
+    with _progress_lock:
+        _progress.update({"running": False, "result": "success" if ok else "failed",
+                          "message": message[:300], "finished": time.time()})
+
+
+def _set_stage(state: dict[str, Any], stage: str, total_key: str | None = None) -> None:
+    if _STAGE_INDEX[stage] < _STAGE_INDEX.get(state.get("stage"), 0):
+        return
+    state["stage"] = stage
+    state["done"] = 0
+    state["total"] = int(state.get("totals", {}).get(total_key, 0)) if total_key else 0
+
+
+def apply_progress_line(state: dict[str, Any], line: str) -> None:
+    """Move the build progress on from one line of adapter/engine output."""
+    text = line.rstrip()
+    stripped = text.strip()
+    if stripped.startswith("{") and '"vissim_obstacles"' in stripped:
+        try:
+            summary = json.loads(stripped)
+            state["totals"] = {"areas": summary.get("areas", 0), "obstacles": summary.get("vissim_obstacles", 0),
+                               "vertical": summary.get("vertical_connections", 0)}
+        except ValueError:
+            pass
+    elif stripped.startswith("Vissim COM ProgID:"):
+        state["prog_id"] = stripped.split(":", 1)[1].split("(")[0].strip()
+        _set_stage(state, "connect")
+    elif stripped.startswith("VISSIM_FALLBACK:"):
+        state["fallback"] = stripped
+        state["stage"] = "connect"
+    elif stripped.startswith("Connecting to Vissim"):
+        _set_stage(state, "connect")
+    elif stripped.startswith("Loading base network"):
+        _set_stage(state, "base")
+    elif stripped.startswith("Creating / configuring Levels"):
+        _set_stage(state, "levels")
+    elif stripped.startswith("Creating Areas"):
+        _set_stage(state, "areas", "areas")
+    elif stripped.startswith("Creating Obstacles"):
+        _set_stage(state, "obstacles", "obstacles")
+    elif stripped.startswith("Creating Vertical Connections"):
+        _set_stage(state, "vertical", "vertical")
+    elif stripped.startswith("Saving") or stripped.startswith("Vissim model saved"):
+        _set_stage(state, "save")
+    elif state.get("stage") in ("areas", "obstacles", "vertical") and text.startswith("  ") or \
+            state.get("stage") == "vertical" and re.match(r"(STAIRWAY|RAMP) \d+:", stripped):
+        state["done"] = int(state.get("done", 0)) + 1
+    if stripped:
+        state["last"] = stripped[:160]
+
+
+def build_progress() -> dict[str, Any]:
+    with _progress_lock:
+        state = dict(_progress)
+    if not state.get("started"):
+        return {"running": False, "stages": BUILD_STAGES}
+    end = state.get("finished") or time.time()
+    state["elapsed_sec"] = round(end - state["started"], 1)
+    state["stage_index"] = _STAGE_INDEX.get(state.get("stage"), 0)
+    state["stages"] = BUILD_STAGES
+    state.pop("totals", None)
+    return state
+
 
 def _safe_stem(name: str) -> str:
     stem = Path(name or 'model').stem
@@ -54,14 +145,50 @@ def _run_adapter(
             raise ValueError('Build output/report paths are required.')
         cmd += ['--output', str(output_path), '--report', str(report_path)]
 
-    return subprocess.run(
-        cmd,
-        cwd=str(app_dir),
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        check=False,
-    )
+    if validate_only:
+        return subprocess.run(
+            cmd,
+            cwd=str(app_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    return _run_streaming(cmd, app_dir, timeout_sec)
+
+
+def _run_streaming(cmd: list[str], cwd: Path, timeout_sec: int) -> subprocess.CompletedProcess[str]:
+    """Like subprocess.run(capture_output=True), but feeds each stdout line to the
+    live build progress while the build runs."""
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace", env=env)
+    out_lines: list[str] = []
+    err_chunks: list[str] = []
+
+    def read_out() -> None:
+        for line in proc.stdout:
+            out_lines.append(line)
+            with _progress_lock:
+                apply_progress_line(_progress, line)
+
+    def read_err() -> None:
+        err_chunks.append(proc.stderr.read())
+
+    readers = [threading.Thread(target=read_out, daemon=True), threading.Thread(target=read_err, daemon=True)]
+    for t in readers:
+        t.start()
+    try:
+        proc.wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for t in readers:
+            t.join(timeout=5)
+        raise
+    for t in readers:
+        t.join(timeout=5)
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(out_lines), "".join(err_chunks))
 
 
 def validate_engine_input(app_dir: Path, project_root: Path, semantic_path: Path) -> dict[str, Any]:
