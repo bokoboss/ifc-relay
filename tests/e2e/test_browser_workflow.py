@@ -117,6 +117,26 @@ def test_clean_model_enables_build_without_acknowledgement(page, tmp_path):
     assert page.errors == []
 
 
+def test_bim_tree_opens_storey_class_element(page, tmp_path):
+    """Left panel tree: storey -> IFC class -> element; clicking shows it in the viewer."""
+    b, _ = _two_storeys(with_stair=False)
+    _open(page, b.write(tmp_path / "tree.ifc"))
+    page.wait_for_selector("#modelTree .tree-storey")
+    storeys = page.locator("#modelTree .tree-storey > summary .tree-label").all_text_contents()
+    assert storeys[:2] == ["L1", "L2"]                              # IFC elevation order
+    page.locator("#modelTree .tree-storey > summary").first.click()
+    wall = page.locator("#modelTree .tree-type", has_text="IfcWall").first
+    wall.locator("summary").click()
+    page.wait_for_selector("#modelTree .tree-element")
+    assert page.locator("#modelTree .tree-type:has-text('IfcWall') .tree-element").count() == 2
+    assert page.locator("#modelTree .tree-element .tree-dot").first.get_attribute("class").split()[-1] \
+        in ("include", "review", "exclude")
+    page.locator("#modelTree .tree-element").first.click()
+    page.wait_for_function("!document.getElementById('inspectorContent').classList.contains('hidden')")
+    assert "ในโมเดลต้นฉบับ" in page.text_content("#messageText")
+    assert page.errors == []
+
+
 def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     b, _ = _two_storeys(with_stair=False)          # closed room -> isolated zone: a Viswalk check, not a stop
     _open(page, b.write(tmp_path / "room.ifc"))
