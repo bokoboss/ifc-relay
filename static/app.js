@@ -2018,7 +2018,7 @@ async function renderVissimChoice() {
   const auto = new Option(`อัตโนมัติ (รุ่นใหม่สุด: ${releases[0]})`, '');
   select.appendChild(auto);
   for (const r of releases) {
-    select.appendChild(new Option(`Vissim ${r}${r === 2025 ? ' · ทดสอบแล้ว' : ''}`, String(r)));
+    select.appendChild(new Option(`Vissim ${r}`, String(r)));
   }
   select.value = info.choice ? String(info.choice) : '';
   select.disabled = !!info.fixed_by_environment;

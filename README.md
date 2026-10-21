@@ -154,7 +154,7 @@ The same suite runs on every pull request via GitHub Actions. Large-IFC regressi
 | App | 0.6.0 (`version.py`) |
 | Pedestrian-model (semantic) schema | 0.6.0 |
 | Geometry Engine contract | v0.3 (`engine/05_geometry_engine_v03.py`) |
-| Vissim | 2025 SP15 tested (build, reopen, stair check); 2026 supported. The build uses the newest installed release (`Vissim.Vissim.2026`, then `.2025`); set `VBB_VISSIM_PROGID` to choose |
+| Vissim | 2025 SP15 and 2026 tested (build, reopen in Viswalk, areas/stairs/walls checked). The build uses the newest installed release and falls back to the next one if it will not start; pick a release in the Engine menu or set `VBB_VISSIM_PROGID` |
 
 The app reports these in *Engine ในเครื่อง* and writes them into every build manifest.
 
