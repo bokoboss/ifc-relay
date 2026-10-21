@@ -1,4 +1,4 @@
-# Product Vision & Scope — Viswalk BIM Builder
+# Product Vision & Scope — IFC Relay
 
 > **Document status:** Product direction and scope (living document), 15 October 2026. This is not a claim that every planned function is implemented.
 >
@@ -165,4 +165,4 @@ Ordering may change based on engineering risk and the available licensed Vissim 
 
 ---
 
-**English summary:** Viswalk BIM Builder is a local-first, engineer-reviewed pipeline that converts BIM/drawing evidence into simplified, validated pedestrian simulation geometry. The validated small-IFC workflow builds Vissim/Viswalk `.inpx` through Windows COM. Large-IFC consolidation and true multi-level circulation remain under development. Human review, traceability, deterministic geometry and data protection are core product constraints.
+**English summary:** IFC Relay is a local-first, engineer-reviewed pipeline that converts BIM/drawing evidence into simplified, validated pedestrian simulation geometry. The validated small-IFC workflow builds Vissim/Viswalk `.inpx` through Windows COM. Large-IFC consolidation and true multi-level circulation remain under development. Human review, traceability, deterministic geometry and data protection are core product constraints.

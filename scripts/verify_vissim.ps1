@@ -1,4 +1,4 @@
-# Viswalk BIM Builder - verification.
+# IFC Relay - verification.
 #   verify_vissim.bat                         full check with Vissim 2025/2026 (synthetic model)
 #   verify_vissim.bat -SkipBuild              same, without the Vissim COM build
 #   verify_vissim.bat -Ifc "D:\Models\building.ifc" -SkipBuild [-Redact] [-StairsReviewOnly]

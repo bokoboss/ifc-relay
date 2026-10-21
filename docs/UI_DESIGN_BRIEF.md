@@ -34,7 +34,7 @@ Frontend v0.4.1 เดิมเป็นแบบ dashboard: Sidebar แสด�
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ [V] VISWALK BIM BUILDER    ENGINEERING WORKSPACE    Local Engine    Reset    │
+│ [V] IFC RELAY            ENGINEERING WORKSPACE    Local Engine    Reset    │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ [เลือกไฟล์ BIM] [เปิดโมเดล] │ [เตรียมโมเดลคนเดิน] [ตรวจสอบโมเดล]               │
 │                                             [สร้างไฟล์ Viswalk]  [เพิ่มเติม]   │

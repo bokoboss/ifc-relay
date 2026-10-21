@@ -1,4 +1,4 @@
-# Viswalk BIM Builder - start the local web app and open the browser.
+# IFC Relay - start the local web app and open the browser.
 param([int]$Port = 8765)
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +18,6 @@ if ($busy) {
     exit 0
 }
 
-Write-Host "Viswalk BIM Builder: $url  (close this window or press Ctrl+C to stop)"
+Write-Host "IFC Relay: $url  (close this window or press Ctrl+C to stop)"
 Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", "Start-Sleep -Seconds 3; Start-Process '$url'"
 & $VPy -m uvicorn app:app --host 127.0.0.1 --port $Port

@@ -1,5 +1,5 @@
 /*
- * Viswalk BIM Builder — Precision Studio
+ * IFC Relay — Precision Studio
  * One stylesheet, tokens first. Desktop-first engineering workbench:
  * the viewport is the subject; panels are quiet instruments around it.
  * Fonts are bundled (IBM Plex Sans Thai / IBM Plex Mono, SIL OFL 1.1).
@@ -544,3 +544,7 @@ th {position:sticky;top:0;background:var(--surface-1);font-weight:600;color:var(
 .search-name {font-size:12.5px;font-weight:600;color:var(--ink-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .search-meta {font-size:12px;color:var(--text-muted);}
 .search-empty {padding:8px 9px;font-size:12px;color:var(--text-faint);}
+
+.about-product {margin:10px 0 2px;padding-top:10px;border-top:1px solid var(--divider);font-size:12.5px;color:var(--ink-700);}
+.about-product strong {color:var(--ink-900);}
+.about-product p {margin-top:4px;font-size:12px;line-height:1.6;color:var(--text-muted);}

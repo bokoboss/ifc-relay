@@ -286,7 +286,7 @@ MANUAL_CHECKS = [
 
 def write_report(rep: Report) -> Path:
     lines = [
-        "# Viswalk BIM Builder - Vissim verification",
+        "# IFC Relay - Vissim verification",
         "",
         f"Run: {datetime.now():%Y-%m-%d %H:%M}",
         f"Project root: `{rep.data.get('environment', {}).get('project_root', '')}`",
@@ -349,7 +349,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     rep = Report(out_dir)
 
-    print("Viswalk BIM Builder - verification on this machine")
+    print("IFC Relay - verification on this machine")
     print("=" * 64)
     check_environment(rep, root)
     run_pytest(rep, root)
