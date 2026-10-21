@@ -54,3 +54,17 @@ def test_panels_of_a_multi_storey_curtain_wall_go_to_their_own_storey(tmp_path):
     level = {o["ifc_global_id"]: o["level_key"] for o in sem["obstacles"] if o.get("ifc_global_id")}
     assert level[low.GlobalId] != level[high.GlobalId]
     assert level[high.GlobalId] == max(level.values())
+
+
+def test_rails_stacked_on_one_footprint_become_one_obstacle(tmp_path):
+    b = Building([0.0, 4.0])
+    l1 = b.storeys[0]
+    b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 0.0, l1)
+    cw = b._run("root.create_entity", ifc_class="IfcCurtainWall", name="Louvres")
+    b._run("spatial.assign_container", relating_structure=l1, products=[cw])
+    rails = [_box(b, "IfcMember", 10.0, 0.0, 10.05, 10.0, z, z + 0.05, cw) for z in (0.4, 0.5, 0.6, 0.7, 0.8)]
+    sem = semantic_for(b.write(tmp_path / "rails.ifc"), {})
+    merged = [o for o in sem["obstacles"] if o.get("type") == "IfcMember"]
+    assert len(merged) == 1
+    assert abs(merged[0]["z_offset"] - 0.4) < 1e-6 and abs(merged[0]["height"] - 0.45) < 1e-6
+    assert sorted(merged[0]["ifc_source_global_ids"]) == sorted(r.GlobalId for r in rails)

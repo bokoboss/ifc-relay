@@ -234,6 +234,35 @@ def merge_walkable_components(components: list[Polygon], grid_size: float = 0.00
     return polygon_components(merged)
 
 
+def merge_stacked_panels(obstacles: list[dict[str, Any]]) -> int:
+    """Curtain-wall rails and panels often repeat on one footprint every few
+    centimetres up the wall (model C: 464 rails, 0.1 m apart). Vissim obstacles are
+    footprints with a height, so one obstacle per footprint covers them all.
+    Merges in place; returns how many obstacles were folded into another."""
+    groups: dict[tuple[Any, ...], list[int]] = {}
+    for idx, obs in enumerate(obstacles):
+        if obs.get("type") not in ("IfcPlate", "IfcMember") or not obs.get("polygon"):
+            continue
+        ring = tuple(sorted((round(float(x), 2), round(float(y), 2)) for x, y in obs["polygon"]))
+        groups.setdefault((int(obs["level_key"]), ring), []).append(idx)
+    drop: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        keep = obstacles[members[0]]
+        bottom = min(float(obstacles[i]["z_offset"]) for i in members)
+        top = max(float(obstacles[i]["z_offset"]) + float(obstacles[i]["height"]) for i in members)
+        guids = [obstacles[i].get("ifc_global_id") for i in members if obstacles[i].get("ifc_global_id")]
+        keep["z_offset"] = round(bottom, 5)
+        keep["height"] = round(top - bottom, 5)
+        keep["ifc_source_global_ids"] = guids
+        keep["name"] = f"{keep['name']} (+{len(members) - 1} stacked)"
+        drop.update(members[1:])
+    if drop:
+        obstacles[:] = [o for i, o in enumerate(obstacles) if i not in drop]
+    return len(drop)
+
+
 def hole_polygons(poly: Polygon) -> list[Polygon]:
     result: list[Polygon] = []
     for ring in poly.interiors:
@@ -1503,6 +1532,12 @@ def build_semantic_model(
                 }
             )
             obstacle_key += 1
+    stacked = merge_stacked_panels(obstacles)
+    if stacked:
+        warnings.append(
+            f"{stacked} curtain-wall plate/member obstacle(s) stacked on the same footprint were merged "
+            "into one obstacle each (their GlobalIds are kept on the merged obstacle)."
+        )
     if plates_off_walking_height:
         warnings.append(
             f"{plates_off_walking_height} IfcPlate/IfcMember element(s) not at walking height "
