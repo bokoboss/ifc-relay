@@ -34,6 +34,9 @@ HERE = Path(__file__).resolve().parent
 REF_DIR = HERE / "visual"
 OUT_DIR = HERE / "visual-out"
 UPDATE = os.environ.get("VBB_UPDATE_VISUAL") == "1"
+# CI sets this: a comparison that cannot run (no reference, other Chromium) fails
+# instead of skipping, so a green CI run always means the screens were compared.
+REQUIRED = os.environ.get("VBB_VISUAL_REQUIRED") == "1"
 pytestmark = pytest.mark.skipif(os.environ.get("VBB_E2E") != "1", reason="set VBB_E2E=1 to run browser tests")
 
 # Both images are averaged over POOL x POOL blocks first, so glyph hinting and
@@ -110,11 +113,12 @@ def _check(page, name: str) -> None:
         return
     if not ref.exists():
         _write_out(name, actual, None)
-        pytest.skip(f"no reference for {name}; run the 'visual references' workflow")
+        (pytest.fail if REQUIRED else pytest.skip)(f"no reference for {name}; run the 'visual references' workflow")
     taken_with = stamp.read_text(encoding="utf-8").strip() if stamp.exists() else "?"
     if taken_with != f"Chromium {page.browser_version}":
         _write_out(name, actual, None)       # still useful to look at
-        pytest.skip(f"references were taken with {taken_with}; this is Chromium {page.browser_version}")
+        (pytest.fail if REQUIRED else pytest.skip)(
+            f"references were taken with {taken_with}; this is Chromium {page.browser_version}")
     a, b = _decode(actual), _decode(ref.read_bytes())
     if a.shape != b.shape:
         _write_out(name, actual, None)

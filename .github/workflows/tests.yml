@@ -58,6 +58,7 @@ jobs:
       - name: Browser end-to-end (Chromium, software WebGL)
         env:
           VBB_E2E: "1"
+          VBB_VISUAL_REQUIRED: "1"
         run: |
           set -o pipefail
           python -m pytest -q tests/e2e 2>&1 | tee e2e.log
