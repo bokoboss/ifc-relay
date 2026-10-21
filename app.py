@@ -25,7 +25,8 @@ from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
 from version import APP_VERSION, PROJECT_STATE_VERSION, versions
 from gate_service import checklist_markdown, evaluate_gate, gate_message_th
-from vissim_build_service import build_preflight, build_vissim_model, validate_engine_input
+from vissim_build_service import (build_preflight, build_progress, build_vissim_model, progress_finish,
+                                  progress_start, validate_engine_input)
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -1023,10 +1024,25 @@ def get_engineering_gate() -> dict[str, Any]:
 def build_current_semantic_in_vissim() -> dict[str, Any]:
     if not BUILD_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="กำลังสร้างไฟล์ Viswalk อยู่แล้ว · รอให้เสร็จก่อน")
+    progress_start()
     try:
-        return _build_current_semantic_in_vissim()
+        result = _build_current_semantic_in_vissim()
+        progress_finish(True)
+        return result
+    except HTTPException as exc:
+        progress_finish(False, str(exc.detail))
+        raise
+    except Exception as exc:
+        progress_finish(False, str(exc))
+        raise
     finally:
         BUILD_LOCK.release()
+
+
+@app.get("/api/build/progress")
+def get_build_progress() -> dict[str, Any]:
+    """Where a running build is (stage, items done / total, elapsed time)."""
+    return build_progress()
 
 
 def _build_current_semantic_in_vissim() -> dict[str, Any]:

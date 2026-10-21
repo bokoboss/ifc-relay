@@ -207,6 +207,16 @@
               <span class="viewport-ident-mark"></span>
               <span id="viewportIdentLabel">3D <small>· IFC ต้นฉบับ</small></span>
             </div>
+            <section id="jobPanel" class="job-panel hidden" role="status" aria-live="polite" aria-label="ความคืบหน้าการสร้างไฟล์">
+              <div class="job-head">
+                <span class="job-spinner" aria-hidden="true"></span>
+                <strong id="jobTitle">กำลังสร้างไฟล์ Viswalk</strong>
+                <span id="jobElapsed" class="job-elapsed">0:00</span>
+              </div>
+              <ol id="jobStages" class="job-stages"></ol>
+              <div class="job-bar" aria-hidden="true"><span id="jobBar"></span></div>
+              <p id="jobDetail" class="job-detail"></p>
+            </section>
             <div id="staleBanner" class="stale-banner hidden" role="status">
               <span>โมเดลคนเดินยังไม่รวมการแก้ไขล่าสุด</span>
               <button id="staleRegenerateBtn" type="button" class="prepare-btn secondary-btn">เตรียมโมเดลคนเดินใหม่</button>
