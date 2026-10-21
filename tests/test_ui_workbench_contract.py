@@ -119,7 +119,7 @@ def test_compact_toolbar_has_direct_primary_actions_and_secondary_tools() -> Non
 
 
 def test_semantic_preparation_activates_simulation_preview_automatically() -> None:
-    begin = JS.index("generateSemanticBtn.addEventListener('click', async () => {")
+    begin = JS.index("async function prepareModel(")
     end = JS.index("downloadSemanticTopBtn.addEventListener('click', () => {", begin)
     handler = JS[begin:end]
     assert "'/api/ifc/semantic'" in handler
@@ -131,7 +131,7 @@ def test_semantic_preparation_activates_simulation_preview_automatically() -> No
 
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
-    assert "/static/app.css?v=6" in dom.anchors                    # one stylesheet, fonts bundled
+    assert "/static/app.css?v=7" in dom.anchors                    # one stylesheet, fonts bundled
     assert (ROOT / "static" / "fonts" / "OFL.txt").exists()
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO

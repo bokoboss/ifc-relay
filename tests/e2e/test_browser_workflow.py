@@ -2,7 +2,7 @@
 
 Covers the review's acceptance scenarios that need a real browser:
 E2E-01 clean model -> Build enabled; a model with Viswalk checks still builds
-(listed, one confirmation); plan passage -> regenerate -> zone reachable; exit mark -> measured from it.
+(listed, one confirmation); plan passage -> regenerate -> zone reachable; exit mark -> re-prepared automatically -> measured from it.
 """
 from __future__ import annotations
 
@@ -225,6 +225,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
     _enter_plan(page)
+    page.click("#autoPrepareBtn[aria-pressed=true]")                     # step through by hand first
     page.click(".plan-tool[data-tool=passage]")
     hits = []
     for x, y in ((13.5, 7.5), (14.5, 8.5)):
@@ -244,6 +245,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         raise AssertionError(f"no edit saved: hits={hits} hint={page.text_content('#planHint')} "
                              f"plan={page.evaluate('window.IFCViewer.isPlan()')} {_diag(page)}") from exc
     assert page.is_disabled("#validateBtn")
+    assert page.evaluate("window.IFCViewer.pendingPassageCuts()") >= 1     # UX-02: cut marked before the run
     # UX-05/09: the change is visible in the viewport and on the prepare button
     page.wait_for_selector("#staleBanner:not(.hidden)")
     assert page.get_attribute("#generateSemanticBtn", "data-step") == "stale"
@@ -257,6 +259,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     page.wait_for_selector("#editsList .edit-review-applied")          # F-19: the run used the passage
     assert "ใช้ครบ" in page.text_content("#editsReview")
     assert "วัดจากโครงข่ายใหญ่ที่สุด" in page.text_content("#connectivityNote")
+    assert page.evaluate("window.IFCViewer.pendingPassageCuts()") == 0      # the model on screen is cut now
 
     # An exit mark changes no geometry; reachability is then measured from it.
     page.click(".plan-tool[data-tool=exit]")
@@ -266,9 +269,9 @@ def test_plan_passage_reconnects_room(page, tmp_path):
         page.wait_for_timeout(300)
     page.wait_for_selector("#planConfirm:not(.hidden)", timeout=10000)
     assert "ทับพื้นที่เดิน" in page.text_content("#planConfirmText")
+    page.click("#autoPrepareBtn[aria-pressed=false]")                    # UX-02: re-prepared without a click
     page.click("#planConfirmBtn")
-    page.wait_for_selector("#staleBanner:not(.hidden)")
-    page.click("#generateSemanticBtn")
-    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
-    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากทางออกที่กำหนด 1 จุด')")
+    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากทางออกที่กำหนด 1 จุด')",
+                           timeout=120000)
+    page.wait_for_selector("#staleBanner", state="hidden")
     assert page.errors == []

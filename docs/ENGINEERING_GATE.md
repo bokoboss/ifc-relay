@@ -37,3 +37,5 @@ Every successful build writes next to the `.inpx`:
 ## Manual plan edits
 
 Edits drawn in the 2D plan (`manual_edits.py`: added walkable floor, added obstacle, passage through walls, exit mark for the connectivity check) are stored in the project state, never in the IFC, and re-applied every time the pedestrian model is generated. They appear in the list as an `info` item and in the build manifest via the semantic model (`ifc_semantic.manual_edits`). They carry over to a new IFC revision when "keep selections" is on.
+
+An edit shows on the plan as soon as it is saved; a passage also marks the wall pieces it will remove (light bands over the walls). With the plan toolbar's auto button on (default, remembered per browser), the pedestrian model is prepared again about a second after drawing stops, and the authoritative model replaces the preview when that run finishes. Edits made during a run queue one more run. With it off, the stale banner asks for the run as before.

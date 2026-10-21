@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=6" />
+  <link rel="stylesheet" href="/static/app.css?v=7" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -17,6 +17,7 @@
     <symbol id="i-target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.5"/><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/></symbol>
     <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 4 2.5 7l3 3"/><path d="M2.5 7h7a3.5 3.5 0 0 1 0 7H7"/></symbol>
     <symbol id="i-redo" viewBox="0 0 16 16"><path d="m10.5 4 3 3-3 3"/><path d="M13.5 7h-7a3.5 3.5 0 0 0 0 7H9"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 16 16"><path d="M13 8a5 5 0 0 1-8.6 3.5"/><path d="M3 8a5 5 0 0 1 8.6-3.5"/><path d="M11.8 1.8v2.9H8.9"/><path d="M4.2 14.2v-2.9h2.9"/></symbol>
     <symbol id="i-close" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
   </svg>
   <div class="app-shell">
@@ -197,6 +198,7 @@
               <div class="plan-tools" role="group" aria-label="ย้อนกลับ">
                 <button id="planUndoBtn" class="plan-tool" title="ย้อนรายการแก้ไขล่าสุด (Ctrl+Z)" aria-label="ย้อน" disabled><svg class="icon" aria-hidden="true"><use href="#i-undo"/></svg></button>
                 <button id="planRedoBtn" class="plan-tool" title="ทำซ้ำ (Ctrl+Y)" aria-label="ทำซ้ำ" disabled><svg class="icon" aria-hidden="true"><use href="#i-redo"/></svg></button>
+                <button id="autoPrepareBtn" class="plan-tool plan-auto" type="button" aria-pressed="true" aria-label="เตรียมโมเดลคนเดินใหม่อัตโนมัติ" title="เตรียมโมเดลคนเดินใหม่อัตโนมัติหลังวาดหรือลบการแก้ไข (กดเพื่อปิด/เปิด)"><svg class="icon" aria-hidden="true"><use href="#i-auto"/></svg></button>
               </div>
               <div id="planConfirm" class="plan-confirm hidden">
                 <span id="planConfirmText"></span>
@@ -539,6 +541,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=051" defer></script>
+  <script src="/static/app.js?v=052" defer></script>
 </body>
 </html>

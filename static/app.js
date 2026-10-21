@@ -955,10 +955,10 @@ const PLAN_HINTS = {
   passage: 'คลิกสองมุมคร่อมผนังตรงที่ต้องการเปิดทางผ่าน',
   exit: 'คลิกสองมุมทับพื้นที่ทางออก/จุดเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง',
 };
-document.querySelectorAll('.plan-tool').forEach(button => {
+document.querySelectorAll('.plan-tool[data-tool]').forEach(button => {
   button.addEventListener('click', () => {
     planTool = button.dataset.tool;
-    document.querySelectorAll('.plan-tool').forEach(b => b.classList.toggle('active', b === button));
+    document.querySelectorAll('.plan-tool[data-tool]').forEach(b => b.classList.toggle('active', b === button));
     viewer()?.setPlanTool(planTool);
     document.getElementById('planHint').textContent = PLAN_HINTS[planTool] || '';
   });
@@ -1044,6 +1044,7 @@ async function saveEdit(shape, { record = true } = {}) {
   });
   renderEdits(result.edits);
   markSemanticStale();
+  scheduleAutoPrepare();
   if (record) {
     editHistory.undo.push({ type: 'add', edit: result.edit });
     editHistory.redo = [];
@@ -1056,6 +1057,7 @@ async function removeEdit(edit, { record = true } = {}) {
   const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
   renderEdits(result.edits);
   markSemanticStale();
+  scheduleAutoPrepare();
   if (record) {
     editHistory.undo.push({ type: 'delete', edit });
     editHistory.redo = [];
@@ -1686,17 +1688,56 @@ function renderOpeningCandidates(candidates) {
   }
 }
 
-generateSemanticBtn.addEventListener('click', async () => {
+// UX-02: plan edits re-prepare the model by themselves once drawing pauses. The
+// edit is drawn (and a passage's wall cuts marked) at once; the authoritative
+// model replaces that preview when the run finishes.
+const AUTO_PREPARE_KEY = 'ifcrelay.autoPrepare';
+const AUTO_PREPARE_DELAY = 1200;
+const autoPrepareBtn = document.getElementById('autoPrepareBtn');
+const autoPrepareOn = () => autoPrepareBtn.getAttribute('aria-pressed') === 'true';
+try { autoPrepareBtn.setAttribute('aria-pressed', String(localStorage.getItem(AUTO_PREPARE_KEY) !== '0')); } catch { /* storage blocked */ }
+autoPrepareBtn.addEventListener('click', () => {
+  const on = !autoPrepareOn();
+  autoPrepareBtn.setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem(AUTO_PREPARE_KEY, on ? '1' : '0'); } catch { /* storage blocked */ }
+  setMessage(on ? 'เปิดการเตรียมโมเดลคนเดินใหม่อัตโนมัติหลังแก้แปลน' : 'ปิดการเตรียมใหม่อัตโนมัติ · กด "เตรียมโมเดลคนเดินใหม่" เองหลังแก้แปลน');
+  if (on && generateSemanticBtn.dataset.step === 'stale') scheduleAutoPrepare();
+});
+let autoPrepareTimer = null;
+let autoPrepareQueued = false;
+let preparing = false;
+
+function scheduleAutoPrepare() {
+  if (!autoPrepareOn()) return;
+  clearTimeout(autoPrepareTimer);
+  autoPrepareTimer = setTimeout(runAutoPrepare, AUTO_PREPARE_DELAY);
+}
+
+function runAutoPrepare() {
+  if (!autoPrepareOn()) return;
+  if (pendingShape || viewer()?.planHasFirstPoint?.()) { scheduleAutoPrepare(); return; }   // still drawing
+  if (preparing || generateSemanticBtn.disabled) { autoPrepareQueued = true; return; }
+  prepareModel({ auto: true });
+}
+
+generateSemanticBtn.addEventListener('click', () => prepareModel());
+
+async function prepareModel({ auto = false } = {}) {
+  if (preparing) return;
+  preparing = true;
+  clearTimeout(autoPrepareTimer);
+  document.getElementById('staleBanner').classList.toggle('auto', auto);
   generateSemanticBtn.disabled = true;
   generateSemanticBtn.setAttribute('aria-busy', 'true');
-  setMessage('กำลังเตรียมโมเดลคนเดิน: รวมพื้นที่เดิน แปลงผนังและช่องเปิดตามองค์ประกอบที่เลือก...');
+  setMessage(auto ? 'กำลังเตรียมโมเดลคนเดินใหม่อัตโนมัติจากการแก้ไขบนแปลน...'
+    : 'กำลังเตรียมโมเดลคนเดิน: รวมพื้นที่เดิน แปลงผนังและช่องเปิดตามองค์ประกอบที่เลือก...');
   try {
     const result = await api('/api/ifc/semantic', { method: 'POST' });
     currentSemantic = result.model;
     currentValidation = null;
     currentBuild = null;
     renderSemanticSummary(result);
-    dock.select('details', { open: false });   // counts update; the viewer keeps its size
+    if (!auto) dock.select('details', { open: false });   // counts update; the viewer keeps its size
     setExportReady(true);
     setBuildOutputReady(false);
     document.getElementById('stepSemantic').classList.add('done');
@@ -1743,8 +1784,11 @@ generateSemanticBtn.addEventListener('click', async () => {
   } finally {
     generateSemanticBtn.disabled = false;
     generateSemanticBtn.removeAttribute('aria-busy');
+    document.getElementById('staleBanner').classList.remove('auto');
+    preparing = false;
+    if (autoPrepareQueued) { autoPrepareQueued = false; scheduleAutoPrepare(); }
   }
-});
+}
 
 downloadSemanticTopBtn.addEventListener('click', () => {
   if (!currentSemantic) return;
