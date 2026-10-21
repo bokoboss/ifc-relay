@@ -281,29 +281,92 @@
         <div class="dock-resize" id="dockResize" role="separator" aria-orientation="horizontal" aria-label="ปรับความสูงแผงด้านล่าง" tabindex="0"></div>
         <div class="dock-bar">
           <div class="dock-tabs" role="tablist">
-            <button class="dock-tab" role="tab" data-tab="checks" aria-selected="false">ตรวจใน Viswalk <span class="dock-count" data-count="checks"></span></button>
-            <button class="dock-tab" role="tab" data-tab="model" aria-selected="false">โมเดลคนเดิน <span class="dock-count" data-count="model"></span></button>
-            <button class="dock-tab" role="tab" data-tab="choices" aria-selected="false">ช่องเปิดและพื้นต่างระดับ <span class="dock-count" data-count="choices"></span></button>
+            <button class="dock-tab" role="tab" data-tab="issues" aria-selected="false">รายการตรวจ <span class="dock-count" data-count="issues"></span></button>
             <button class="dock-tab" role="tab" data-tab="edits" aria-selected="false">แก้ไขบนแปลน <span class="dock-count" data-count="edits"></span></button>
-            <button class="dock-tab" role="tab" data-tab="stairs" aria-selected="false">บันได <span class="dock-count" data-count="stairs"></span></button>
-            <button class="dock-tab" role="tab" data-tab="engine" aria-selected="false">ผล Engine และไฟล์ <span class="dock-count" data-count="engine"></span></button>
-            <button class="dock-tab" role="tab" data-tab="ifc" aria-selected="false">ข้อมูล IFC <span class="dock-count" data-count="ifc"></span></button>
+            <button class="dock-tab" role="tab" data-tab="build" aria-selected="false">ผล Engine และไฟล์ <span class="dock-count" data-count="build"></span></button>
+            <button class="dock-tab" role="tab" data-tab="details" aria-selected="false">รายละเอียด <span class="dock-count" data-count="details"></span></button>
           </div>
           <button id="dockToggle" class="dock-toggle" type="button" aria-expanded="false" aria-controls="dockBody" title="ย่อ/ขยายแผงด้านล่าง">
             <span class="dock-toggle-icon" aria-hidden="true"></span><span class="dock-toggle-text">ขยาย</span>
           </button>
         </div>
         <div id="dockBody" class="dock-body">
-          <div class="dock-panel" data-panel="checks" role="tabpanel">
+          <div class="dock-panel" data-panel="issues" role="tabpanel">
+            <div class="issue-filter" role="group" aria-label="กรองรายการตรวจ">
+              <button type="button" class="issue-filter-btn active" data-filter="all">ทั้งหมด</button>
+              <button type="button" class="issue-filter-btn" data-filter="checks">ตรวจใน Viswalk <span data-filter-count="checks"></span></button>
+              <button type="button" class="issue-filter-btn" data-filter="choices">ช่องเปิดและพื้นต่างระดับ <span data-filter-count="choices"></span></button>
+              <button type="button" class="issue-filter-btn" data-filter="stairs">บันไดและทางลาด <span data-filter-count="stairs"></span></button>
+            </div>
+            <div class="issue-group-block" data-group="checks">
             <div id="gateSection" class="gate-section hidden">
               <h3>เรื่องที่ต้องตรวจใน Viswalk</h3>
               <p class="opening-candidates-note">สร้างไฟล์ได้เสมอเมื่อ Geometry Engine ไม่พบข้อผิดพลาด · รายการด้านล่างให้ไปตรวจหรือแก้ใน Viswalk และจะบันทึกเป็น checklist ข้างไฟล์ .inpx</p>
               <div id="gateList" class="gate-list"></div>
               <div id="gateSummary" class="gate-summary"></div>
             </div>
-            <p class="dock-empty">ยังไม่ได้ตรวจ Geometry · กด "ตรวจ Geometry" แล้วรายการที่ต้องตรวจใน Viswalk จะอยู่ที่นี่</p>
+            </div>
+            <div class="issue-group-block" data-group="choices">
+            <div id="openingCandidateSection" class="opening-candidates hidden">
+              <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
+              <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div id="openingCandidateList"></div>
+            </div>
+            <div id="offLevelSection" class="opening-candidates hidden">
+              <h3>แผ่นพื้นต่างระดับมาก (ยังไม่ใช้เป็นพื้นเดิน)</h3>
+              <p class="opening-candidates-note">แผ่นที่สูงหรือต่ำกว่าพื้นชั้นเกิน 0.40 ม. เช่นแผงบังแดด กันสาด หรือชั้นลอย · ติ๊กเฉพาะแผ่นที่เป็นพื้นเดินจริง · ระบบจะสร้างเป็นพื้นที่เดินที่ระดับจริงของแผ่น (ชั้นลอย ไม่รวมกับพื้นชั้น) จึงต้องมีบันได/ทางลาดเชื่อม · แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div id="offLevelList"></div>
+            </div>
+            </div>
+            <div class="issue-group-block" data-group="stairs">
+            <div id="verticalSection" class="opening-candidates hidden">
+              <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>
+              <p class="opening-candidates-note">ลูกศรใน 3D ชี้ทิศขึ้น · <span class="dir-ok">เขียว</span> = หาจาก Geometry · <span class="dir-review">ส้ม</span> = ต้องตรวจทิศ · ทิศบันไดยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim</p>
+              <div id="verticalList"></div>
+            </div>
+            </div>
+            <p class="dock-empty">ยังไม่มีรายการ · กด "เตรียมโมเดลคนเดิน" แล้ว "ตรวจ Geometry"</p>
           </div>
-          <div class="dock-panel" data-panel="model" role="tabpanel">
+          <div class="dock-panel" data-panel="edits" role="tabpanel">
+            <div id="editsSection" class="opening-candidates hidden">
+              <h3>แก้ไขบนแปลนโดยวิศวกร</h3>
+              <p class="opening-candidates-note">วาดในโหมด "แปลน 2D" · ระบบใช้ทุกครั้งที่เตรียมโมเดลคนเดิน และบันทึกใน build manifest · ไม่แก้ไฟล์ IFC</p>
+              <p id="editsReview" class="edits-review"></p>
+              <div id="editsList"></div>
+            </div>
+            <p class="dock-empty">ยังไม่มีการแก้ไขบนแปลน · วาดได้ในโหมด "แปลน 2D"</p>
+          </div>
+          <div class="dock-panel" data-panel="build" role="tabpanel">
+          <section id="buildSection" class="panel hidden build-section">
+            <div class="panel-heading">
+              <div>
+                <div class="eyebrow">BUILD / VALIDATION</div>
+                <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
+              </div>
+              <div class="semantic-actions">
+                <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
+                <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
+                <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
+                <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
+                <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
+              </div>
+            </div>
+
+            <div class="metric-grid build-metrics">
+              <div class="metric build-error"><span>ข้อผิดพลาด</span><strong id="buildErrors">—</strong></div>
+              <div class="metric review"><span>คำเตือน</span><strong id="buildWarnings">—</strong></div>
+              <div class="metric opening"><span>ข้อมูล</span><strong id="buildInfo">—</strong></div>
+              <div class="metric include"><span>สถานะ</span><strong id="buildStatus">พร้อม</strong></div>
+              <div class="metric"><span>เวลา</span><strong id="buildDuration">—</strong></div>
+            </div>
+
+
+            <div id="buildIssueList" class="build-issue-list"></div>
+            <div id="buildOutputPath" class="engine-path hidden"></div>
+          </section>
+            <p class="dock-empty">ยังไม่ได้ตรวจ Geometry หรือสร้างไฟล์</p>
+          </div>
+          <div class="dock-panel" data-panel="details" role="tabpanel">
           <section id="semanticSection" class="panel hidden semantic-section">
             <div class="panel-heading">
               <div>
@@ -353,69 +416,6 @@
 
             <div id="semanticEnginePath" class="engine-path hidden"></div>
           </section>
-            <p class="dock-empty">ยังไม่ได้เตรียมโมเดลคนเดิน</p>
-          </div>
-          <div class="dock-panel" data-panel="choices" role="tabpanel">
-            <div id="openingCandidateSection" class="opening-candidates hidden">
-              <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
-              <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
-              <div id="openingCandidateList"></div>
-            </div>
-            <div id="offLevelSection" class="opening-candidates hidden">
-              <h3>แผ่นพื้นต่างระดับมาก (ยังไม่ใช้เป็นพื้นเดิน)</h3>
-              <p class="opening-candidates-note">แผ่นที่สูงหรือต่ำกว่าพื้นชั้นเกิน 0.40 ม. เช่นแผงบังแดด กันสาด หรือชั้นลอย · ติ๊กเฉพาะแผ่นที่เป็นพื้นเดินจริง · ระบบจะสร้างเป็นพื้นที่เดินที่ระดับจริงของแผ่น (ชั้นลอย ไม่รวมกับพื้นชั้น) จึงต้องมีบันได/ทางลาดเชื่อม · แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
-              <div id="offLevelList"></div>
-            </div>
-            <p class="dock-empty">ไม่มีช่องเปิดไร้ประตูหรือแผ่นพื้นต่างระดับให้เลือก</p>
-          </div>
-          <div class="dock-panel" data-panel="edits" role="tabpanel">
-            <div id="editsSection" class="opening-candidates hidden">
-              <h3>แก้ไขบนแปลนโดยวิศวกร</h3>
-              <p class="opening-candidates-note">วาดในโหมด "แปลน 2D" · ระบบใช้ทุกครั้งที่เตรียมโมเดลคนเดิน และบันทึกใน build manifest · ไม่แก้ไฟล์ IFC</p>
-              <p id="editsReview" class="edits-review"></p>
-              <div id="editsList"></div>
-            </div>
-            <p class="dock-empty">ยังไม่มีการแก้ไขบนแปลน · วาดได้ในโหมด "แปลน 2D"</p>
-          </div>
-          <div class="dock-panel" data-panel="stairs" role="tabpanel">
-            <div id="verticalSection" class="opening-candidates hidden">
-              <h3>บันไดและทางลาดในโมเดลคนเดิน</h3>
-              <p class="opening-candidates-note">ลูกศรใน 3D ชี้ทิศขึ้น · <span class="dir-ok">เขียว</span> = หาจาก Geometry · <span class="dir-review">ส้ม</span> = ต้องตรวจทิศ · ทิศบันไดยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim</p>
-              <div id="verticalList"></div>
-            </div>
-            <p class="dock-empty">ยังไม่มีบันไดหรือทางลาดในโมเดลคนเดิน</p>
-          </div>
-          <div class="dock-panel" data-panel="engine" role="tabpanel">
-          <section id="buildSection" class="panel hidden build-section">
-            <div class="panel-heading">
-              <div>
-                <div class="eyebrow">BUILD / VALIDATION</div>
-                <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
-              </div>
-              <div class="semantic-actions">
-                <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
-                <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
-                <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
-                <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
-                <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
-              </div>
-            </div>
-
-            <div class="metric-grid build-metrics">
-              <div class="metric build-error"><span>ข้อผิดพลาด</span><strong id="buildErrors">—</strong></div>
-              <div class="metric review"><span>คำเตือน</span><strong id="buildWarnings">—</strong></div>
-              <div class="metric opening"><span>ข้อมูล</span><strong id="buildInfo">—</strong></div>
-              <div class="metric include"><span>สถานะ</span><strong id="buildStatus">พร้อม</strong></div>
-              <div class="metric"><span>เวลา</span><strong id="buildDuration">—</strong></div>
-            </div>
-
-
-            <div id="buildIssueList" class="build-issue-list"></div>
-            <div id="buildOutputPath" class="engine-path hidden"></div>
-          </section>
-            <p class="dock-empty">ยังไม่ได้ตรวจหรือสร้างไฟล์</p>
-          </div>
-          <div class="dock-panel" data-panel="ifc" role="tabpanel">
           <section id="largeModelSection" class="panel hidden large-model-section">
             <div class="panel-heading">
               <div>

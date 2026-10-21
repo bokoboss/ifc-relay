@@ -78,7 +78,26 @@ const dock = (() => {
     toggle.querySelector('.dock-toggle-text').textContent = open ? 'ย่อ' : 'ขยาย';
     store.set('open', open ? '1' : '0');
   }
+  // Four task tabs (GUI-01). Older names still work: they open the tab that
+  // holds that list, filtered to it.
+  const ALIAS = {
+    checks: ['issues', 'checks'], choices: ['issues', 'choices'], stairs: ['issues', 'stairs'],
+    model: ['details'], ifc: ['details'], engine: ['build'],
+  };
+  const issuesPanel = root.querySelector('.dock-panel[data-panel="issues"]');
+  function setFilter(filter) {
+    issuesPanel.dataset.filter = filter;
+    issuesPanel.querySelectorAll('.issue-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+  }
+  issuesPanel.querySelectorAll('.issue-filter-btn').forEach(b => b.addEventListener('click', () => setFilter(b.dataset.filter)));
+  setFilter('all');
+
   function select(name, { open = true } = {}) {
+    if (ALIAS[name]) {
+      const [tab, filter] = ALIAS[name];
+      if (filter) setFilter(filter);
+      name = tab;
+    }
     if (!panels.some(p => p.dataset.panel === name)) return;
     active = name;
     for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
@@ -125,17 +144,19 @@ const dock = (() => {
   });
 
   // Tab counts follow what the panels actually contain.
+  const checksCount = () => document.getElementById('gateSection').classList.contains('hidden') ? 0
+    : document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length;
+  const GROUP_COUNTS = {
+    checks: checksCount,
+    choices: () => document.querySelectorAll('#openingCandidateList .opening-row, #offLevelList .check-row').length,
+    stairs: () => document.querySelectorAll('#verticalList .vertical-row').length,
+  };
   const COUNTS = {
-    checks: () => [document.getElementById('gateSection').classList.contains('hidden') ? 0
-                   : document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length,
-                   document.querySelectorAll('#gateList .gate-row.block').length ? 'block' : 'warn'],
-    model: () => [0, ''],
-    choices: () => [document.querySelectorAll('#openingCandidateList .opening-row, #offLevelList .check-row').length, ''],
+    issues: () => [checksCount(), document.querySelectorAll('#gateList .gate-row.block').length ? 'block' : 'warn'],
     edits: () => [document.querySelectorAll('#editsList .edit-row').length,
                   document.querySelector('#editsReview.needs-review') ? 'warn' : ''],
-    stairs: () => [document.querySelectorAll('#verticalList .vertical-row').length, ''],
-    engine: () => [Number(document.getElementById('buildErrors')?.textContent) || 0, 'block'],
-    ifc: () => [0, ''],
+    build: () => [Number(document.getElementById('buildErrors')?.textContent) || 0, 'block'],
+    details: () => [0, ''],
   };
   let pending = false;
   function updateCounts() {
@@ -145,6 +166,16 @@ const dock = (() => {
       const [n, tone] = fn();
       el.textContent = n ? String(n) : '';
       el.className = `dock-count${n && tone ? ` ${tone}` : ''}`;
+    }
+    for (const [group, fn] of Object.entries(GROUP_COUNTS)) {
+      const n = fn();
+      const el = issuesPanel.querySelector(`[data-filter-count="${group}"]`);
+      if (el) el.textContent = n ? String(n) : '';
+      const btn = issuesPanel.querySelector(`.issue-filter-btn[data-filter="${group}"]`);
+      if (btn) {
+        btn.disabled = !n;
+        if (!n && issuesPanel.dataset.filter === group) setFilter('all');
+      }
     }
   }
   new MutationObserver(() => {
@@ -1653,7 +1684,7 @@ generateSemanticBtn.addEventListener('click', async () => {
     currentValidation = null;
     currentBuild = null;
     renderSemanticSummary(result);
-    dock.select('model', { open: false });     // counts update; the viewer keeps its size
+    dock.select('details', { open: false });   // counts update; the viewer keeps its size
     setExportReady(true);
     setBuildOutputReady(false);
     document.getElementById('stepSemantic').classList.add('done');
@@ -2003,7 +2034,7 @@ validateBtn.addEventListener('click', async () => {
     const result = await api('/api/validate', { method: 'POST' });
     renderValidation(result);
     const gate = await refreshGate();
-    dock.select((result.severity_counts?.error || 0) ? 'engine' : 'checks');
+    dock.select((result.severity_counts?.error || 0) ? 'build' : 'checks');
     buildViswalkBtn.disabled = !(gate && gate.passed);
     const c = result.severity_counts || {};
     // "Engine passed" is not "model verified" (UX-01): say which one this is.
@@ -2041,7 +2072,7 @@ function confirmBuild(checks) {
   }
   if (checks.length > shown.length) {
     const li = document.createElement('li');
-    li.textContent = `และอีก ${checks.length - shown.length} เรื่อง (ดูในแท็บ "ตรวจใน Viswalk")`;
+    li.textContent = `และอีก ${checks.length - shown.length} เรื่อง (ดูในแท็บ "รายการตรวจ")`;
     list.appendChild(li);
   }
   return new Promise(resolve => {
@@ -2069,7 +2100,7 @@ buildViswalkBtn.addEventListener('click', async () => {
   try {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
-    dock.select('engine');
+    dock.select('build');
     setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
   } catch (error) {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';

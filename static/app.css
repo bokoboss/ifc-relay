@@ -548,3 +548,23 @@ th {position:sticky;top:0;background:var(--surface-1);font-weight:600;color:var(
 .about-product {margin:10px 0 2px;padding-top:10px;border-top:1px solid var(--divider);font-size:12.5px;color:var(--ink-700);}
 .about-product strong {color:var(--ink-900);}
 .about-product p {margin-top:4px;font-size:12px;line-height:1.6;color:var(--text-muted);}
+
+/* Issues tab: one queue, filtered by kind (GUI-01) */
+.issue-filter {display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px;}
+.issue-filter-btn {
+  display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 10px;
+  border:1px solid var(--divider-strong);border-radius:var(--r-md);background:#fff;
+  font-size:12.5px;font-weight:500;color:var(--ink-700);
+}
+.issue-filter-btn span:empty {display:none;}
+.issue-filter-btn span {font-size:12px;font-weight:600;color:var(--text-muted);}
+.issue-filter-btn:hover {background:var(--surface-2);}
+.issue-filter-btn.active {background:var(--ink-900);border-color:var(--ink-900);color:#fff;}
+.issue-filter-btn.active span {color:#cfe0e2;}
+.issue-group-block {margin-bottom:18px;}
+.issue-group-block:not(:has(> :not(.hidden))) {display:none;}
+.dock-panel[data-filter="checks"] .issue-group-block:not([data-group="checks"]),
+.dock-panel[data-filter="choices"] .issue-group-block:not([data-group="choices"]),
+.dock-panel[data-filter="stairs"] .issue-group-block:not([data-group="stairs"]) {display:none;}
+.dock-panel[data-panel="issues"]:not(:has(.issue-group-block > :not(.hidden))) .dock-empty {display:block;}
+.dock-panel[data-panel="issues"]:not(:has(.issue-group-block > :not(.hidden))) .issue-filter {display:none;}
