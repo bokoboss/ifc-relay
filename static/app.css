@@ -507,3 +507,6 @@ th {position:sticky;top:0;background:var(--surface-1);font-weight:600;color:var(
 
 /* the tab already says "ตรวจใน Viswalk"; rows only label the exceptions */
 .gate-row.check .gate-chip {display:none;}
+
+.vissim-choice {display:grid;gap:4px;margin-top:12px;padding-top:12px;border-top:1px solid var(--divider);font-size:12px;font-weight:600;color:var(--text-muted);}
+.vissim-choice select {min-height:var(--control-h);padding:4px 8px;border:1px solid var(--divider-strong);border-radius:var(--r-md);background:#fff;font-size:12.5px;color:var(--ink-900);}

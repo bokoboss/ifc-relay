@@ -4,8 +4,10 @@ Vissim registers one versioned COM ProgID per installed release
 (``Vissim.Vissim.2025``, ``Vissim.Vissim.2026`` ...) plus the version-independent
 ``Vissim.Vissim`` for the most recently registered one. ProgIDs are case-insensitive.
 
-Order: ``VBB_VISSIM_PROGID`` (explicit choice) -> newest supported release that is
-registered -> version-independent ProgID.
+Order: ``VBB_VISSIM_PROGID`` (explicit choice, e.g. picked in the app) -> newest
+supported release that is registered -> version-independent ProgID. Without an
+explicit choice the build falls back to the next registered release when one
+release will not start (see ``candidates``).
 """
 from __future__ import annotations
 
@@ -43,6 +45,17 @@ def resolve_prog_id() -> tuple[str | None, str]:
     if _registered(VERSION_INDEPENDENT):
         return VERSION_INDEPENDENT, "version-independent ProgID"
     return None, "no Vissim COM server registered"
+
+
+def candidates() -> list[str]:
+    """ProgIDs to try, in order. An explicit choice is the only candidate."""
+    explicit = os.environ.get("VBB_VISSIM_PROGID", "").strip()
+    if explicit:
+        return [explicit]
+    out = [f"Vissim.Vissim.{r}" for r in registered_releases()]
+    if not out and _registered(VERSION_INDEPENDENT):
+        out.append(VERSION_INDEPENDENT)
+    return out
 
 
 def release_of(prog_id: str | None) -> int | None:

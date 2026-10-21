@@ -2004,6 +2004,42 @@ openBuildFolderBtn.addEventListener('click', async () => {
   }
 });
 
+// Which installed Vissim builds the file (engine menu). "อัตโนมัติ" = newest,
+// falling back to the next release if that one will not start.
+async function renderVissimChoice() {
+  const row = document.getElementById('vissimChoiceRow');
+  const select = document.getElementById('vissimChoice');
+  let info;
+  try { info = await api('/api/vissim'); } catch { return; }
+  const releases = info.registered || [];
+  row.classList.toggle('hidden', !releases.length);
+  if (!releases.length) return;
+  select.innerHTML = '';
+  const auto = new Option(`อัตโนมัติ (รุ่นใหม่สุด: ${releases[0]})`, '');
+  select.appendChild(auto);
+  for (const r of releases) {
+    select.appendChild(new Option(`Vissim ${r}${r === 2025 ? ' · ทดสอบแล้ว' : ''}`, String(r)));
+  }
+  select.value = info.choice ? String(info.choice) : '';
+  select.disabled = !!info.fixed_by_environment;
+  select.title = info.fixed_by_environment ? 'กำหนดด้วย VBB_VISSIM_PROGID ตอนเปิดแอป' : '';
+}
+
+document.getElementById('vissimChoice').addEventListener('change', async event => {
+  const value = event.target.value;
+  try {
+    await api('/api/vissim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ release: value ? Number(value) : null }),
+    });
+    setMessage(value ? `สร้างไฟล์ด้วย Vissim ${value}` : 'สร้างไฟล์ด้วย Vissim รุ่นใหม่สุดที่ติดตั้ง (ถ้าเปิดไม่ได้จะลองรุ่นถัดไป)');
+  } catch (error) {
+    setMessage(`เปลี่ยนรุ่น Vissim ไม่สำเร็จ: ${error.message}`);
+    renderVissimChoice();
+  }
+});
+
 async function restoreState() {
   try {
     const [health, state] = await Promise.all([
@@ -2021,6 +2057,7 @@ async function restoreState() {
           : 'ไม่พบ Vissim ในเครื่อง (ยังตรวจและเตรียมโมเดลได้)')
       : '';
     if (health.app_version) document.getElementById('appVersionText').textContent = `v${health.app_version}`;
+    renderVissimChoice();
     if (health.credit) document.getElementById('creditText').textContent = health.credit;
 
     if (!health.three_vendor_ready) {
