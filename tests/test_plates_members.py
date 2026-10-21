@@ -39,3 +39,18 @@ def test_member_outside_curtain_wall_is_review():
     plate = f.createIfcPlate(ifcopenshell.guid.new())
     assert recommendation(plate)[0] == "include" and recommendation(plate)[2] == "obstacle"
     assert recommendation(member)[0] == "review"
+
+
+def test_panels_of_a_multi_storey_curtain_wall_go_to_their_own_storey(tmp_path):
+    b = Building([0.0, 4.0])
+    l1, l2 = b.storeys
+    b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 0.0, l1)
+    b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 4.0, l2)
+    cw = b._run("root.create_entity", ifc_class="IfcCurtainWall", name="Facade")
+    b._run("spatial.assign_container", relating_structure=l1, products=[cw])      # whole facade on L1
+    low = _box(b, "IfcPlate", 10.0, 0.0, 10.02, 10.0, 0.0, 3.0, cw)
+    high = _box(b, "IfcPlate", 10.0, 0.0, 10.02, 10.0, 4.0, 7.0, cw)               # stands on L2
+    sem = semantic_for(b.write(tmp_path / "f.ifc"), {})
+    level = {o["ifc_global_id"]: o["level_key"] for o in sem["obstacles"] if o.get("ifc_global_id")}
+    assert level[low.GlobalId] != level[high.GlobalId]
+    assert level[high.GlobalId] == max(level.values())
