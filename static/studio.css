@@ -542,3 +542,242 @@ th {background:#f7faf9;font-size:11px;color:#607680;}
 .plan-size input {font-size:12px;padding:2px 4px;margin-left:4px;width:80px;}
 .plan-confirm {display:flex;align-items:center;gap:6px;flex-basis:100%;background:#fff8e8;border:1px solid #f0d9a8;border-radius:4px;padding:5px 8px;}
 .plan-tool:disabled {opacity:.45;cursor:not-allowed;}
+
+/* ==========================================================================
+ * Workbench v4 — the viewport never leaves the screen (review UX-01).
+ * Page = header + command bar + workbench; the workbench is the three-pane
+ * explorer over a bottom review dock. Long lists scroll inside the dock.
+ * ========================================================================== */
+:root {
+  --rail: #17282f;          /* dock bar: the drafting-table rail */
+  --rail-2: #22383f;
+  --rail-text: #b9cbcf;
+  --rail-active: #f4f7f6;
+  --dock-h: clamp(150px, 27vh, 340px);
+}
+html, body {height:100%;}
+html {scroll-behavior:auto;}
+.app-shell {display:flex;flex-direction:column;height:100dvh;min-height:560px;}
+.main {
+  flex:1 1 auto;min-height:0;width:100%;
+  display:flex;flex-direction:column;gap:8px;
+  padding:10px 16px 4px;
+}
+
+/* Header: brand, the open file as the document title, environment. */
+.topbar {margin:0;min-height:0;gap:16px;flex:0 0 auto;}
+.topbar-brand {min-width:0;}
+.brand-mark {width:36px;height:36px;font-size:21px;border-radius:6px;}
+.brand-glyph-accent {width:8px;height:8px;}
+.brand-title {
+  margin:0;font-size:15px;line-height:1.2;letter-spacing:-.005em;font-weight:760;color:#1d3540;
+}
+.brand-subtitle {margin-top:2px;font-size:11px;letter-spacing:0;color:#6d838c;}
+.topbar-divider {height:30px;}
+.topbar .file-meta {
+  flex:1 1 auto;max-width:none;text-align:left;margin:0;
+  font-size:14px;font-weight:650;color:#2b4651;
+}
+.topbar-actions {margin-left:auto;}
+
+/* Command bar: the four steps on the left, the live status takes the rest. */
+.workspace-toolbar-shell {margin:0;flex:0 0 auto;}
+.workspace-toolbar {min-height:0;padding:8px 10px;gap:12px;}
+.workspace-toolbar .toolbar-primary {flex:0 0 auto;}
+.toolbar-utilities {flex:0 0 auto;min-width:0;}
+.message-panel {
+  flex:1 1 auto;min-width:0;margin:0;padding:0 4px;background:none;border:0;
+  min-height:0;display:block;
+}
+#messageText {
+  display:block;font-size:12px;color:#546b75;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+/* Workbench: explorer on top, dock below; nothing here scrolls the page. */
+.workbench {
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
+  border:1px solid #cad7da;border-radius:10px;overflow:hidden;background:#fff;
+  box-shadow:0 2px 8px rgba(25,47,57,.05);
+}
+.workbench > .explorer-layout {
+  flex:1 1 auto;min-height:0;border:0;border-radius:0;box-shadow:none;
+  grid-template-rows:minmax(0,1fr);position:relative;
+}
+.explorer-left,.inspector-panel {overflow:auto;overscroll-behavior:contain;}
+.explorer-left {padding:12px 10px;}
+.inspector-panel {padding:12px 12px;}
+.explorer-left .panel-heading,.inspector-panel .panel-heading {
+  display:flex;align-items:center;justify-content:space-between;padding:0 3px 9px;
+}
+.panel-heading.tight h2 {font-size:14px;}
+.scroll-list {max-height:none;}
+.viewer-panel {min-height:0;}
+.viewer-toolbar {min-height:0;padding:7px 10px;}
+.viewer-host {height:auto;min-height:0;flex:1 1 auto;}
+.viewer-footer {min-height:0;padding:6px 12px;}
+.inspector-close {
+  display:none;border:0;background:none;color:#6c838b;
+  font-size:20px;line-height:1;padding:2px 6px;border-radius:4px;cursor:pointer;
+}
+.inspector-close:hover {background:#edf3f3;color:#1d3540;}
+
+/* Dock */
+.dock {
+  flex:0 0 auto;display:flex;flex-direction:column;position:relative;
+  background:#fbfcfc;border-top:1px solid #1f343b;
+}
+.dock-resize {
+  position:absolute;left:0;right:0;top:-5px;height:9px;z-index:6;cursor:row-resize;
+}
+.dock[data-open="false"] .dock-resize {display:none;}
+.dock-resize:focus-visible {outline:2px solid var(--accent);outline-offset:-3px;}
+.dock-bar {
+  display:flex;align-items:stretch;gap:8px;background:var(--rail);
+  padding:0 6px 0 4px;min-height:38px;
+}
+.dock-tabs {display:flex;align-items:stretch;gap:2px;overflow-x:auto;scrollbar-width:none;flex:1 1 auto;min-width:0;}
+.dock-tabs::-webkit-scrollbar {display:none;}
+.dock-tab {
+  position:relative;display:flex;align-items:center;gap:7px;white-space:nowrap;
+  border:0;background:none;color:var(--rail-text);
+  font-size:12px;font-weight:650;padding:0 12px;cursor:pointer;
+}
+.dock-tab:hover {color:#fff;background:var(--rail-2);}
+.dock[data-open="true"] .dock-tab[aria-selected="true"] {color:var(--rail-active);background:var(--rail-2);}
+.dock[data-open="true"] .dock-tab[aria-selected="true"]::after {
+  content:"";position:absolute;left:10px;right:10px;bottom:0;height:2px;background:#d99a62;
+}
+.dock-tab:focus-visible {outline:2px solid #8fd0cc;outline-offset:-3px;}
+.dock-count {
+  min-width:18px;padding:0 5px;border-radius:9px;font-size:10.5px;line-height:17px;text-align:center;
+  font-variant-numeric:tabular-nums;color:#d6e2e4;background:rgba(255,255,255,.1);
+}
+.dock-count:empty {display:none;}
+.dock-count.warn {background:#d99a62;color:#2a1a0e;}
+.dock-count.block {background:#d0574b;color:#fff;}
+.dock-toggle {
+  flex:0 0 auto;display:flex;align-items:center;gap:7px;
+  border:0;background:none;color:var(--rail-text);font-size:12px;font-weight:650;
+  padding:0 10px;cursor:pointer;border-left:1px solid rgba(255,255,255,.08);
+}
+.dock-toggle:hover {color:#fff;}
+.dock-toggle-icon {
+  width:8px;height:8px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+  transform:rotate(-135deg) translate(-2px,-2px);transition:transform .15s;
+}
+.dock[data-open="true"] .dock-toggle-icon {transform:rotate(45deg) translate(-2px,-2px);}
+.dock-body {height:var(--dock-h);min-height:120px;max-height:70vh;overflow:hidden;}
+.dock[data-open="false"] .dock-body {display:none;}
+.dock-panel {height:100%;overflow:auto;overscroll-behavior:contain;padding:14px 18px 18px;display:none;}
+.dock-panel.active {display:block;}
+.dock-empty {display:none;margin:22px 0;color:#7d9097;font-size:13px;}
+.dock-panel:not(:has(> :not(.hidden):not(.dock-empty))) .dock-empty {display:block;}
+
+/* Sections inside the dock lose their page-card chrome. */
+.dock #largeModelSection,.dock #auditSection,.dock #semanticSection,
+.dock #buildSection,.dock #categorySection {
+  margin:0 0 18px;padding:0;border:0;border-radius:0;box-shadow:none;background:none;
+}
+.dock .eyebrow {display:none;}
+.dock .panel-heading {margin-bottom:12px;align-items:center;}
+.dock .panel-heading h2,.dock #semanticSection h2,.dock #buildSection h2,
+.dock #auditSection h2,.dock #categorySection h2,.dock #largeModelSection .panel-heading h2 {font-size:14px;}
+.dock .opening-candidates h3,.dock .gate-section h3 {font-size:14px;margin:0 0 6px;}
+.dock .opening-candidates {margin:0 0 18px;}
+.dock .gate-section {margin:0;}
+.dock .metric {padding:8px 10px;}
+.dock .metric strong {font-size:16px;}
+
+/* Build confirmation */
+.build-confirm {
+  width:min(520px,calc(100vw - 32px));border:1px solid #c8d6d9;border-radius:10px;padding:0;
+  color:var(--text);box-shadow:0 24px 60px rgba(17,37,44,.28);
+}
+.build-confirm::backdrop {background:rgba(17,37,44,.38);}
+.build-confirm form {padding:20px 22px 18px;}
+.build-confirm h2 {margin:0 0 8px;font-size:17px;}
+.build-confirm p {margin:0 0 10px;font-size:13px;line-height:1.6;color:#455e68;}
+.build-confirm-list {margin:0 0 12px;padding:0;list-style:none;border-top:1px solid #e4ebec;}
+.build-confirm-list li {
+  display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #e4ebec;font-size:13px;
+}
+.build-confirm-list li strong {font-variant-numeric:tabular-nums;color:#986919;}
+.build-confirm-note {font-size:12px!important;color:#6d838c!important;}
+.build-confirm-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+
+.app-credit {flex:0 0 auto;padding:3px 16px 5px;font-size:10.5px;}
+
+@media (min-width:1800px) {
+  .main {padding:18px 28px 10px;}
+  .viewer-host {height:auto;}
+}
+@media (max-width:1060px) {
+  .topbar {flex-wrap:nowrap;}
+  .workbench > .explorer-layout {grid-template-columns:200px minmax(0,1fr);}
+  /* Inspector floats over the viewer instead of dropping below it (UX-04). */
+  .workbench .inspector-panel {
+    display:none;position:absolute;z-index:20;right:10px;top:52px;bottom:10px;
+    width:min(320px,48%);grid-column:auto;
+    border:1px solid #c9d7da!important;border-radius:8px;
+    box-shadow:0 14px 34px rgba(17,37,44,.2);
+  }
+  .explorer-layout:has(#inspectorContent:not(.hidden)):not(.inspector-dismissed) .inspector-panel {display:block;}
+  .inspector-close {display:block;}
+}
+@media (max-width:730px) {
+  /* Small screens: back to a scrolling page, panes stacked. */
+  .app-shell {height:auto;min-height:100dvh;}
+  .main {padding:12px 11px 16px;}
+  .topbar {flex-wrap:wrap;}
+  .topbar .file-meta {flex-basis:100%;order:3;}
+  .workspace-toolbar {flex-wrap:wrap;}
+  .message-panel {flex-basis:100%;order:3;}
+  #messageText {white-space:normal;}
+  .workbench > .explorer-layout {grid-template-columns:minmax(0,1fr);}
+  .viewer-host {height:440px;flex:0 0 auto;}
+  .workbench .inspector-panel {position:static;width:auto;box-shadow:none;border-radius:0;}
+  .dock-body {height:auto;max-height:none;}
+  .dock-panel {height:auto;}
+}
+
+/* Plan tools: a compact strip along the bottom of the viewport (wraps upward
+   only when the viewer is narrow); the hint lives in the viewer footer so the
+   drawing area stays clear (UX-13). */
+.plan-toolbar {
+  left:8px;right:auto;bottom:8px;max-width:calc(100% - 16px);
+  gap:5px;padding:4px 5px;flex-wrap:wrap;
+}
+.plan-toolbar .plan-tool,.plan-toolbar .plan-shape {font-size:11.5px;padding:3px 7px;}
+.plan-toolbar .plan-level select {max-width:150px;font-size:11.5px;}
+.plan-toolbar .plan-size input {width:72px;font-size:11.5px;}
+.plan-toolbar .plan-confirm {
+  position:absolute;left:0;bottom:calc(100% + 6px);flex-basis:auto;white-space:nowrap;
+  box-shadow:0 4px 12px rgba(20,40,40,.12);
+}
+.plan-hint {font-size:11px;color:#4f6770;}
+.viewer-panel:has(#planToolbar.hidden) #planHint {display:none;}
+.viewer-panel:has(#planToolbar:not(.hidden)) #previewNote {display:none;}
+
+/* One command bar: app + open file, the four steps, live status, tools. */
+.workspace-toolbar .topbar-brand {gap:10px;min-width:0;flex:0 1 250px;}
+.topbar-brand-copy {min-width:0;}
+.workspace-toolbar .brand-title {font-size:14px;}
+.workspace-toolbar .file-meta {
+  display:block;max-width:100%;margin:1px 0 0;text-align:left;
+  font-size:11.5px;font-weight:550;color:#5f7680;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.workspace-toolbar .toolbar-utilities {gap:8px;}
+.environment-trigger {min-height:35px;padding:7px 10px;}
+.tools-dropdown .danger-item {color:#9b3b30;}
+.tools-dropdown .danger-item.armed {background:#fbeceb;color:#8d2a20;font-weight:750;}
+.plan-toolbar #planUndoBtn,.plan-toolbar #planRedoBtn {font-size:14px;line-height:1;padding:3px 8px;}
+@media (max-width:1180px) {
+  .workspace-toolbar {flex-wrap:wrap;row-gap:6px;}
+  .workspace-toolbar .message-panel {order:5;flex:1 1 100%;padding:0 2px;}
+}
+.workspace-toolbar .brand-mark {flex:0 0 auto;}
+.plan-toolbar {gap:4px;}
+.plan-toolbar .plan-level select {max-width:128px;}
+.plan-toolbar .plan-tools {gap:3px;}

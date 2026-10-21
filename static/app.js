@@ -53,7 +53,117 @@ window.addEventListener('unhandledrejection', event => {
 
 function setMessage(text) {
   messageText.textContent = text;
+  messageText.title = text;          // the bar shows one line; hover for all of it
 }
+
+// ---------------------------------------------------------------------------
+// Review dock (UX-01): lists live in a bottom dock with its own scroll, so the
+// viewport never leaves the screen. Tabs keep the original section ids.
+// ---------------------------------------------------------------------------
+const dock = (() => {
+  const root = document.getElementById('reviewDock');
+  const body = document.getElementById('dockBody');
+  const toggle = document.getElementById('dockToggle');
+  const tabs = [...root.querySelectorAll('.dock-tab')];
+  const panels = [...root.querySelectorAll('.dock-panel')];
+  const store = {
+    get(key) { try { return localStorage.getItem(`vbb.dock.${key}`); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(`vbb.dock.${key}`, value); } catch { /* private mode */ } },
+  };
+  let active = store.get('tab') || 'checks';
+
+  function setOpen(open) {
+    root.dataset.open = open ? 'true' : 'false';
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.querySelector('.dock-toggle-text').textContent = open ? 'ย่อ' : 'ขยาย';
+    store.set('open', open ? '1' : '0');
+  }
+  function select(name, { open = true } = {}) {
+    if (!panels.some(p => p.dataset.panel === name)) return;
+    active = name;
+    for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
+    for (const p of panels) p.classList.toggle('active', p.dataset.panel === name);
+    store.set('tab', name);
+    if (open) setOpen(true);
+  }
+  tabs.forEach(t => t.addEventListener('click', () => {
+    if (t.dataset.tab === active && root.dataset.open === 'true') setOpen(false);
+    else select(t.dataset.tab);
+  }));
+  root.querySelector('.dock-tabs').addEventListener('keydown', event => {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+    const i = tabs.findIndex(t => t.dataset.tab === active);
+    const next = tabs[(i + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    select(next.dataset.tab);
+    next.focus();
+  });
+  toggle.addEventListener('click', () => setOpen(root.dataset.open !== 'true'));
+
+  // Height: drag the top edge (or arrow keys on it); remembered per browser.
+  const handle = document.getElementById('dockResize');
+  const setHeight = px => {
+    const h = Math.round(Math.min(Math.max(px, 120), window.innerHeight * 0.7));
+    root.style.setProperty('--dock-h', `${h}px`);
+    store.set('height', String(h));
+  };
+  const saved = Number(store.get('height'));
+  if (saved) setHeight(saved);
+  handle.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const startH = body.getBoundingClientRect().height;
+    const move = e => setHeight(startH + (startY - e.clientY));
+    const up = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+  });
+  handle.addEventListener('keydown', event => {
+    const h = body.getBoundingClientRect().height;
+    if (event.key === 'ArrowUp') { setHeight(h + 24); event.preventDefault(); }
+    if (event.key === 'ArrowDown') { setHeight(h - 24); event.preventDefault(); }
+  });
+
+  // Tab counts follow what the panels actually contain.
+  const COUNTS = {
+    checks: () => [document.querySelectorAll('#gateList .gate-row.check, #gateList .gate-row.block').length,
+                   document.querySelectorAll('#gateList .gate-row.block').length ? 'block' : 'warn'],
+    model: () => [document.querySelectorAll('#semanticWarningList .warning-item:not(.info)').length, ''],
+    choices: () => [document.querySelectorAll('#openingCandidateList .opening-row, #offLevelList .check-row').length, ''],
+    edits: () => [document.querySelectorAll('#editsList .edit-row').length,
+                  document.querySelector('#editsReview.needs-review') ? 'warn' : ''],
+    stairs: () => [document.querySelectorAll('#verticalList .vertical-row').length, ''],
+    engine: () => [Number(document.getElementById('buildErrors')?.textContent) || 0, 'block'],
+    ifc: () => [0, ''],
+  };
+  let pending = false;
+  function updateCounts() {
+    pending = false;
+    for (const [name, fn] of Object.entries(COUNTS)) {
+      const el = root.querySelector(`.dock-count[data-count="${name}"]`);
+      const [n, tone] = fn();
+      el.textContent = n ? String(n) : '';
+      el.className = `dock-count${n && tone ? ` ${tone}` : ''}`;
+    }
+  }
+  new MutationObserver(() => {
+    if (!pending) { pending = true; requestAnimationFrame(updateCounts); }
+  }).observe(body, { childList: true, subtree: true, characterData: true });
+
+  select(active, { open: false });
+  setOpen(store.get('open') === '1');
+  updateCounts();
+  return { select, setOpen };
+})();
+
+// Narrow screens: the inspector floats over the viewer; it can be closed and
+// comes back with the next selection.
+(() => {
+  const layout = document.getElementById('explorerSection');
+  document.getElementById('inspectorCloseBtn').addEventListener('click', () => layout.classList.add('inspector-dismissed'));
+  new MutationObserver(() => layout.classList.remove('inspector-dismissed'))
+    .observe(document.getElementById('selectedGuid'), { childList: true, characterData: true, subtree: true });
+})();
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -462,7 +572,20 @@ async function loadStoreyIntoView(storeyId, name) {
   return runLoad3d();
 }
 
+let resetArmed = null;
 resetBtn.addEventListener('click', async () => {
+  // Clears selections, plan edits and results: ask once more, in place.
+  if (!resetArmed) {
+    resetBtn.textContent = 'กดอีกครั้งเพื่อล้างโครงการ';
+    resetBtn.classList.add('armed');
+    resetArmed = setTimeout(() => {
+      resetArmed = null;
+      resetBtn.textContent = 'เริ่มโครงการใหม่';
+      resetBtn.classList.remove('armed');
+    }, 4000);
+    return;
+  }
+  clearTimeout(resetArmed);
   try {
     await api('/api/project/reset', { method: 'POST' });
     window.location.reload();
@@ -1429,6 +1552,7 @@ generateSemanticBtn.addEventListener('click', async () => {
     currentValidation = null;
     currentBuild = null;
     renderSemanticSummary(result);
+    dock.select('model', { open: false });     // counts update; the viewer keeps its size
     setExportReady(true);
     setBuildOutputReady(false);
     document.getElementById('stepSemantic').classList.add('done');
@@ -1604,6 +1728,7 @@ validateBtn.addEventListener('click', async () => {
     const result = await api('/api/validate', { method: 'POST' });
     renderValidation(result);
     const gate = await refreshGate();
+    dock.select((result.severity_counts?.error || 0) ? 'engine' : 'checks');
     buildViswalkBtn.disabled = !(gate && gate.passed);
     const c = result.severity_counts || {};
     setMessage(`ตรวจสอบโมเดลเสร็จแล้ว · ข้อผิดพลาด ${c.error || 0} · ข้อควรระวัง ${c.warning || 0} · ข้อมูล ${c.info || 0}` +
@@ -1618,12 +1743,43 @@ validateBtn.addEventListener('click', async () => {
   }
 });
 
+function confirmBuild(checks) {
+  // Resolves true to build, false to go back to the list. Native <dialog>:
+  // focus is trapped while open and Esc closes it.
+  const dialog = document.getElementById('buildConfirm');
+  document.getElementById('buildConfirmLead').textContent =
+    `Geometry Engine สร้างไฟล์ได้ · มี ${checks.length} เรื่องที่ต้องตรวจหรือแก้ใน Viswalk หลังสร้างไฟล์`;
+  const list = document.getElementById('buildConfirmList');
+  list.innerHTML = '';
+  const shown = checks.slice(0, 6);
+  for (const item of shown) {
+    const li = document.createElement('li');
+    const title = document.createElement('span');
+    title.textContent = item.title;
+    const count = document.createElement('strong');
+    count.textContent = item.count;
+    li.append(title, count);
+    list.appendChild(li);
+  }
+  if (checks.length > shown.length) {
+    const li = document.createElement('li');
+    li.textContent = `และอีก ${checks.length - shown.length} เรื่อง (ดูในแท็บ "ตรวจใน Viswalk")`;
+    list.appendChild(li);
+  }
+  return new Promise(resolve => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'build'), { once: true });
+    dialog.returnValue = '';
+    dialog.showModal();
+    document.getElementById('buildConfirmGo').focus();
+  });
+}
+
 buildViswalkBtn.addEventListener('click', async () => {
   const checks = (currentGate?.items || []).filter(i => i.policy === 'check');
-  if (checks.length && !window.confirm(
-    `มี ${checks.length} เรื่องที่ต้องตรวจ/แก้ใน Viswalk หลังสร้างไฟล์:\n` +
-    checks.map(i => `• ${i.title} (${i.count})`).join('\n') +
-    '\n\nรายการนี้จะบันทึกเป็น checklist ข้างไฟล์ .inpx · สร้างไฟล์เลยไหม?')) return;
+  if (checks.length && !(await confirmBuild(checks))) {
+    dock.select('checks');
+    return;
+  }
   buildBusy = true;
   buildViswalkBtn.disabled = true;
   validateBtn.disabled = true;
@@ -1635,6 +1791,7 @@ buildViswalkBtn.addEventListener('click', async () => {
   try {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
+    dock.select('engine');
     setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
   } catch (error) {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
