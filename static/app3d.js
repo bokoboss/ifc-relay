@@ -235,6 +235,7 @@ function semanticPassesFilters(object) {
 
 function addSemanticPreview(model) {
   clearSemantic();
+  semanticWalls = Array.isArray(model.walls) ? model.walls : [];
   const levels = levelZMap(model);
   semanticLevelNames = new Map(
     (model.levels || []).filter(level => !level.generated && Number(level.key) < 900)
@@ -558,6 +559,64 @@ const focusGroup = new THREE.Group();     // "ดูตำแหน่ง" marke
 planOverlay.add(focusGroup);
 const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, exit: 0xb86c4d, measure: 0xd35400 };
 let manualEdits = [];
+let semanticWalls = [];            // centre-line walls of the model on screen (for the passage preview)
+
+// UX-02: the part of a wall segment inside a polygon, as [t0, t1] pieces of the
+// segment (0..1). Used to show where a passage will cut before the model is
+// regenerated; once it is, the walls on screen are already cut and nothing shows.
+function clipSegment(a, b, poly) {
+  const ts = [0, 1];
+  for (let i = 0; i < poly.length; i += 1) {
+    const c = poly[i], d = poly[(i + 1) % poly.length];
+    const r = [b[0] - a[0], b[1] - a[1]], q = [d[0] - c[0], d[1] - c[1]];
+    const den = r[0] * q[1] - r[1] * q[0];
+    if (Math.abs(den) < 1e-12) continue;
+    const t = ((c[0] - a[0]) * q[1] - (c[1] - a[1]) * q[0]) / den;
+    const u = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den;
+    if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  ts.sort((x, y) => x - y);
+  const inside = (pt) => {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const pieces = [];
+  for (let i = 0; i + 1 < ts.length; i += 1) {
+    const m = (ts[i] + ts[i + 1]) / 2;
+    if (ts[i + 1] - ts[i] > 1e-6 && inside([a[0] + (b[0] - a[0]) * m, a[1] + (b[1] - a[1]) * m])) pieces.push([ts[i], ts[i + 1]]);
+  }
+  return pieces;
+}
+
+function passageCuts(edit) {
+  const poly = edit.polygon.map(p => [Number(p[0]), Number(p[1])]);
+  const cuts = [];
+  for (const wall of semanticWalls) {
+    if (Number(wall.level_key) !== Number(edit.level_key)) continue;
+    const a = wall.start.map(Number), b = wall.end.map(Number);
+    for (const [t0, t1] of clipSegment(a, b, poly)) {
+      cuts.push({ wall, a: [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
+                  b: [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1] });
+    }
+  }
+  return cuts;
+}
+
+// The wall piece a passage will remove: a light band over the wall, wall-thick.
+function cutMark(cut, z) {
+  const dx = cut.b[0] - cut.a[0], dy = cut.b[1] - cut.a[1];
+  const len = Math.hypot(dx, dy);
+  const t = Math.max(Number(cut.wall.thickness || 0.2), 0.05) + 0.04;
+  const nx = -dy / len * t / 2, ny = dx / len * t / 2;
+  const mark = outline([[cut.a[0] + nx, cut.a[1] + ny], [cut.b[0] + nx, cut.b[1] + ny],
+                  [cut.b[0] - nx, cut.b[1] - ny], [cut.a[0] - nx, cut.a[1] - ny]], z, 0xf4f7f8, 0.95);
+  mark.children.forEach(c => { c.renderOrder += 3; });
+  return mark;
+}
 
 function levelZ(key) {
   return semanticLevelZ.get(Number(key)) || 0;
@@ -593,6 +652,13 @@ function drawEdits() {
     if (planActive && planLevelKey != null && Number(edit.level_key) !== planLevelKey) continue;
     const g = outline(edit.polygon, levelZ(edit.level_key) + 0.06, EDIT_COLORS[edit.kind] || 0x888888);
     g.userData.edit = edit;
+    if (edit.kind === 'passage') {
+      for (const cut of passageCuts(edit)) {
+        const mark = cutMark(cut, levelZ(edit.level_key) + 0.07);
+        mark.userData.passagePreview = true;
+        g.add(mark);
+      }
+    }
     editsGroup.add(g);
   }
 }
@@ -998,6 +1064,7 @@ window.IFCViewer = {
 
   loadSemantic(model) {
     addSemanticPreview(model || {});
+    drawEdits();
     if (planActive) requestAnimationFrame(() => rebuildSnapTargets());
     if (mode === 'simulation' || mode === 'overlay') {
       modelGroup.visible = mode === 'overlay';
@@ -1100,6 +1167,11 @@ window.IFCViewer = {
   },
   planHasFirstPoint() {
     return planPoints.length > 0;
+  },
+
+  // UX-02 test hook: wall pieces the drawn passages would still cut in the model on screen.
+  pendingPassageCuts() {
+    return manualEdits.filter(e => e.kind === 'passage').reduce((n, e) => n + passageCuts(e).length, 0);
   },
 
   setManualEdits(edits) {

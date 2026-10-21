@@ -282,6 +282,9 @@ a.link-btn {display:inline-flex;align-items:center;}
 .plan-tool.exit {box-shadow:inset 3px 0 0 var(--accent);}
 .plan-tool.active.walkable,.plan-tool.active.obstacle,.plan-tool.active.passage,.plan-tool.active.exit {box-shadow:none;}
 #planUndoBtn,#planRedoBtn {padding:3px 7px;}
+#autoPrepareBtn {padding:3px 7px;margin-left:4px;}
+#autoPrepareBtn[aria-pressed="true"] {background:var(--primary-soft);border-color:var(--primary);color:var(--primary-deep);}
+.stale-banner.auto .prepare-btn {display:none;}
 .plan-confirm {
   position:absolute;left:0;bottom:calc(100% + 6px);display:flex;align-items:center;gap:6px;white-space:nowrap;
   padding:6px 8px;background:var(--warning-soft);border:1px solid #e8cf9c;border-radius:var(--r-md);box-shadow:0 4px 12px rgba(17,37,44,.12);
@@ -610,3 +613,4 @@ button[aria-busy="true"]::after {
 @media (prefers-reduced-motion:reduce) {
   .job-spinner,button[aria-busy="true"]::after {animation:none;}
 }
+.stale-banner.auto > span::after {content:" · กำลังเตรียมใหม่อัตโนมัติ…";}
