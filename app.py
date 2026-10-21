@@ -164,8 +164,27 @@ def ifc_cache_path(
 
 
 def ifc_semantic_path(path: Path) -> Path:
+    """A new file per generation (ENG-03): a validation or build that started on
+    one generation can never be recorded for, or hash, a later one - the
+    state's semantic path changes and commit_build_status refuses."""
     token = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)
-    return SEMANTIC_DIR / f"{token}_geometry_v03.json"
+    return SEMANTIC_DIR / f"{token}_geometry_v03.{uuid.uuid4().hex[:12]}.json"
+
+
+SEMANTIC_GENERATIONS_KEPT = 4
+
+
+def prune_semantic_generations(current: Path) -> None:
+    """Keep the newest few generations of this IFC (a build may still read one)."""
+    stem = current.name.split("_geometry_v03.")[0]
+    older = sorted((p for p in current.parent.glob(f"{stem}_geometry_v03.*.json") if p != current),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in older[SEMANTIC_GENERATIONS_KEPT - 1:]:
+        p.unlink(missing_ok=True)
+
+
+def semantic_download_name(path: Path) -> str:
+    return path.name.split("_geometry_v03.")[0] + "_geometry_v03.json"
 
 
 def current_semantic_path_or_404() -> Path:
@@ -614,6 +633,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
             ),
         }
         store.write(state)
+        prune_semantic_generations(output_path)
 
     return {
         "status": "ok",
@@ -654,7 +674,7 @@ def download_ifc_semantic() -> FileResponse:
     return FileResponse(
         path,
         media_type="application/json",
-        filename=path.name,
+        filename=semantic_download_name(path),
     )
 
 
@@ -839,7 +859,7 @@ class GateNotPassed(Exception):
 
 
 def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validation: dict[str, Any],
-                         upload: dict[str, Any]) -> None:
+                         upload: dict[str, Any], semantic_file: Path) -> None:
     """Record what was built, under which gate decisions, next to the .inpx."""
     import hashlib
     from datetime import datetime as _dt
@@ -850,7 +870,6 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
     def _sha(p: Path | None) -> str | None:
         return hashlib.sha256(p.read_bytes()).hexdigest() if p is not None and p.is_file() else None
 
-    semantic_file = current_semantic_path_or_404()
     semantic_model = json.loads(semantic_file.read_text(encoding="utf-8"))
     info = semantic_model.get("ifc_semantic", {})
     manifest = {
@@ -890,8 +909,9 @@ def _gate_passed_quiet(state: dict[str, Any]) -> bool:
         return False
 
 
-def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = None) -> dict[str, Any]:
-    semantic_path = current_semantic_path_or_404()
+def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = None,
+                  semantic_path: Path | None = None) -> dict[str, Any]:
+    semantic_path = semantic_path or current_semantic_path_or_404()
     semantic_model = json.loads(semantic_path.read_text(encoding="utf-8"))
     if validation is None:
         build = state.get("build") or {}
@@ -937,13 +957,13 @@ def _build_current_semantic_in_vissim() -> dict[str, Any]:
     # Always validate immediately before build; do not trust an older validation state.
     try:
         validation = validate_engine_input(APP_DIR, PROJECT_ROOT, semantic_path)
-        gate = _current_gate(state, validation)
+        gate = _current_gate(state, validation, semantic_path)
         if not gate["passed"]:
             commit_build_status(semantic_path, {"status": "validated", "validation": validation,
                                                 "message": "Engineering gate not passed."})
             raise GateNotPassed(gate)
         result = build_vissim_model(APP_DIR, PROJECT_ROOT, semantic_path, source_name)
-        write_build_manifest(result, gate, validation, upload)
+        write_build_manifest(result, gate, validation, upload, semantic_path)
     except GateNotPassed as exc:
         raise HTTPException(status_code=409, detail="ยังสร้างไฟล์ไม่ได้ · " + gate_message_th(exc.gate))
     except HTTPException:

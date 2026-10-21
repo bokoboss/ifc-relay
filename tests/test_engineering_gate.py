@@ -127,3 +127,55 @@ def test_build_writes_viswalk_checklist(client, tmp_path, monkeypatch):
     assert any(c["id"] == "isolated_zones" for c in manifest["check_in_viswalk"])
     checklist = (tmp_path / "api_viswalk_checklist.md").read_text(encoding="utf-8")
     assert "พื้นที่ที่เดินไปไม่ถึง" in checklist and "api.ifc" in checklist
+
+
+def test_all_closed_passage_candidates_reach_the_checklist():
+    """ENG-01: no display cap on the list the checklist is built from."""
+    import ifc_semantic_service
+
+    assert not hasattr(ifc_semantic_service, "CANDIDATE_LIST_LIMIT")
+    cands = [{"global_id": f"OP{n}", "classification": "passage_candidate", "decision": "auto"} for n in range(520)]
+    sem = {"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": CLEAN_CONNECTIVITY,
+                            "opening_candidates": cands}}
+    item = next(i for i in evaluate_gate(sem, OK)["items"] if i["id"] == "passages_closed")
+    assert item["count"] == 520
+
+
+def test_passage_that_cut_no_wall_is_a_viswalk_check():
+    """ENG-02."""
+    sem = {"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": CLEAN_CONNECTIVITY,
+                            "manual_edits": [{"id": "E1", "kind": "passage"}, {"id": "E2", "kind": "passage"}],
+                            "manual_edits_status": {"E1": {"applied": True, "walls_cut": 0, "note": ""},
+                                                    "E2": {"applied": True, "walls_cut": 1, "note": ""}}}}
+    gate = evaluate_gate(sem, OK)
+    item = next(i for i in gate["items"] if i["id"] == "manual_passage_no_effect")
+    assert item["policy"] == "check" and item["identities"] == ["E1"] and gate["passed"]
+
+
+@requires_engine
+def test_result_of_an_older_generation_is_not_recorded(client, tmp_path):
+    """ENG-03: Generate A -> validate A starts -> Generate B -> A's result is refused,
+    and A's file is not overwritten by B."""
+    import app as app_module
+    from fastapi import HTTPException
+
+    b, ov = _two_storeys(with_stair=True)
+    path = b.write(tmp_path / "gen.ifc")
+    with open(path, "rb") as fh:
+        client.post("/api/import", files={"file": (path.name, fh)})
+    client.post("/api/analyze")
+    for guid, status in ov.items():
+        client.post("/api/selection", json={"global_id": guid, "status": status})
+    client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []})
+    client.post("/api/ifc/semantic")
+    path_a = app_module.current_semantic_path_or_404()
+    text_a = path_a.read_text(encoding="utf-8")
+    client.post("/api/ifc/semantic")
+    path_b = app_module.current_semantic_path_or_404()
+    assert path_b != path_a and path_a.read_text(encoding="utf-8") == text_a
+    with pytest.raises(HTTPException) as exc:
+        app_module.commit_build_status(path_a, {"status": "validated"})
+    assert exc.value.status_code == 409
+    app_module.commit_build_status(path_b, {"status": "validated"})
+    r = client.get("/api/ifc/semantic/download")
+    assert r.status_code == 200 and r.headers["content-disposition"].endswith('_gen_geometry_v03.json"')
