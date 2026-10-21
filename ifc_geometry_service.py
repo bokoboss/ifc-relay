@@ -205,7 +205,8 @@ def extract_ifc_geometry(
         raise ValueError(
             f"IFC geometry request contains {len(elements)} meshable elements, "
             f"above safety limit {max_elements}. Use simulation-relevant or "
-            "storey-filtered loading instead of full-model loading."
+            "storey-filtered loading instead of full-model loading "
+            "(preparing the pedestrian model: raise VBB_SEMANTIC_MAX_ELEMENTS if the computer has the memory)."
         )
 
     settings = ifcopenshell.geom.settings()
