@@ -216,6 +216,26 @@ def test_polygon_snap_undo_redo(page, tmp_path):
     page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
     page.keyboard.press("Control+y")
     page.wait_for_selector("#editsList .edit-row")
+
+    # Delete from the list, undo (re-added under a new id), undo again: the older
+    # "added" step must find the re-added edit.
+    page.click("#editsList .edit-row button:has-text('ลบ')")
+    page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
+    page.click("#planUndoBtn")
+    page.wait_for_selector("#editsList .edit-row")
+    page.click("#planUndoBtn")
+    page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
+    page.click("#planRedoBtn")
+    page.wait_for_selector("#editsList .edit-row")
+    page.wait_for_function("!document.getElementById('planUndoBtn').disabled")
+
+    # The history survives a reload.
+    page.reload()
+    page.wait_for_function("document.getElementById('editsList').children.length === 1", timeout=60000)
+    page.wait_for_function("!document.getElementById('planUndoBtn').disabled")
+    page.evaluate("document.getElementById('planUndoBtn').click()")
+    page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
+    assert not page.is_disabled("#planRedoBtn")
     assert page.errors == []
 
 

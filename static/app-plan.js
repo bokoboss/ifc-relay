@@ -77,6 +77,59 @@ const editHistory = { undo: [], redo: [] };
 function updateUndoButtons() {
   document.getElementById('planUndoBtn').disabled = !editHistory.undo.length;
   document.getElementById('planRedoBtn').disabled = !editHistory.redo.length;
+  saveHistory();
+}
+
+// Undo/redo survive a reload (per browser). Edits live on the server, so the
+// saved history is replayed against the current edit list first; if it no
+// longer fits (project reset, edits changed in another tab) it is dropped.
+const HISTORY_KEY = 'ifcrelay.editHistory';
+const HISTORY_MAX = 50;
+
+function saveHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({
+      undo: editHistory.undo.slice(-HISTORY_MAX), redo: editHistory.redo.slice(-HISTORY_MAX),
+    }));
+  } catch { /* storage blocked: history stays in memory */ }
+}
+
+function historyFits(saved, edits) {
+  const uidOf = step => step?.edit?.uid;
+  if (![...saved.undo, ...saved.redo].every(step => uidOf(step) && ['add', 'delete'].includes(step.type))) return false;
+  let present = new Set(edits.map(e => e.uid));
+  for (const step of [...saved.undo].reverse()) {          // undoing walks back in time
+    const has = present.has(uidOf(step));
+    if (step.type === 'add' ? !has : has) return false;
+    if (step.type === 'add') present.delete(uidOf(step)); else present.add(uidOf(step));
+  }
+  present = new Set(edits.map(e => e.uid));
+  for (const step of [...saved.redo].reverse()) {          // redoing walks forward again
+    const has = present.has(uidOf(step));
+    if (step.type === 'add' ? has : !has) return false;
+    if (step.type === 'add') present.add(uidOf(step)); else present.delete(uidOf(step));
+  }
+  return true;
+}
+
+let historyRestored = false;
+function restoreHistory(edits) {
+  if (historyRestored) return;          // once per page load; afterwards memory is the truth
+  historyRestored = true;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null'); } catch { saved = null; }
+  const ok = saved && Array.isArray(saved.undo) && Array.isArray(saved.redo) && historyFits(saved, edits);
+  editHistory.undo = ok ? saved.undo : [];
+  editHistory.redo = ok ? saved.redo : [];
+  updateUndoButtons();
+}
+
+// Re-adding an edit (undo of a delete, redo of an add) gives it a new id and uid:
+// point every other step at the new record so older steps still find it.
+function remapEdit(oldEdit, newEdit) {
+  for (const step of [...editHistory.undo, ...editHistory.redo]) {
+    if (step.edit?.uid === oldEdit.uid) step.edit = newEdit;
+  }
 }
 
 function segmentHitsPolygon(a, b, poly) {
@@ -166,6 +219,7 @@ async function undoEdit() {
       editHistory.redo.push(step);
     } else {
       const again = await saveEdit(asShape(step.edit), { record: false });
+      remapEdit(step.edit, again);
       editHistory.redo.push({ type: 'delete', edit: again });
     }
     setMessage('ย้อนการแก้ไขแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
@@ -181,6 +235,7 @@ async function redoEdit() {
   try {
     if (step.type === 'add') {
       const again = await saveEdit(asShape(step.edit), { record: false });
+      remapEdit(step.edit, again);
       editHistory.undo.push({ type: 'add', edit: again });
     } else {
       await removeEdit(step.edit, { record: false });
@@ -331,7 +386,9 @@ function renderEdits(edits) {
 
 async function refreshEdits() {
   try {
-    renderEdits((await api('/api/edits')).edits);
+    const { edits } = await api('/api/edits');
+    renderEdits(edits);
+    restoreHistory(edits || []);
   } catch (error) {
     // optional panel
   }
