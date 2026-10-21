@@ -10,7 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+from tests.ui_sources import app_js  # noqa: E402
+
+JS = app_js()
 STUDIO = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
 
 

@@ -119,13 +119,20 @@ install.bat  start.bat  verify_vissim.bat   Windows entry points (no .exe)
 app.py                      FastAPI server (uvicorn app:app)
 ifc_service.py              IFC audit and storey/mesh listing
 ifc_geometry_service.py     IFC geometry extraction
-ifc_semantic_service.py     walkable areas, obstacles, openings, key ranges
+ifc_semantic_service.py     pedestrian model build: levels, floors, walls, stairs, key ranges
+semantic_geometry.py        polygon helpers (footprints, floor merging, holes)
+semantic_walls.py           wall axes, door/opening shapes, multi-storey wall copies
+semantic_obstacles.py       columns, obstacles, curtain-wall panels
+connectivity_service.py     walking-zone connectivity (geometry-only)
+gate_service.py             before-build list: what stops the build, what to check in Viswalk
+manual_edits.py             engineer's plan edits (floor, obstacle, passage, exit)
 ifc_vertical_service.py     stairs/ramps, landings, up-direction review
 revision_service.py         carry review decisions across IFC revisions
 vissim_build_service.py     validation and build orchestration
 vissim_build_adapter.py     subprocess adapter around the Geometry Engine (COM)
 state_store.py  project_paths.py  fixture_paths.py
 static/                     browser UI (Three.js runtime downloaded to static/vendor/)
+                            app.js core + app-plan / app-model / app-review / app-build.js, app3d.js viewer
 engine/                     bundled Geometry Engine v0.3
 scripts/                    installer, launcher, verify and IFC dry-run scripts
 tests/                      pytest suite on synthetic IFC (runs in CI)
