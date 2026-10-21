@@ -58,3 +58,16 @@ def test_engineer_can_include_an_off_level_slab(tmp_path):
     out = {x["global_id"]: x["decision"] for x in sem["ifc_semantic"]["off_level_slabs"]}
     assert out == {sun.GlobalId: "auto", mezz.GlobalId: "include"}
     assert sem["ifc_semantic"]["summary"]["off_level_slabs_excluded"] == 1
+
+
+def test_flattened_step_is_a_viswalk_check(tmp_path):
+    """ENG-02: a 0.25-0.40 m step merged into the floor is listed, not silent."""
+    from gate_service import evaluate_gate
+
+    b, sun, wet, mezz = _model()
+    sem = semantic_for(b.write(tmp_path / "s.ifc"))
+    steps = {s["global_id"]: s for s in sem["ifc_semantic"]["flattened_steps"]}
+    assert wet.GlobalId in steps and abs(steps[wet.GlobalId]["offset_m"] + 0.27) < 0.01
+    gate = evaluate_gate(sem, {"issues": [], "severity_counts": {}, "build_allowed": True})
+    item = next(i for i in gate["items"] if i["id"] == "floor_step_flattened")
+    assert item["policy"] == "check" and wet.GlobalId in item["identities"]

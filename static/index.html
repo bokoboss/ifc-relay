@@ -60,9 +60,9 @@
               เตรียมโมเดลคนเดิน
             </button>
             <button id="validateBtn" class="secondary-btn" disabled
-              title="ตรวจ Geometry และปัญหาก่อนส่งออกเป็นไฟล์ Viswalk">ตรวจสอบโมเดล</button>
+              title="ให้ Geometry Engine ตรวจว่าสร้างไฟล์จากโมเดลนี้ได้หรือไม่ และรวบรวมเรื่องที่ต้องไปตรวจใน Viswalk · ไม่ใช่การรับรองโมเดล">ตรวจ Geometry</button>
             <button id="buildViswalkBtn" class="build-btn" disabled
-              title="สร้างไฟล์ .inpx ผ่าน Vissim/Viswalk ในเครื่องหลังตรวจสอบโมเดล">สร้างไฟล์ Viswalk <svg class="icon" aria-hidden="true"><use href="#i-build"/></svg></button>
+              title="สร้างไฟล์ .inpx ผ่าน Vissim/Viswalk ในเครื่องหลังตรวจ Geometry">สร้างไฟล์ Viswalk <svg class="icon" aria-hidden="true"><use href="#i-build"/></svg></button>
           </div>
           <div class="message-panel" role="status" aria-live="polite">
             <span id="messageText">พร้อมทำงาน · เลือกไฟล์ BIM เพื่อเริ่มต้น</span>
@@ -109,7 +109,7 @@
       </section>
 
       <div class="workbench">
-      <section id="explorerSection" class="explorer-layout" aria-label="พื้นที่ทำงานตรวจสอบโมเดล">
+      <section id="explorerSection" class="explorer-layout" aria-label="พื้นที่ทำงานโมเดล">
         <aside class="panel explorer-left">
           <div class="panel-heading tight">
             <div>
@@ -301,7 +301,7 @@
               <div id="gateList" class="gate-list"></div>
               <div id="gateSummary" class="gate-summary"></div>
             </div>
-            <p class="dock-empty">ยังไม่ได้ตรวจสอบโมเดล · กด "ตรวจสอบโมเดล" แล้วรายการที่ต้องตรวจใน Viswalk จะอยู่ที่นี่</p>
+            <p class="dock-empty">ยังไม่ได้ตรวจ Geometry · กด "ตรวจ Geometry" แล้วรายการที่ต้องตรวจใน Viswalk จะอยู่ที่นี่</p>
           </div>
           <div class="dock-panel" data-panel="model" role="tabpanel">
           <section id="semanticSection" class="panel hidden semantic-section">

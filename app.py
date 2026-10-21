@@ -47,10 +47,43 @@ app = FastAPI(
     title="IFC Relay",
     version=APP_VERSION,
     description=(
-        "Large-model IFC Explorer, consolidated semantic geometry generation, "
-        "validation, and Vissim/Viswalk COM build workflow."
+        "IFC → INPX Model Builder: review IFC geometry, refine pedestrian areas and build "
+        "an INPX network for PTV Viswalk through Vissim COM (independent tool, not a PTV product)."
     ),
 )
+
+
+# ---- Local API hardening (SEC-01) --------------------------------------------
+# The app listens on 127.0.0.1, but any web page open in the same browser can
+# still send requests to it. Accept only requests addressed to this machine
+# (blocks DNS rebinding) and refuse state changes coming from another site.
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1", "testserver"} | {
+    h.strip() for h in os.environ.get("VBB_ALLOWED_HOSTS", "").split(",") if h.strip()}
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _host_only(value: str) -> str:
+    value = value.strip().lower()
+    if value.startswith("["):
+        return value.split("]")[0] + "]"
+    return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+
+@app.middleware("http")
+async def local_only(request, call_next):
+    from fastapi.responses import JSONResponse
+    from urllib.parse import urlsplit
+
+    host = _host_only(request.headers.get("host", ""))
+    if host not in _LOCAL_HOSTS:
+        return JSONResponse({"detail": "IFC Relay accepts requests to this computer only."}, status_code=403)
+    if request.method not in _SAFE_METHODS:
+        origin = request.headers.get("origin")
+        if origin and origin != "null" and _host_only(urlsplit(origin).netloc) not in _LOCAL_HOSTS:
+            return JSONResponse({"detail": "Request from another site refused."}, status_code=403)
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Request from another site refused."}, status_code=403)
+    return await call_next(request)
 
 def state_transaction(func):
     """Run a short state-changing endpoint as one read-modify-write (F-07)."""

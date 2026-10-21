@@ -86,7 +86,7 @@ The proven Geometry Engine v0.3 is bundled in `engine/` (private repository). Th
 
 Structural IFC models may contain no doors or other information needed to establish pedestrian connections. Such gaps must be identified and reviewed, **not silently inferred as valid passages**. Multi-level stair/ramp/elevator extraction is not yet production-ready.
 
-One copy of the app holds **one project for one engineer** (state in `runtime\`). Changes from several browser tabs are serialized and not lost, a long job never writes its result over a model that changed meanwhile, and only one Vissim build runs at a time; but tabs still share the same project. To work on two projects at once, use two copies of the app folder and start the second on another port (`scripts\start.ps1 -Port 8766`). The server listens on 127.0.0.1 only and has no login, so it must not be exposed to a network.
+One copy of the app holds **one project for one engineer** (state in `runtime\`). Changes from several browser tabs are serialized and not lost, a long job never writes its result over a model that changed meanwhile, and only one Vissim build runs at a time; but tabs still share the same project. To work on two projects at once, use two copies of the app folder and start the second on another port (`scripts\start.ps1 -Port 8766`). The server listens on 127.0.0.1 only, answers only requests addressed to this computer and refuses changes sent from other web sites; it has no login, so it must not be exposed to a network.
 
 ## Quick start on Windows (no .exe)
 

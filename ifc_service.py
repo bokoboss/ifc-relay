@@ -51,6 +51,8 @@ SIMULATION_MESH_TYPES = (
     "IfcFurnishingElement",
     "IfcBuildingElementProxy",
     "IfcCurtainWall",
+    "IfcPlate",      # curtain-wall glazing and panels carry the geometry, not IfcCurtainWall
+    "IfcMember",
 )
 
 
@@ -119,6 +121,14 @@ def is_a(entity: Any, ifc_type: str) -> bool:
         return str(entity.is_a()) == ifc_type
 
 
+def _aggregate_parent_is(entity: Any, ifc_class: str) -> bool:
+    for rel in getattr(entity, "Decomposes", None) or []:
+        parent = getattr(rel, "RelatingObject", None)
+        if parent is not None and is_a(parent, ifc_class):
+            return True
+    return False
+
+
 def recommendation(entity: Any) -> tuple[str, str, str]:
     """Return (status, Viswalk mapping, simulation role)."""
     if is_a(entity, "IfcBuildingStorey"):
@@ -176,6 +186,17 @@ def recommendation(entity: Any) -> tuple[str, str, str]:
 
     if is_a(entity, "IfcRailing"):
         return "include", "Obstacle / boundary", "obstacle"
+
+    # PTV's BIM import turns IfcPlate into an obstacle; curtain-wall frames block
+    # walking the same way. Plates lying in the floor or overhead are dropped later
+    # by height (ifc_semantic_service).
+    if is_a(entity, "IfcPlate"):
+        return "include", "Obstacle (plate / glazing panel)", "obstacle"
+
+    if is_a(entity, "IfcMember"):
+        if _aggregate_parent_is(entity, "IfcCurtainWall"):
+            return "include", "Obstacle (curtain-wall frame)", "obstacle"
+        return "review", "Member: obstacle only if it blocks walking", "review"
 
     for ifc_type in EXCLUDE_TYPES:
         if is_a(entity, ifc_type):

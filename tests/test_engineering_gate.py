@@ -179,3 +179,14 @@ def test_result_of_an_older_generation_is_not_recorded(client, tmp_path):
     app_module.commit_build_status(path_b, {"status": "validated"})
     r = client.get("/api/ifc/semantic/download")
     assert r.status_code == 200 and r.headers["content-disposition"].endswith('_gen_geometry_v03.json"')
+
+
+def test_checklist_reads_codes_not_warning_text():
+    """ARCH-01: rewording a warning cannot change the checklist."""
+    sem = {"ifc_semantic": {"summary": {}, "connectivity": CLEAN_CONNECTIVITY,
+                            "warnings": ["Tür XYZ hat keine Öffnung"],   # any wording
+                            "diagnostics": [{"code": "door_not_converted", "ids": ["2O2Fr$t4X7Zf8NOew3FLOH"]},
+                                            {"code": "multi_storey_no_doors", "ids": [], "count": 3}]}}
+    items = {i["id"]: i for i in evaluate_gate(sem, OK)["items"]}
+    assert items["doors_not_converted"]["identities"] == ["2O2Fr$t4X7Zf8NOew3FLOH"]
+    assert items["multi_storey_no_doors"]["count"] == 3

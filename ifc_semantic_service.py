@@ -195,6 +195,11 @@ def precision_clean_polygon(poly: Polygon, grid_size: float = 0.005) -> Polygon 
 # millimetres - splits the walking ground and pedestrians cannot cross it.
 # Gaps narrower than this between slab pieces of one level are closed.
 WALKABLE_GAP_CLOSE = 0.05
+# IfcPlate/IfcMember block walking only where they stand in the walking zone:
+# a plate whose top is below this (a floor deck) or whose bottom is above this
+# (a canopy, a ceiling panel) relative to its level is not an obstacle.
+PLATE_MIN_TOP = 0.30
+PLATE_MAX_BOTTOM = 2.00
 
 
 def merge_walkable_components(components: list[Polygon], grid_size: float = 0.005,
@@ -776,6 +781,13 @@ def build_semantic_model(
     included_door_count = 0
     door_openings_applied = 0
 
+    # Machine-readable findings for the checklist (ARCH-01): code + object ids +
+    # metrics. The English warnings stay for people; nothing parses them.
+    diagnostics: list[dict[str, Any]] = []
+
+    def diag(code: str, ids: list[str] | None = None, **metrics: Any) -> None:
+        diagnostics.append({"code": code, "ids": [str(i) for i in (ids or []) if i], **metrics})
+
     for door in model.by_type("IfcDoor"):
         if effective_status(door, selection_overrides) != "include":
             continue
@@ -785,12 +797,14 @@ def build_semantic_model(
             warnings.append(
                 f"Door {global_id(door) or door.id()} is included but has no IfcRelFillsElement opening relationship."
             )
+            diag("door_not_converted", [global_id(door) or str(door.id())], reason="no_opening_relationship")
             continue
         host = opening_to_host.get(int(opening.id()))
         if host is None or not is_a(host, "IfcWall"):
             warnings.append(
                 f"Door {global_id(door) or door.id()} opening is not hosted by an IfcWall."
             )
+            diag("door_not_converted", [global_id(door) or str(door.id())], reason="host_not_wall")
             continue
 
         opening_shape = _opening_shape(model, opening)
@@ -816,6 +830,7 @@ def build_semantic_model(
             warnings.append(
                 f"Door {global_id(door) or door.id()} has no usable opening or mesh geometry."
             )
+            diag("door_not_converted", [global_id(door) or str(door.id())], reason="no_geometry")
             continue
 
         overall_width = getattr(door, "OverallWidth", None)
@@ -1023,6 +1038,7 @@ def build_semantic_model(
     # Pass 2: route storey floors vs. intermediate landings vs. off-level slabs.
     intermediate_landings: list[dict[str, Any]] = []
     off_level_slabs: list[dict[str, Any]] = []
+    flattened_steps: list[dict[str, Any]] = []
     for cand in slab_candidates:
         level_key = cand["level_key"]
         datum = level_datum_by_key[level_key]
@@ -1067,6 +1083,9 @@ def build_semantic_model(
                 f"Floor slab {cand['guid'] or cand['slab'].id()} top ({cand['top_z']:.3f} m) is "
                 f"{offset:+.3f} m from its storey floor; merged into level {level_key}. Review whether it is a mezzanine or step."
             )
+            # A real step people cannot walk over, flattened onto the floor (ENG-02).
+            flattened_steps.append({"global_id": cand["guid"], "level_key": level_key,
+                                    "offset_m": round(offset, 3), "area_m2": area})
 
         walkable_source_slab_count += 1
         walkable_components_by_level[level_key].extend(cand["components"])
@@ -1347,6 +1366,7 @@ def build_semantic_model(
     # ---------------------------------------------------------
     columns: list[dict[str, Any]] = []
     obstacles: list[dict[str, Any]] = []
+    plates_off_walking_height = 0
     column_key = 1301
     obstacle_key = 1401
 
@@ -1396,6 +1416,10 @@ def build_semantic_model(
         z_offset = bbmin[2] - level_z_by_key[level_key]
         if abs(z_offset) < 1e-5:
             z_offset = 0.0
+        if (is_a(element, "IfcPlate") or is_a(element, "IfcMember")) and (
+                bbmax[2] - level_z_by_key[level_key] < PLATE_MIN_TOP or z_offset > PLATE_MAX_BOTTOM):
+            plates_off_walking_height += 1
+            continue
 
         if is_a(element, "IfcColumn"):
             compactness = 0.0
@@ -1456,6 +1480,11 @@ def build_semantic_model(
                 }
             )
             obstacle_key += 1
+    if plates_off_walking_height:
+        warnings.append(
+            f"{plates_off_walking_height} IfcPlate/IfcMember element(s) not at walking height "
+            f"(top below {PLATE_MIN_TOP:.2f} m or bottom above {PLATE_MAX_BOTTOM:.2f} m over their level); not exported as obstacles."
+        )
 
     # ---------------------------------------------------------
     # Vertical connections (geometry-aware, one record per flight)
@@ -1519,6 +1548,7 @@ def build_semantic_model(
             f"{multi_closed} multi-storey wall copies are exported without door gaps on the upper storeys "
             "(the lower storey's doors do not carry up). Review doors on those storeys."
         )
+        diag("multi_storey_no_doors", [], count=int(multi_closed))
 
     # Engineer's manual plan edits (added floor / obstacles / passages).
     from manual_edits import apply_manual_edits
@@ -1635,6 +1665,8 @@ def build_semantic_model(
             # Full list: the Viswalk checklist is built from it. The UI pages it.
             "opening_candidates": opening_candidates,
             "off_level_slabs": off_level_slabs,
+            "flattened_steps": flattened_steps,
+            "diagnostics": diagnostics,
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
             "manual_edits_applied": manual_applied,

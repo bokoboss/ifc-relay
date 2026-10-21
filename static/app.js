@@ -2006,11 +2006,14 @@ validateBtn.addEventListener('click', async () => {
     dock.select((result.severity_counts?.error || 0) ? 'engine' : 'checks');
     buildViswalkBtn.disabled = !(gate && gate.passed);
     const c = result.severity_counts || {};
-    setMessage(`ตรวจสอบโมเดลเสร็จแล้ว · ข้อผิดพลาด ${c.error || 0} · ข้อควรระวัง ${c.warning || 0} · ข้อมูล ${c.info || 0}` +
-      ((c.error || 0) ? ' · ต้องแก้ข้อผิดพลาดก่อนสร้างไฟล์ Viswalk' : ' · ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)') +
-      (gate && gate.to_check?.length ? ` · มี ${gate.to_check.length} เรื่องที่ต้องตรวจใน Viswalk` : ''));
+    // "Engine passed" is not "model verified" (UX-01): say which one this is.
+    setMessage((c.error || 0)
+      ? `ตรวจ Geometry: Engine สร้างไฟล์จากโมเดลนี้ไม่ได้ (${c.error} ข้อผิดพลาด) · ดูแท็บผล Engine`
+      : `ตรวจ Geometry: Engine สร้างไฟล์ได้` +
+        (gate && gate.to_check?.length ? ` · ยังมี ${gate.to_check.length} เรื่องต้องตรวจใน Viswalk` : '') +
+        ' · ยังไม่ใช่การรับรองโมเดล');
   } catch (error) {
-    setMessage(`ตรวจสอบโมเดลไม่สำเร็จ: ${error.message}`);
+    setMessage(`ตรวจ Geometry ไม่สำเร็จ: ${error.message}`);
   } finally {
     validationBusy = false;
     validateBtn.disabled = false;

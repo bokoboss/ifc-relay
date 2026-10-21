@@ -37,7 +37,8 @@ def test_set_message_literals_are_thai():
 
 
 def test_validation_message_separates_geometry_check_from_viswalk_check():
-    assert "ผ่านการตรวจ Geometry แล้ว (ยังต้องตรวจผลใน Viswalk)" in APP_JS
+    assert "Engine สร้างไฟล์ได้" in APP_JS and "ยังไม่ใช่การรับรองโมเดล" in APP_JS
+    assert "ตรวจสอบโมเดล" not in INDEX                    # the button says "ตรวจ Geometry"
 
 
 def test_viewer_badge_follows_mode():
