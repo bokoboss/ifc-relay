@@ -131,7 +131,7 @@ def test_semantic_preparation_activates_simulation_preview_automatically() -> No
 
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
-    assert "/static/app.css?v=7" in dom.anchors                    # one stylesheet, fonts bundled
+    assert "/static/app.css?v=8" in dom.anchors                    # one stylesheet, fonts bundled
     assert (ROOT / "static" / "fonts" / "OFL.txt").exists()
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
@@ -139,3 +139,11 @@ def test_studio_css_offline_and_responsive() -> None:
     assert "https://" not in STUDIO
     assert ".viewer-host" in STUDIO
     assert ".explorer-layout" in STUDIO
+
+
+def test_viewer_legend_matches_model_colours() -> None:
+    """The legend swatches use the colours the viewer draws with."""
+    view3d = (ROOT / "static" / "app3d.js").read_text(encoding="utf-8")
+    for hex6 in ("77a7c8", "4f5962", "b18a57", "1f8a70", "d98e04", "c0392b", "2e9e5b", "34495e", "0e9fb6", "b86c4d"):
+        assert f"--c:#{hex6}" in HTML and f"0x{hex6}" in view3d
+    assert 'id="viewerLegend"' in HTML and "viewerLegend" in JS

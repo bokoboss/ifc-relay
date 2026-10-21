@@ -614,3 +614,24 @@ button[aria-busy="true"]::after {
   .job-spinner,button[aria-busy="true"]::after {animation:none;}
 }
 .stale-banner.auto > span::after {content:" · กำลังเตรียมใหม่อัตโนมัติ…";}
+
+/* viewer legend: what the colours of the pedestrian model mean */
+.viewer-legend {
+  position:absolute;z-index:5;right:12px;top:12px;max-width:calc(100% - 24px);
+  background:rgba(255,255,255,.94);border:1px solid var(--divider);border-radius:var(--r-sm);
+  font-size:12px;color:var(--ink-700);
+}
+.viewer-legend summary {cursor:pointer;padding:4px 10px;font-weight:600;list-style:none;user-select:none;}
+.viewer-legend summary::-webkit-details-marker {display:none;}
+.viewer-legend summary::after {content:"";display:inline-block;width:5px;height:5px;margin:0 0 2px 7px;
+  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);}
+.viewer-legend[open] summary::after {transform:rotate(-135deg);margin-bottom:-1px;}
+.viewer-legend ul {list-style:none;margin:0;padding:2px 10px 8px;display:grid;gap:4px;}
+.viewer-legend ul + ul {border-top:1px solid var(--divider);padding-top:7px;}
+.viewer-legend li {display:flex;align-items:center;gap:7px;white-space:nowrap;}
+.viewer-legend i {flex:0 0 auto;width:14px;height:10px;border-radius:2px;background:var(--c);}
+.viewer-legend i.line {height:10px;background:color-mix(in srgb,var(--c) 28%,transparent);border:1.5px solid var(--c);}
+.viewer-legend i.arrow {height:3px;border-radius:2px;position:relative;}
+.viewer-legend i.arrow::after {content:"";position:absolute;right:-1px;top:-3px;border-left:5px solid var(--c);
+  border-top:4.5px solid transparent;border-bottom:4.5px solid transparent;}
+.legend-cut {display:inline-block;width:12px;height:6px;background:#f4f7f8;border:1px solid #9aa7ad;border-radius:1px;margin:0 2px;}

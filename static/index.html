@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=7" />
+  <link rel="stylesheet" href="/static/app.css?v=8" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -210,6 +210,23 @@
               <span class="viewport-ident-mark"></span>
               <span id="viewportIdentLabel">3D <small>· IFC ต้นฉบับ</small></span>
             </div>
+            <details id="viewerLegend" class="viewer-legend hidden">
+              <summary>สัญลักษณ์</summary>
+              <ul>
+                <li><i style="--c:#77a7c8"></i>พื้นที่เดิน</li>
+                <li><i style="--c:#4f5962"></i>ผนัง · เสา · สิ่งกีดขวาง</li>
+                <li><i style="--c:#b18a57"></i>บันได · ทางลาด</li>
+                <li><i class="arrow" style="--c:#1f8a70"></i>ทิศขึ้นบันได</li>
+                <li><i class="arrow" style="--c:#d98e04"></i>ทิศบันไดต้องตรวจ</li>
+                <li><i style="--c:#c0392b"></i>เดินไปไม่ถึง</li>
+              </ul>
+              <ul class="legend-edits">
+                <li><i class="line" style="--c:#2e9e5b"></i>พื้นที่เดินเพิ่ม</li>
+                <li><i class="line" style="--c:#34495e"></i>สิ่งกีดขวางเพิ่ม</li>
+                <li><i class="line" style="--c:#0e9fb6"></i>ทางผ่าน <span class="legend-cut"></span> ผนังที่จะถูกตัด</li>
+                <li><i class="line" style="--c:#b86c4d"></i>ทางออก</li>
+              </ul>
+            </details>
             <section id="jobPanel" class="job-panel hidden" role="status" aria-live="polite" aria-label="ความคืบหน้าการสร้างไฟล์">
               <div class="job-head">
                 <span class="job-spinner" aria-hidden="true"></span>
@@ -541,6 +558,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=052" defer></script>
+  <script src="/static/app.js?v=053" defer></script>
 </body>
 </html>
