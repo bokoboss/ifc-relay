@@ -441,6 +441,62 @@ def build_raw_obstacle(item):
 # VERTICAL CONNECTION
 # ============================================================
 
+# Vissim accepts a ramp/stair only if its polygon is a rectangle, and it is
+# strict about it. Corners of a rotated flight written with 4 decimals
+# (vissim_wkt) are no longer exactly perpendicular, so Vissim refuses them
+# ("Ramp has to be a rectangle"). Rebuild the rectangle on the same 0.1 mm
+# grid with integer side vectors u = (p, q) and w = (-q, p): perpendicular
+# exactly, whatever the rounding.
+RAMP_GRID = 1e-4
+RAMP_MAX_VECTOR = 150          # |u| in grid units: angle vs length resolution
+
+
+def exact_rectangle(geometry):
+    coords = list(geometry.exterior.coords)[:4]
+    (x0, y0), (x1, y1), _, (x3, y3) = coords
+    ex, ey = x1 - x0, y1 - y0
+    fx, fy = x3 - x0, y3 - y0
+    length = math.hypot(ex, ey)
+    width = math.hypot(fx, fy)
+    if length <= 0 or width <= 0:
+        return geometry
+    angle = math.atan2(ey, ex)
+    side = 1 if ex * fy - ey * fx >= 0 else -1
+    best = None
+    candidates = set()
+    for r in range(1, RAMP_MAX_VECTOR + 1):
+        cp, cq = r * math.cos(angle), r * math.sin(angle)
+        for p in (math.floor(cp), math.ceil(cp)):
+            for q in (math.floor(cq), math.ceil(cq)):
+                candidates.add((p, q))
+    for p, q in sorted(candidates):
+        if True:
+            norm = math.hypot(p, q)
+            if norm < 1 or norm > RAMP_MAX_VECTOR or math.gcd(abs(p), abs(q)) != 1:
+                continue
+            turn = abs((math.atan2(q, p) - angle + math.pi) % (2 * math.pi) - math.pi)
+            if turn > 0.05:
+                continue
+            step = norm * RAMP_GRID
+            m = max(1, round(length / step))
+            k = max(1, round(width / step))
+            score = turn * max(length, width) + abs(m * step - length) + abs(k * step - width)
+            if best is None or score < best[0]:
+                best = (score, p, q, m, k)
+    if best is None:
+        return geometry
+    _, p, q, m, k = best
+    i0, j0 = round(x0 / RAMP_GRID), round(y0 / RAMP_GRID)
+    wp, wq = -q * side, p * side
+    corners = [
+        (i0, j0),
+        (i0 + m * p, j0 + m * q),
+        (i0 + m * p + k * wp, j0 + m * q + k * wq),
+        (i0 + k * wp, j0 + k * wq),
+    ]
+    return Polygon([(i * RAMP_GRID, j * RAMP_GRID) for i, j in corners])
+
+
 def build_vertical_connection(item, transform):
     key = int(item["key"])
     name = item.get(
@@ -490,6 +546,8 @@ def build_vertical_connection(item, transform):
         geometry,
         transform,
     )
+    if len(points) == 4:
+        geometry = exact_rectangle(geometry)
 
     start_level = int(
         item["start_level"]
