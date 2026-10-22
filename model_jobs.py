@@ -26,6 +26,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -42,6 +43,54 @@ LOG_PATH: Path | None = None          # set by the app
 
 class JobFailed(RuntimeError):
     """A heavy job could not finish; the message is shown to the engineer."""
+
+
+class JobCancelled(RuntimeError):
+    """The engineer cancelled the job (queued or running)."""
+
+
+# What each job is called on screen.
+JOB_TITLES = {
+    "audit": "ตรวจ IFC",
+    "revision": "เทียบกับ IFC รุ่นก่อน",
+    "geometry": "สร้างรูปทรง 3D",
+    "semantic": "เตรียมโมเดลคนเดิน",
+    "stairs": "อ่านรายการบันได",
+}
+
+# Jobs waiting or running, for the progress panel (GET /api/jobs).
+_jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
+
+
+def active_jobs() -> list[dict[str, Any]]:
+    now = time.time()
+    with _jobs_lock:
+        return [{"id": j["id"], "job": j["job"], "title": j["title"], "state": j["state"],
+                 "elapsed_sec": round(now - j["submitted"], 1), "est_mb": j["est_mb"],
+                 "files": j["files"], "can_cancel": j["state"] in ("queued", "running")}
+                for j in _jobs.values()]
+
+
+def cancel(job_id: str) -> bool:
+    """Cancel a queued job, or stop a running worker process. Results are only
+    ever written atomically, so a stopped job leaves nothing half-written."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job or job["state"] not in ("queued", "running"):
+            return False
+        job["cancelled"] = True
+        job["state"] = "cancelling"
+        pool = job.get("pool")
+    with SCHEDULER._cond:
+        SCHEDULER._cond.notify_all()
+    if pool is not None:
+        for process in list(getattr(pool, "_processes", {}).values()):
+            try:
+                process.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +165,7 @@ class _Scheduler:
         return int(total * BUDGET_SHARE) if total else None
 
     @contextmanager
-    def slot(self, est_mb: int) -> Iterator[dict[str, Any]]:
+    def slot(self, est_mb: int, job: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
         budget = self.budget_mb()
         info: dict[str, Any] = {"est_mb": est_mb, "budget_mb": budget, "waited_s": 0.0}
         started = time.time()
@@ -126,7 +175,11 @@ class _Scheduler:
             # Alone it always runs (it may still not fit: reported if it dies);
             # side by side only while the estimates fit the budget.
             while self._running and (budget is None or sum(self._running.values()) + est_mb > budget):
-                self._cond.wait()
+                if job is not None and job.get("cancelled"):
+                    raise JobCancelled("ยกเลิกงานที่รอคิวแล้ว")
+                self._cond.wait(timeout=1.0)
+            if job is not None and job.get("cancelled"):
+                raise JobCancelled("ยกเลิกงานที่รอคิวแล้ว")
             self._running[ticket] = est_mb
             info["parallel"] = len(self._running) - 1
         info["waited_s"] = round(time.time() - started, 1)
@@ -168,7 +221,7 @@ def _log(entry: dict[str, Any]) -> None:
 
 
 def run(label: str, target: str, *args: Any, files: list[Path], kind: str = "geometry",
-        **kwargs: Any) -> Any:
+        title: str | None = None, **kwargs: Any) -> Any:
     """Run ``module:function(*args, **kwargs)`` as one heavy job and return its result.
 
     ``files`` are the IFCs the job opens (for the memory estimate and the log).
@@ -180,18 +233,32 @@ def run(label: str, target: str, *args: Any, files: list[Path], kind: str = "geo
                              "size_mb": round(sum(p.stat().st_size for p in files if p and p.exists()) / 1048576, 1),
                              "est_mb": est, "ram_mb": total}
     in_process = os.environ.get("VBB_GEOMETRY_IN_PROCESS") == "1"
-    with SCHEDULER.slot(est) as info:
-        entry.update(waited_s=info["waited_s"], parallel=info["parallel"], budget_mb=info["budget_mb"])
-        started = time.time()
-        try:
+    job = {"id": uuid.uuid4().hex[:12], "job": label, "title": title or JOB_TITLES.get(label, label), "state": "queued",
+           "submitted": time.time(), "est_mb": est, "files": entry["files"], "cancelled": False, "pool": None}
+    with _jobs_lock:
+        _jobs[job["id"]] = job
+    started = time.time()
+    try:
+        with SCHEDULER.slot(est, job) as info:
+            entry.update(waited_s=info["waited_s"], parallel=info["parallel"], budget_mb=info["budget_mb"])
+            with _jobs_lock:
+                job["state"] = "running"
+            started = time.time()
             if in_process:
                 result, stats = _child(target, args, kwargs)
             else:
-                result, stats = _run_in_fresh_process(target, args, kwargs, est, total)
-        except Exception as exc:
-            entry.update(outcome="failed", sec=round(time.time() - started, 1), error=f"{type(exc).__name__}: {exc}"[:500])
-            _log(entry)
-            raise
+                result, stats = _run_in_fresh_process(target, args, kwargs, est, total, job)
+    except Exception as exc:
+        cancelled = job["cancelled"] or isinstance(exc, JobCancelled)
+        entry.update(outcome="cancelled" if cancelled else "failed", sec=round(time.time() - started, 1),
+                     error=f"{type(exc).__name__}: {exc}"[:500])
+        _log(entry)
+        if cancelled and not isinstance(exc, JobCancelled):
+            raise JobCancelled("ยกเลิกแล้ว") from exc
+        raise
+    finally:
+        with _jobs_lock:
+            _jobs.pop(job["id"], None)
     entry.update(outcome="ok", sec=round(time.time() - started, 1), job_sec=stats["sec"], peak_mb=stats["peak_mb"])
     if isinstance(result, dict) and result.get("outcome"):
         entry["outcome"] = result["outcome"]
@@ -199,7 +266,8 @@ def run(label: str, target: str, *args: Any, files: list[Path], kind: str = "geo
     return result
 
 
-def _run_in_fresh_process(target: str, args: tuple, kwargs: dict, est: int, total: int | None) -> tuple[Any, dict]:
+def _run_in_fresh_process(target: str, args: tuple, kwargs: dict, est: int, total: int | None,
+                          job: dict[str, Any] | None = None) -> tuple[Any, dict]:
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures.process import BrokenProcessPool
@@ -208,9 +276,15 @@ def _run_in_fresh_process(target: str, args: tuple, kwargs: dict, est: int, tota
     # server would inherit uvicorn's state. One process per job: it exits after
     # the job, so the memory of a large IFC is returned to the system.
     pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+    if job is not None:
+        with _jobs_lock:
+            job["pool"] = pool
     try:
-        return pool.submit(_child, target, args, kwargs).result()
+        future = pool.submit(_child, target, args, kwargs)
+        return future.result()
     except BrokenProcessPool as exc:
+        if job is not None and job.get("cancelled"):
+            raise JobCancelled("ยกเลิกแล้ว") from exc
         ram = f"{total / 1024:.0f} GB" if total else "unknown"
         raise JobFailed(
             "ตัวประมวลผล IFC หยุดกลางคัน มักเป็นเพราะหน่วยความจำไม่พอ "

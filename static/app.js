@@ -13,6 +13,7 @@ const downloadInpxBtn = document.getElementById('downloadInpxBtn');
 const downloadBuildReportBtn = document.getElementById('downloadBuildReportBtn');
 const downloadValidationBtn = document.getElementById('downloadValidationBtn');
 const downloadBuildLogBtn = document.getElementById('downloadBuildLogBtn');
+const downloadPackageBtn = document.getElementById('downloadPackageBtn');
 const openBuildFolderBtn = document.getElementById('openBuildFolderBtn');
 const resetBtn = document.getElementById('resetBtn');
 const messageText = document.getElementById('messageText');
@@ -215,7 +216,15 @@ function formatBytes(bytes) {
 }
 
 async function api(url, options = {}) {
-  const response = await fetch(url, options);
+  // Heavy requests run as server jobs: the task panel polls them while any request is open.
+  const tracked = typeof taskPanel !== 'undefined';   // app-tasks.js (shared global)
+  if (tracked) taskPanel.requestStarted();
+  let response;
+  try {
+    response = await fetch(url, options);
+  } finally {
+    if (tracked) taskPanel.requestEnded();
+  }
   const payload = await response.json().catch(() => ({}));
   // Any change on the server can make the pedestrian model stale or move the
   // workflow on: re-read the project state once things settle.
@@ -257,6 +266,11 @@ async function refreshWorkflowState() {
     el.setAttribute('aria-description', words[steps[step]]);
   }
   document.getElementById('staleBanner').classList.toggle('hidden', !stale);
+  // Views of the pedestrian model look unavailable until it exists (UX-23).
+  for (const id of ['simulationModeBtn', 'overlayModeBtn', 'planModeBtn']) {
+    const b = document.getElementById(id);
+    if (b) { b.dataset.unavailable = String(!ready); b.title = ready ? '' : 'ใช้ได้หลังกด "เตรียมโมเดลคนเดิน"'; }
+  }
 }
 
 document.getElementById('staleRegenerateBtn').addEventListener('click', () => generateSemanticBtn.click());
@@ -339,6 +353,7 @@ function setBuildOutputReady(ready) {
   downloadBuildReportBtn.disabled = !ready;
   downloadValidationBtn.disabled = !ready;
   downloadBuildLogBtn.disabled = !ready;
+  downloadPackageBtn.disabled = !ready;
   openBuildFolderBtn.disabled = !ready;
   if (!ready) document.getElementById('stepBuild').classList.remove('done');
 }
@@ -901,11 +916,19 @@ function setViewerBadge(mode) {
   document.getElementById('viewerLegend')?.classList.toggle('hidden', !['simulation', 'overlay', 'plan'].includes(mode));
   const badge = document.getElementById('viewportIdentLabel');
   if (!badge) return;
+  // Scope: how much of the IFC the 3D view shows vs. what the pedestrian model covers (UX-09).
+  const total = new Set((currentAudit?.spatial?.storeys || []).map(s => s.name)).size;
+  const loaded = Object.keys(currentGeometry?.storeys || {}).filter(n => n !== 'Unassigned').length;
+  const partial = total && loaded && loaded < total;
+  const sourceScope = partial ? ` · แสดง ${loaded}/${total} ชั้น` : '';
   badge.innerHTML = {
-    simulation: '3D <small>· โมเดลคนเดิน (Viswalk)</small>',
+    simulation: '3D <small>· โมเดลคนเดิน (Viswalk) · ทุกชั้นใน IFC</small>',
     overlay: '3D <small>· ซ้อนภาพ โมเดลคนเดินบน IFC ต้นฉบับ</small>',
     plan: 'แปลน <small>· รายระดับของโมเดลคนเดิน</small>',
-  }[mode] || '3D <small>· IFC ต้นฉบับ</small>';
+  }[mode] || `3D <small>· IFC ต้นฉบับ${sourceScope}</small>`;
+  badge.title = partial
+    ? `มุมมอง 3D โหลด IFC ต้นฉบับ ${loaded} จาก ${total} ชั้น · "เตรียมโมเดลคนเดิน" ใช้ทุกชั้นของ IFC เสมอ`
+    : '';
 }
 
 document.getElementById('overlayModeBtn').addEventListener('click', () => {

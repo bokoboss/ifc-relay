@@ -137,6 +137,28 @@ def test_bim_tree_opens_storey_class_element(page, tmp_path):
     assert page.errors == []
 
 
+def test_pending_stairs_are_never_silent(page, tmp_path):
+    """UX-01..04: stairs in review show next to "prepare", prepare asks, the bulk
+    include runs from the dialog, and the model then has the stair."""
+    b, _ = _two_storeys(with_stair=True)              # the stair stays "review" (no overrides)
+    _open(page, b.write(tmp_path / "stairs.ifc"))
+    page.wait_for_selector("#stairPendingChip:not(.hidden)", timeout=60000)
+    assert "บันได 1 ชุดยังไม่ได้นำเข้า" in page.text_content("#stairPendingChip")
+    page.click("#stairPendingChip")                    # takes the engineer to the stair block
+    page.wait_for_selector("#stairReviewBlock.flash")
+    page.click("#generateSemanticBtn")
+    page.wait_for_selector("#stairPrepareConfirm[open]")
+    assert "ยังไม่ได้นำเข้า 1 ชุด" in page.text_content("#stairPrepareLead")
+    page.click("#stairPrepareInclude")
+    page.wait_for_selector("#stairPendingChip.hidden", state="attached", timeout=60000)
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    assert page.text_content("#stairIncluded") == "1"
+    sem = page.evaluate("currentSemantic")
+    assert len(sem["vertical_connections"]) == 1
+    assert sem["ifc_semantic"]["stair_decisions"]["review"] == 0
+    assert page.errors == []
+
+
 def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     b, _ = _two_storeys(with_stair=False)          # closed room -> isolated zone: a Viswalk check, not a stop
     _open(page, b.write(tmp_path / "room.ifc"))
@@ -170,6 +192,9 @@ def _dock(page, tab):
 
 
 def _enter_plan(page, level="1"):
+    # After preparing, the issue list may open (pending items); draw with it folded.
+    if page.get_attribute("#reviewDock", "data-open") == "true":
+        page.click("#dockToggle")
     page.click("#planModeBtn")
     page.select_option("#planLevelSelect", level)
     page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
@@ -264,6 +289,10 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     _open(page, b.write(tmp_path / "plan.ifc"))
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    # UX-26: an unreachable floor is pending, so the issue list opens on it
+    page.wait_for_function("document.getElementById('reviewDock').dataset.open === 'true'")
+    assert page.get_attribute('.dock-tab[data-tab="issues"]', "aria-selected") == "true"
+    assert "เรื่องให้ตัดสินใจหรือตรวจ" in page.text_content("#messageText")
     _enter_plan(page)
     page.click("#autoPrepareBtn[aria-pressed=true]")                     # step through by hand first
     page.click(".plan-tool[data-tool=passage]")
@@ -311,7 +340,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     assert "ทับพื้นที่เดิน" in page.text_content("#planConfirmText")
     page.click("#autoPrepareBtn[aria-pressed=false]")                    # UX-02: re-prepared without a click
     page.click("#planConfirmBtn")
-    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากทางออกที่กำหนด 1 จุด')",
+    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากจุดอ้างอิงทางออก 1 จุด')",
                            timeout=120000)
     page.wait_for_selector("#staleBanner", state="hidden")
     assert page.errors == []

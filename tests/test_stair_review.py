@@ -130,3 +130,21 @@ def test_ui_wiring_for_stair_review():
     assert "/api/stairs/bulk" in js and "refreshStairOverview" in js
     assert "stairDirectionArrow" in js3d and "ConeGeometry" in js3d and "direction_status" in js3d
     assert "ยังไม่ถือว่ารับรองจนกว่าจะตรวจใน Vissim" in html
+
+
+def test_stairs_left_in_review_reach_the_checklist(tmp_path):
+    """UX-01: an IFC stair the engineer has not decided on is a check item, not silence."""
+    from gate_service import evaluate_gate
+    from tests.ifc_factory import semantic_for
+    from tests.test_connectivity import _two_storeys
+
+    b, ov = _two_storeys(with_stair=True)
+    path = b.write(tmp_path / "s.ifc")
+    pending = semantic_for(path, {})                        # stair left in review
+    info = pending["ifc_semantic"]["stair_decisions"]
+    assert info["units"] == 1 and info["review"] == 1 and len(info["pending_global_ids"]) == 1
+    item = next(i for i in evaluate_gate(pending, None)["items"] if i["id"] == "stairs_pending")
+    assert item["policy"] == "check" and item["count"] == 1
+    done = semantic_for(path, ov)                           # included
+    assert done["ifc_semantic"]["stair_decisions"]["review"] == 0
+    assert not any(i["id"] == "stairs_pending" for i in evaluate_gate(done, None)["items"])

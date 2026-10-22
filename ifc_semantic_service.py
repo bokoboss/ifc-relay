@@ -1063,6 +1063,9 @@ def build_semantic_model(
             "gap_repairs": gap_repairs,
             "diagnostics": diagnostics,
             "connectivity": connectivity,
+            # Decisions on the IFC's stair/ramp units: units still in review are not
+            # in this model, and the checklist must say so (UX-01).
+            "stair_decisions": _stair_decisions(model, selection_overrides, parent_lookup),
             "manual_edits": list(manual_edits or []),
             "manual_edits_applied": manual_applied,
             "manual_edits_status": manual_status,
@@ -1114,3 +1117,11 @@ def build_semantic_to_file(path: Path, output_path: Path, overrides: dict[str, s
     info = model["ifc_semantic"]
     return {"summary": info["summary"], "warnings": info["warnings"],
             "outcome": "partial" if geometry.get("mesh_failures") else "success"}
+
+
+def _stair_decisions(model: Any, overrides: dict[str, str], parent_lookup: dict[int, Any]) -> dict[str, Any]:
+    from ifc_vertical_service import stair_overview
+
+    overview = stair_overview(model, overrides or {}, parent_lookup, children_map(model))
+    pending = [u["global_id"] for u in overview["units"] if u["state"] == "review" and u.get("global_id")]
+    return {**overview["counts"], "pending_global_ids": pending}

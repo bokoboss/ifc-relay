@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 index = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-appjs = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
+appjs = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-tasks.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
 app = (ROOT / "app.py").read_text(encoding="utf-8")
 
 checks = [
@@ -15,7 +15,7 @@ checks = [
     ("Semantic download endpoint exists", '@app.get("/api/ifc/semantic/download")' in app),
     ("Engine download endpoint exists", '@app.get("/api/ifc/semantic/engine-download")' in app),
     ("Engine download uses geometry_ifc_v03.json filename", 'filename="geometry_ifc_v03.json"' in app),
-    ("Export buttons enable after semantic generation", 'setExportReady(true);' in appjs),
+    ("Export buttons enable after semantic generation", 'setExportReady(true);' in appjs or 'setExportReady(!result.stale)' in appjs),
     ("Export buttons restore from project state", 'setExportReady(!state.semantic.stale);' in appjs),
     ("Selection change disables stale exports", 'setExportReady(false);' in appjs),
     ("Top Semantic button downloads endpoint", "startDownload('/api/ifc/semantic/download')" in appjs),

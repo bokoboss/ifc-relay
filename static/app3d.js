@@ -79,6 +79,7 @@ let categoryFilter = new Set();
 let overrides = {};
 let isolatedGuid = null;
 let wireframe = false;
+let loadedStoreys = new Set();   // source storeys loaded in the view (the storey list filters these)
 let renderRequested = true;   // render on demand (see animate)
 let lastRender = 0;
 let semanticLoaded = false;
@@ -246,8 +247,10 @@ function semanticPassesFilters(object) {
     }
     return Number(src.level_key) === planLevelKey;
   }
+  // The pedestrian model covers the whole IFC: levels whose source storey is not
+  // loaded in the 3D view are shown, the storey list only hides loaded ones (UX-09).
   const name = semanticLevelNames.get(semanticLevelKey(info));
-  return name == null || storeyFilter.has(name);
+  return name == null || !loadedStoreys.has(name) || storeyFilter.has(name);
 }
 
 function addSemanticPreview(model) {
@@ -1055,6 +1058,7 @@ window.IFCViewer = {
     storeyFilter = append
       ? new Set([...storeyFilter, ...incomingStoreys])
       : new Set(incomingStoreys);
+    loadedStoreys = append ? new Set([...loadedStoreys, ...incomingStoreys]) : new Set(incomingStoreys);
     categoryFilter = append
       ? new Set([...categoryFilter, ...incomingCategories])
       : new Set(incomingCategories);

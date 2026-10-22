@@ -258,7 +258,7 @@ validateBtn.addEventListener('click', async () => {
   validationBusy = true;
   setMessage('กำลังตรวจโมเดลคนเดินด้วย Geometry Engine v0.3...');
   try {
-    const result = await api('/api/validate', { method: 'POST' });
+    const result = await taskPanel.track('ตรวจ Geometry (Geometry Engine)', api('/api/validate', { method: 'POST' }));
     renderValidation(result);
     const gate = await refreshGate();
     dock.select((result.severity_counts?.error || 0) ? 'build' : 'checks');

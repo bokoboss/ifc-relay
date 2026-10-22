@@ -1,6 +1,6 @@
 # Before the build: what stops it, what to check in Viswalk
 
-This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-22.1). The build endpoint re-validates and re-evaluates the list before starting Vissim.
+This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-22.3). The build endpoint re-validates and re-evaluates the list before starting Vissim.
 
 | Item | Policy | Why |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Stair/ramp end not on a walkable area (Engine) | check | Viswalk will error at that ramp; connect it to an Area in Viswalk |
 | Connectivity diagnostic failed or missing | check | Listed, never read as "all connected"; does not affect the file |
 | Manual plan edit that could not be applied | check | The file will not contain it; redraw it or fix in Viswalk |
+| Stair/ramp units of the IFC still in review (not converted) | check | The model has no such stairs; include them or build them in Viswalk |
 | Stair end reaches no free walking space (connectivity) | check | Blocked by a wall or no floor; people cannot use it |
 | Walking zones not reachable from the marked exits (or, with none marked, from the largest network) | check | Missing door/stair, or a closed room/shaft |
 | Exit mark that touches no free walking space | check | Ignored by the connectivity check; redraw it over the floor |
@@ -20,19 +21,23 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Walkable-looking openings still closed | check | Open real passages in the app or in Viswalk |
 | Multi-storey wall copies without door gaps | check | Upper storeys may need doors |
 | Obstacles with (almost) no floor under them | check | Wrong level or missing slab |
+| Connectivity measured from the largest network (no exit reference marked) | info | Preliminary; mark exit references on the plan to measure from real exits |
 | Slab gaps < 50 mm closed automatically | info | Each repair is listed with its place; "ดูตำแหน่ง" shows it on the plan so an intended gap is not hidden |
 | Obstacles across the floor edge | info | Walls/columns on the slab edge |
 | Overlapping obstacles | info | Usually joined walls; many overlaps can mean duplicates - check in the plan |
 
 With check items present, Build asks for one confirmation listing them; nothing has to be ticked. Items are built from structured diagnostics (`ifc_semantic.diagnostics`: code, object ids, metrics), never from the wording of warnings. Each item carries a **fingerprint** (policy version + the identities of the problems: IFC GlobalIds, zone level/location/area, edit ids), so the manifest records exactly which problems were known at build time.
 
-The connectivity check is a geometry-only diagnostic (free walking space touching); it is not routing verification and says nothing about clear widths or route choice. Without exit marks it measures from the largest network; with the plan tool **ทางออก** the engineer marks exits/origins (any number, any level) and every zone that cannot reach one of them is listed. An exit mark changes no geometry and is not written to the `.inpx`.
+The connectivity check is a geometry-only diagnostic (free walking space touching); it is not routing verification and says nothing about clear widths or route choice. Without exit marks it measures from the largest network; with the plan tool **อ้างอิงทางออก** (exit reference) the engineer marks exits/origins (any number, any level) and every zone that cannot reach one of them is listed. An exit mark changes no geometry and is not written to the `.inpx`.
 
 Plan edits are listed with what the last pedestrian-model run did with each one: `ใช้แล้ว` (applied as drawn), `ย้ายระดับ` (its level was renumbered and it was re-bound by height), `ไม่มีผล` (a passage that crossed no wall, or an exit mark on no walking space), `ใช้ไม่ได้` (skipped; listed as a Viswalk check) and `รอเตรียมใหม่` (added since the last run). The list header counts the edits that need a look, so after an IFC revision the engineer works through it as a review queue.
 
 Every successful build writes next to the `.inpx`:
 
-- `<name>_viswalk_checklist.md` - the check items as a tick list (title, count, detail, object ids), for the review in Viswalk.
+- `<name>_viswalk_checklist.md` - the check items as a tick list (title, count, detail, the first 30 object ids and how many there are), plus what the converter does not make (pedestrian inputs, routes, exits), for the review in Viswalk.
+- `<name>_checklist_ids.json` - every object id of every item (the annex the Markdown list points to).
+
+"ดาวน์โหลดชุดไฟล์งาน" (`GET /api/build/latest/package`) gives the `.inpx` with the checklist, id annex, manifest, validation, engine report and build log as one ZIP.
 - `<name>_build_manifest.json` - source IFC name and SHA-256, pedestrian-model file SHA-256, output `.inpx` SHA-256, Geometry Engine file SHA-256, Vissim release used, manual edits with apply status, Engine severity counts, the full list with fingerprints (`engineering_gate`, `check_in_viswalk`) and `viswalk_verified: false` - the model is not verified until an engineer checks it in Viswalk.
 
 ## Manual plan edits

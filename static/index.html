@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=10" />
+  <link rel="stylesheet" href="/static/app.css?v=13" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -60,6 +60,7 @@
               title="แปลงพื้น ผนัง ช่องเปิด เสา และองค์ประกอบที่เลือกเป็น Geometry สำหรับ Viswalk พร้อมแสดง Simulation Preview ใน 3D">
               เตรียมโมเดลคนเดิน
             </button>
+            <button id="stairPendingChip" type="button" class="decision-chip hidden" title="บันได/ทางลาดที่ยังไม่ได้นำเข้าจะไม่อยู่ในโมเดลคนเดิน · คลิกเพื่อไปที่รายการบันได"></button>
             <button id="validateBtn" class="secondary-btn" disabled
               title="ให้ Geometry Engine ตรวจว่าสร้างไฟล์จากโมเดลนี้ได้หรือไม่ และรวบรวมเรื่องที่ต้องไปตรวจใน Viswalk · ไม่ใช่การรับรองโมเดล">ตรวจ Geometry</button>
             <button id="buildViswalkBtn" class="build-btn" disabled
@@ -151,9 +152,9 @@
           <div class="filter-block stair-review" id="stairReviewBlock">
             <div class="filter-title">บันไดและทางลาด</div>
             <div class="mini-summary">
-              <div><span>ทั้งหมด (ชุด)</span><strong id="stairUnits">0</strong></div>
-              <div><span>นำเข้าแล้ว</span><strong id="stairIncluded">0</strong></div>
-              <div><span>รอตรวจสอบ</span><strong id="stairReview">0</strong></div>
+              <div><span>ทั้งหมด (ชุด)</span><strong id="stairUnits">–</strong></div>
+              <div><span>นำเข้าแล้ว</span><strong id="stairIncluded">–</strong></div>
+              <div><span>รอตรวจสอบ</span><strong id="stairReview">–</strong></div>
             </div>
             <button id="stairBulkBtn" class="secondary-btn stair-bulk-btn" disabled>นำเข้าบันไดทั้งหมด…</button>
             <div id="stairConfirm" class="stair-confirm hidden" role="dialog" aria-live="polite">
@@ -193,7 +194,7 @@
                 <button data-tool="walkable" class="plan-tool walkable" title="คลิกสองมุมเพื่อเพิ่มพื้นที่เดิน">+ พื้นที่เดิน</button>
                 <button data-tool="obstacle" class="plan-tool obstacle" title="คลิกสองมุมเพื่อเพิ่มสิ่งกีดขวาง">+ สิ่งกีดขวาง</button>
                 <button data-tool="passage" class="plan-tool passage" title="คลิกสองมุมคร่อมผนังเพื่อเปิดทางผ่าน (เช่นประตูที่ IFC ไม่ได้ผูก)">เปิดทางผ่าน</button>
-                <button data-tool="exit" class="plan-tool exit" title="วาดทับพื้นที่ทางออกหรือจุดที่คนเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง ไม่เปลี่ยนรูปทรงโมเดล">ทางออก</button>
+                <button data-tool="exit" class="plan-tool exit" title="จุดอ้างอิงทางออก: วาดทับพื้นที่ทางออกหรือจุดที่คนเริ่มเดิน เพื่อตรวจว่าพื้นที่ไหนเดินไปไม่ถึง · ไม่สร้าง Exit/Input ใน INPX (กำหนดใน Viswalk)">อ้างอิงทางออก</button>
               </div>
               <div class="plan-tools" role="group" aria-label="รูปทรง">
                 <button data-shape="rect" class="plan-shape active" title="คลิกสองมุม">สี่เหลี่ยม</button>
@@ -229,14 +230,18 @@
                 <li><i class="line" style="--c:#2e9e5b"></i>พื้นที่เดินเพิ่ม</li>
                 <li><i class="line" style="--c:#34495e"></i>สิ่งกีดขวางเพิ่ม</li>
                 <li><i class="line" style="--c:#0e9fb6"></i>ทางผ่าน <span class="legend-cut"></span> ผนังที่จะถูกตัด</li>
-                <li><i class="line" style="--c:#b86c4d"></i>ทางออก</li>
+                <li><i class="line" style="--c:#b86c4d"></i>จุดอ้างอิงทางออก (ไม่ส่งเข้า INPX)</li>
               </ul>
             </details>
+            <section id="taskPanel" class="task-panel hidden" role="status" aria-live="polite" aria-label="งานที่กำลังทำ">
+              <ul id="taskList" class="task-list"></ul>
+            </section>
             <section id="jobPanel" class="job-panel hidden" role="status" aria-live="polite" aria-label="ความคืบหน้าการสร้างไฟล์">
               <div class="job-head">
                 <span class="job-spinner" aria-hidden="true"></span>
                 <strong id="jobTitle">กำลังสร้างไฟล์ Viswalk</strong>
                 <span id="jobElapsed" class="job-elapsed">0:00</span>
+                <button id="jobCloseBtn" type="button" class="job-close hidden" aria-label="ปิด" title="ปิด"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
               </div>
               <ol id="jobStages" class="job-stages"></ol>
               <div class="job-bar" aria-hidden="true"><span id="jobBar"></span></div>
@@ -345,6 +350,15 @@
             <div id="openingCandidateSection" class="opening-candidates hidden">
               <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
               <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div class="opening-filters">
+                <label><span class="sr-only">ชั้น</span><select id="openingLevelFilter"><option value="">ทุกชั้น</option></select></label>
+                <label><span class="sr-only">ชนิด</span><select id="openingKindFilter">
+                  <option value="">ทุกชนิด</option>
+                  <option value="passage_candidate">อาจเป็นทางเดิน</option>
+                  <option value="open">ที่เปิดแล้ว</option>
+                </select></label>
+                <span id="openingCount" class="check-count"></span>
+              </div>
               <div id="openingCandidateList"></div>
             </div>
             <div id="offLevelSection" class="opening-candidates hidden">
@@ -379,6 +393,7 @@
                 <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
               </div>
               <div class="semantic-actions">
+                <button id="downloadPackageBtn" class="build-btn" disabled title=".inpx + checklist สำหรับตรวจใน Viswalk + manifest + รายงาน (ZIP)">ดาวน์โหลดชุดไฟล์งาน</button>
                 <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
                 <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
                 <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
@@ -543,6 +558,17 @@
       </section>
       </div>
 
+      <dialog id="stairPrepareConfirm" class="build-confirm" aria-labelledby="stairPrepareTitle">
+        <form method="dialog">
+          <h2 id="stairPrepareTitle">บันได/ทางลาดยังไม่ได้นำเข้า</h2>
+          <p id="stairPrepareLead"></p>
+          <p class="build-confirm-note">ค่าเริ่มต้นของบันไดทุกตัวคือ "รอตรวจสอบ" · ชุดที่ตั้งเป็น "ไม่ใช้" จะไม่ถูกเปลี่ยน</p>
+          <div class="build-confirm-actions">
+            <button value="skip" class="secondary-btn">เตรียมต่อโดยยังไม่ใส่</button>
+            <button value="include" class="build-btn" id="stairPrepareInclude">นำเข้าทั้งหมดแล้วเตรียม</button>
+          </div>
+        </form>
+      </dialog>
       <dialog id="buildConfirm" class="build-confirm" aria-labelledby="buildConfirmTitle">
         <form method="dialog">
           <h2 id="buildConfirmTitle">สร้างไฟล์ Viswalk</h2>
@@ -563,11 +589,12 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=057" defer></script>
-  <script src="/static/app-plan.js?v=055" defer></script>
-  <script src="/static/app-model.js?v=054" defer></script>
-  <script src="/static/app-review.js?v=054" defer></script>
-  <script src="/static/app-tree.js?v=054" defer></script>
-  <script src="/static/app-build.js?v=054" defer></script>
+  <script src="/static/app.js?v=059" defer></script>
+  <script src="/static/app-tasks.js?v=059" defer></script>
+  <script src="/static/app-plan.js?v=059" defer></script>
+  <script src="/static/app-model.js?v=059" defer></script>
+  <script src="/static/app-review.js?v=059" defer></script>
+  <script src="/static/app-tree.js?v=059" defer></script>
+  <script src="/static/app-build.js?v=059" defer></script>
 </body>
 </html>

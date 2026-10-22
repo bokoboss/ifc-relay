@@ -18,14 +18,14 @@ from pydantic import BaseModel, Field
 
 from ifc_geometry_service import EXTRACTOR_VERSION, VIEW_MAX_TRIANGLES, GeometryFailed
 import model_jobs
-from model_jobs import JobFailed
+from model_jobs import JobCancelled, JobFailed
 from ifc_service import ifcopenshell_version
 from revision_service import report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
 from version import APP_VERSION, PROJECT_STATE_VERSION, versions
-from gate_service import checklist_markdown, evaluate_gate, gate_message_th
+from gate_service import checklist_ids, checklist_markdown, evaluate_gate, gate_message_th
 from vissim_build_service import (build_preflight, build_progress, build_vissim_model, progress_finish,
                                   progress_start, validate_engine_input)
 
@@ -183,11 +183,25 @@ VIEW_MAX_ELEMENTS = int(os.environ.get("VBB_VIEW_MAX_ELEMENTS", "25000"))
 CACHE_MAX_MB = int(float(os.environ.get("VBB_CACHE_MAX_GB", "4")) * 1024)
 
 
+def job_http_error(exc: Exception, what: str) -> HTTPException:
+    """409 when the engineer cancelled the job, 500 otherwise."""
+    if isinstance(exc, JobCancelled):
+        return HTTPException(status_code=409, detail=f"{what}: ยกเลิกแล้ว")
+    return HTTPException(status_code=500, detail=job_error_detail(exc, what))
+
+
 def job_error_detail(exc: Exception, what: str) -> str:
     """Message for a failed heavy job: plain for known causes, technical otherwise."""
     if isinstance(exc, (JobFailed, GeometryFailed)):
         return f"{what}: {exc}"
     return f"{what}: {type(exc).__name__}: {exc}"
+
+
+def write_json_atomic(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 _SHA_MEMO: dict[tuple[str, int, float], str] = {}
@@ -469,16 +483,17 @@ def analyze() -> dict[str, Any]:
                 result = json.loads(audit_cache.read_text(encoding="utf-8"))
                 result["source_file"] = str(path)
             else:
-                result = model_jobs.run("audit", "ifc_service:audit_ifc", path, files=[path], kind="open")
-                CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                audit_cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+                result, stairs = model_jobs.run("audit", "ifc_vertical_service:audit_with_stairs", path,
+                                                files=[path], kind="open")
+                write_json_atomic(audit_cache, result)
+                write_json_atomic(stair_structure_cache(path), stairs)
         except ImportError as exc:
             raise HTTPException(
                 status_code=500,
                 detail=f"IfcOpenShell is not installed. Run install.bat first. Details: {exc}",
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC audit failed"))
+            raise job_http_error(exc, "IFC audit failed")
 
         revision = state.get("revision") or {}
         if revision.get("status") == "pending":
@@ -491,10 +506,7 @@ def analyze() -> dict[str, Any]:
                     files=[p for p in (previous_path, path) if p is not None], kind="open",
                 )
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail=job_error_detail(exc, "Revision carry-over failed"),
-                )
+                raise job_http_error(exc, "Revision carry-over failed")
             state.setdefault("selection", {"mode": "auto"})["overrides"] = carried
             state["revision"] = report
         if (state.get("revision") or {}).get("status") == "applied":
@@ -546,19 +558,21 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         result = model_jobs.run(
             "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path, view_path,
             files=[path], kind="geometry",
+            title=("โหลด 3D · ชิ้นส่วนรอตรวจ (พื้นหลัง)" if request.tier == "review" else "โหลด 3D")
+            + (f" · {len(request.storey_ids)} ชั้น" if request.storey_ids else " · ทั้งอาคาร"),
             mode=request.mode, storey_ids=request.storey_ids, tier=request.tier,
             source_sha256=upload_sha256(path), max_elements=VIEW_MAX_ELEMENTS,
         )
     except ValueError as exc:
         if "safety limit" not in str(exc):
-            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+            raise job_http_error(exc, "IFC geometry extraction failed")
         count = re.search(r"contains (\d+)", str(exc))
         raise HTTPException(status_code=413, detail=(
             f"ส่วนที่ขอเปิดมีชิ้นส่วน {count.group(1) if count else 'เกิน'} ชิ้น เกินที่จอ 3D รับได้ต่อครั้ง "
             f"({VIEW_MAX_ELEMENTS:,} ชิ้น) · เลือกเปิดทีละชั้น หรือตั้ง VBB_VIEW_MAX_ELEMENTS ให้สูงขึ้นถ้าเครื่องแรงพอ · "
             "การเตรียมโมเดลคนเดินไม่ได้ใช้ขีดจำกัดนี้"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+        raise job_http_error(exc, "IFC geometry extraction failed")
     prune_geometry_cache(keep=view_path)
 
     with store.lock:
@@ -587,6 +601,19 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
     # The meshes go to the browser straight from the cache file: the server
     # process never parses them (a 371 MB IFC gives about 140 MB of meshes).
     return FileResponse(view_path, media_type="application/json")
+
+
+@app.get("/api/jobs")
+def list_jobs() -> dict[str, Any]:
+    """Heavy jobs waiting for memory or running, for the progress panel."""
+    return {"jobs": model_jobs.active_jobs()}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    if not model_jobs.cancel(job_id):
+        raise HTTPException(status_code=404, detail="ไม่พบงานนี้ หรืองานจบไปแล้ว")
+    return {"status": "cancelling"}
 
 
 @app.get("/api/revision")
@@ -656,12 +683,29 @@ class StairBulkUpdate(BaseModel):
     status: Literal["include", "auto"]
 
 
+def stair_structure_cache(path: Path) -> Path:
+    return CACHE_DIR / f"stairs_{upload_sha256(path)[:24]}_{APP_VERSION}.json"
+
+
 def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]:
+    """Stair/ramp units with the current decisions. The units come from the
+    audit's read of the IFC (cached by content), so counting and bulk changes
+    do not read the IFC again."""
+    from ifc_vertical_service import stair_overview_from_structure
+
+    cache = stair_structure_cache(path)
     try:
-        return model_jobs.run("stairs", "ifc_vertical_service:stair_overview_for_file", path, overrides,
-                              files=[path], kind="open")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "Stair overview failed"))
+        structure = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
+    except (OSError, ValueError):
+        structure = None
+    if structure is None:
+        try:
+            structure = model_jobs.run("stairs", "ifc_vertical_service:stair_structure_for_file", path,
+                                       files=[path], kind="open")
+        except Exception as exc:
+            raise job_http_error(exc, "อ่านรายการบันไดไม่สำเร็จ")
+        write_json_atomic(cache, structure)
+    return stair_overview_from_structure(structure, overrides)
 
 
 @app.get("/api/stairs")
@@ -755,7 +799,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
         )
         semantic = json.loads(output_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC semantic extraction failed"))
+        raise job_http_error(exc, "IFC semantic extraction failed")
     prune_geometry_cache(keep=geometry_cache)
 
     summary = semantic["ifc_semantic"]["summary"]
@@ -791,6 +835,8 @@ def generate_ifc_semantic() -> dict[str, Any]:
         "download_url": "/api/ifc/semantic/download",
         "engine_export_url": "/api/ifc/semantic/export-engine-input",
         "model": semantic,
+        # UX-25: the selection or plan edits changed while this ran.
+        "stale": changed_meanwhile,
     }
 
 
@@ -1049,6 +1095,9 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
     checklist.write_text(checklist_markdown(gate, str(upload.get("original_name")), out.name, manifest["built_at"]),
                          encoding="utf-8")
     result["checklist_path"] = str(checklist)
+    ids = out.with_name(stem + "_checklist_ids.json")
+    ids.write_text(json.dumps(checklist_ids(gate), indent=2, ensure_ascii=False), encoding="utf-8")
+    result["checklist_ids_path"] = str(ids)
 
 
 def _gate_passed_quiet(state: dict[str, Any]) -> bool:
@@ -1196,6 +1245,28 @@ def download_latest_build_log() -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Build log is missing: {path}")
     return FileResponse(path, media_type="text/plain", filename=path.name)
+
+
+@app.get("/api/build/latest/package")
+def download_latest_build_package() -> FileResponse:
+    """The .inpx with everything needed to check it in Viswalk, as one ZIP:
+    checklist (+ full id list), manifest, validation, engine report, build log."""
+    import zipfile
+
+    result = current_build_result_or_404()
+    out = Path(result["output_path"])
+    if not out.exists():
+        raise HTTPException(status_code=404, detail=f"ไม่พบไฟล์ .inpx: {out}")
+    keys = ("output_path", "checklist_path", "checklist_ids_path", "manifest_path", "validation_path",
+            "report_path", "log_path")
+    files = [Path(result[k]) for k in keys if result.get(k) and Path(result[k]).exists()]
+    package = out.with_name(out.stem.replace("_viswalk", "") + "_package.zip")
+    tmp = package.with_name(package.name + ".tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, f.name)
+    os.replace(tmp, package)
+    return FileResponse(package, media_type="application/zip", filename=package.name)
 
 
 @app.post("/api/build/latest/open-folder")

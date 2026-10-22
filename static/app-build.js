@@ -47,6 +47,7 @@ const jobPanel = (() => {
 
   return {
     start() {
+      document.getElementById('jobCloseBtn')?.classList.add('hidden');
       panel.classList.remove('hidden');
       panel.dataset.state = 'running';
       render({ stages: [], stage_index: 0, elapsed_sec: 0 });
@@ -57,10 +58,16 @@ const jobPanel = (() => {
     async stop() {
       clearInterval(timer);
       await poll();
-      setTimeout(() => panel.classList.add('hidden'), panel.dataset.state === 'success' ? 4000 : 8000);
+      // Success fades; a failure stays until the engineer closes it (UX-22).
+      if (panel.dataset.state === 'success') setTimeout(() => panel.classList.add('hidden'), 4000);
+      else document.getElementById('jobCloseBtn')?.classList.remove('hidden');
     },
   };
 })();
+
+document.getElementById('jobCloseBtn')?.addEventListener('click', () => {
+  document.getElementById('jobPanel').classList.add('hidden');
+});
 
 buildViswalkBtn.addEventListener('click', async () => {
   const checks = (currentGate?.items || []).filter(i => i.policy === 'check');
@@ -82,7 +89,7 @@ buildViswalkBtn.addEventListener('click', async () => {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
     dock.select('build');
-    setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
+    setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · ยังไม่ได้ตรวจยืนยันใน Viswalk · "ดาวน์โหลดชุดไฟล์งาน" มี checklist สำหรับตรวจ`);
   } catch (error) {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
     setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
@@ -97,6 +104,7 @@ buildViswalkBtn.addEventListener('click', async () => {
 
 downloadInpxTopBtn.addEventListener('click', () => startDownload('/api/build/latest/download'));
 downloadInpxBtn.addEventListener('click', () => startDownload('/api/build/latest/download'));
+downloadPackageBtn.addEventListener('click', () => startDownload('/api/build/latest/package'));
 downloadBuildReportBtn.addEventListener('click', () => startDownload('/api/build/latest/report'));
 downloadValidationBtn.addEventListener('click', () => startDownload('/api/build/latest/validation'));
 downloadBuildLogBtn.addEventListener('click', () => startDownload('/api/build/latest/log'));
