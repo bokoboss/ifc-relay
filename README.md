@@ -82,7 +82,7 @@ For product goals, scope, feature maturity and roadmap, see **[Product Vision & 
 
 ## Current repository limitations
 
-The proven Geometry Engine v0.3 is bundled in `engine/` (private repository). The `base_empty.inpx` Vissim template is created with licensed Vissim and is **not** committed; place it in `local\` on each machine. Validation works without it; only the `.inpx` build needs it. The browser's Three.js libraries are downloaded by the installer rather than committed.
+The proven Geometry Engine v0.3 is bundled in `engine/`. The `base_empty.inpx` Vissim template is created with licensed Vissim and is **not** committed; place it in `local\` on each machine. Validation works without it; only the `.inpx` build needs it. The browser's Three.js libraries are downloaded by the installer rather than committed.
 
 Structural IFC models may contain no doors or other information needed to establish pedestrian connections. Such gaps must be identified and reviewed, **not silently inferred as valid passages**. Multi-level stair/ramp/elevator extraction is not yet production-ready.
 
@@ -94,7 +94,7 @@ One copy of the app holds **one project for one engineer** (state in `runtime\`)
 
 Requires Windows 10/11, internet for the first install, and Python 3.10-3.13 (the installer can install Python 3.12 with `winget` if none is found). `Build Viswalk` additionally needs a licensed PTV Vissim 2025 or 2026.
 
-1. Download the repository ZIP (or `git clone`) and extract it anywhere, e.g. `C:\Tools\viswalk-bim-builder`.
+1. Download the repository ZIP (or `git clone`) and extract it anywhere, e.g. `C:\Tools\ifc-relay`.
 2. Copy `base_empty.inpx` (an empty network saved from the Vissim release you build with) into the `local\` folder (created by step 3), or pass it to the installer: `install.bat -BaseNetworkPath D:\proj\base_empty.inpx`. The Geometry Engine is bundled in `engine\`; `-EnginePath` copies an override into `local\`.
 3. Double-click **`install.bat`**: creates `.venv` inside the app folder, installs packages, downloads the local Three.js runtime and checks Vissim COM.
 4. Double-click **`start.bat`**: starts the app on `http://127.0.0.1:8765` and opens the browser. Close the window to stop it.
@@ -193,4 +193,5 @@ Interface type: IBM Plex Sans Thai and IBM Plex Mono (© IBM Corp., SIL Open Fon
 - **Do not commit real client/project BIM data** (including IFC/DXF/PDF), proprietary Vissim models, credentials, cached geometry, logs or generated outputs.
 - Use only synthetic or openly redistributable regression models whose provenance and licenses are confirmed.
 - PTV Vissim and Viswalk are third-party products. This project is independent and not endorsed by PTV.
-- **No software license has been selected yet.** A public GitHub repository alone does not grant reuse, redistribution or commercialization rights.
+- Licensed under the **GNU Affero General Public License v3.0** ([LICENSE](LICENSE)). You may use, modify and redistribute it, but a modified version that you distribute or offer to users over a network must make its complete source code available under the same license.
+- The license covers this repository's code only. It grants no rights to PTV Vissim/Viswalk, to `base_empty.inpx`, or to any project data you process with the tool.

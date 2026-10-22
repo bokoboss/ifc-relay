@@ -76,7 +76,7 @@ processes): audit 4.2 s → 0.0 s, geometry 52 s → 0.5 s.
 
 Through the app (real worker processes), model C opens one storey at a time,
 but its "second level" storey alone has 16,816 simulation-relevant elements
-(10,034 IfcMember + 6,129 IfcPlate, a curtain-wall roof): the 3D view refused it
+(mostly IfcMember and IfcPlate): the 3D view refused it
 at 12,000 elements per request, so that storey could not be opened at all.
 With the limit raised for the test: 818k triangles, browser parse 0.9 s, mesh
 build 0.4 s, JS heap 322 MB. The per-request view limit is now 25,000
@@ -86,8 +86,8 @@ renders in software); merging meshes per storey/class is the fix if it is slow.
 
 ## Ground storey of model C (reported: Chrome nearly froze)
 
-7,541 elements, 2.26 M triangles, of which 246 doors (manufacturer families up
-to 148,000 triangles each) were 1.7 M; the review tier adds 1.9 M more.
+7,541 elements, 2.26 M triangles, of which a few hundred doors (manufacturer
+families up to 148,000 triangles each) were 1.7 M; the review tier adds 1.9 M more.
 
 - Old version on the 7.8 GB test machine: the server process was killed by the
   system (out of memory) while opening this storey.

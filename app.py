@@ -172,8 +172,8 @@ model_jobs.LOG_PATH = (Path(_perf_log) if _perf_log else None) if _perf_log is n
 # Preparing the pedestrian model runs in a worker process and never sends the
 # meshes to the browser, so it gets a much higher, configurable ceiling (PERF-01).
 SEMANTIC_MAX_ELEMENTS = int(os.environ.get("VBB_SEMANTIC_MAX_ELEMENTS", "80000"))
-# Per request to the 3D view. One storey of a 371 MB test model has 16,816
-# curtain-wall members/plates (818k triangles): 0.9 s to parse and 0.4 s to build
+# Per request to the 3D view. One storey of a large test model has ~17k
+# simulation-relevant elements (818k triangles): 0.9 s to parse and 0.4 s to build
 # in the browser, so 12,000 refused a storey the browser handles. Frame rate on a
 # real GPU with that many meshes is still to be measured (batching is next).
 VIEW_MAX_ELEMENTS = int(os.environ.get("VBB_VIEW_MAX_ELEMENTS", "25000"))

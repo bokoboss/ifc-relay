@@ -392,8 +392,8 @@ def extract_ifc_geometry(
 
 # The 3D view gets a lighter copy of the meshes: an element with more triangles
 # than this (manufacturer door families reach 148,000) is shown as its footprint
-# hull extruded over its height. Measured on one storey of a 371 MB model: 246
-# doors were 1.7 M of its 2.3 M triangles; with this limit the storey is ~0.3 M.
+# hull extruded over its height. Measured on one storey of a 371 MB model: a few
+# hundred doors were 1.7 M of its 2.3 M triangles; with this limit the storey is ~0.3 M.
 # The pedestrian model always uses the full meshes.
 VIEW_MAX_TRIANGLES = 2000
 
