@@ -94,7 +94,7 @@ Frontend v0.4.1 เดิมเป็นแบบ dashboard: Sidebar แสด�
 ## 7. Non-goals
 
 - ไม่เพิ่มฟีเจอร์ BIM ใหม่หรือแก้ Algorithm
-- Evacuation Simulation เป็นแนวคิดระยะถัดไปที่บันทึกไว้ใน [Issue #11](https://github.com/bokoboss/ifc-relay/issues/11) และไม่รวมใน UI PR นี้
+- Evacuation Simulation เป็นแนวคิดระยะถัดไปที่บันทึกไว้ใน [Issue #3](https://github.com/bokoboss/ifc-relay/issues/3) และไม่รวมใน UI PR นี้
 - ไม่เปลี่ยน Semantic JSON schema
 - ไม่เพิ่มระบบ login/cloud storage
 - ไม่อ้างว่ารองรับ PDF/DXF เต็มรูปแบบ
