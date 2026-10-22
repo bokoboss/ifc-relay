@@ -79,6 +79,8 @@ let categoryFilter = new Set();
 let overrides = {};
 let isolatedGuid = null;
 let wireframe = false;
+let renderRequested = true;   // render on demand (see animate)
+let lastRender = 0;
 let semanticLoaded = false;
 const semanticMeshes = [];
 
@@ -107,16 +109,31 @@ const simulationColors = {
   opening: 0x63a86f,
 };
 
+// Source meshes share materials (one per colour/opacity/state): thousands of
+// elements with one material each made Chrome spend most of each frame on
+// material switches. Flat shading needs no normals, so none are computed.
+const sharedMaterials = new Map();
+
+function sharedMaterial(color, opacity, depthWrite = true) {
+  const key = `${color}|${opacity}|${depthWrite}|${wireframe}`;
+  let material = sharedMaterials.get(key);
+  if (!material) {
+    material = new THREE.MeshStandardMaterial({
+      color, roughness: 0.82, metalness: 0.02, side: THREE.DoubleSide, flatShading: true,
+      transparent: opacity < 1, opacity, depthWrite, wireframe,
+    });
+    material.userData.shared = true;
+    sharedMaterials.set(key, material);
+  }
+  return material;
+}
+
+function sourceOpacity(item) {
+  return item.ifc_type === 'IfcWindow' ? 0.58 : item.ifc_type === 'IfcSlab' ? 0.75 : 1.0;
+}
+
 function makeMaterial(item) {
-  return new THREE.MeshStandardMaterial({
-    color: sourceColors[item.ifc_type] ?? 0x9ba5ae,
-    roughness: 0.82,
-    metalness: 0.02,
-    side: THREE.DoubleSide,
-    transparent: item.ifc_type === 'IfcWindow' || item.ifc_type === 'IfcSlab',
-    opacity: item.ifc_type === 'IfcWindow' ? 0.58 : item.ifc_type === 'IfcSlab' ? 0.75 : 1.0,
-    wireframe: false,
-  });
+  return sharedMaterial(sourceColors[item.ifc_type] ?? 0x9ba5ae, sourceOpacity(item));
 }
 
 
@@ -372,8 +389,7 @@ function clearModel() {
 
   for (const mesh of meshes.values()) {
     modelGroup.remove(mesh);
-    mesh.geometry.dispose();
-    mesh.material.dispose();
+    mesh.geometry.dispose();             // materials are shared and kept
   }
   meshes.clear();
   selectedGuid = null;
@@ -402,29 +418,19 @@ function simulationVisible(item) {
 function updateMaterial(mesh) {
   const item = mesh.userData.item;
   if (!item) return;
-
-  mesh.material.depthWrite = mode !== 'overlay';
   if (mode === 'overlay') {
     // Source IFC as a faint ghost behind the pedestrian model.
-    mesh.material.color.setHex(sourceColors[item.ifc_type] ?? 0x9ba5ae);
-    mesh.material.opacity = 0.16;
-    mesh.material.transparent = true;
+    mesh.material = sharedMaterial(sourceColors[item.ifc_type] ?? 0x9ba5ae, 0.16, false);
   } else if (mode === 'source') {
-    mesh.material.color.setHex(sourceColors[item.ifc_type] ?? 0x9ba5ae);
-    mesh.material.opacity = item.ifc_type === 'IfcWindow' ? 0.58 : item.ifc_type === 'IfcSlab' ? 0.75 : 1.0;
-    mesh.material.transparent = mesh.material.opacity < 1;
+    mesh.material = sharedMaterial(sourceColors[item.ifc_type] ?? 0x9ba5ae, sourceOpacity(item));
   } else {
     const role = item.simulation_role || 'review';
-    mesh.material.color.setHex(simulationColors[role] ?? 0x8d979f);
-    mesh.material.opacity = role === 'walkable' ? 0.62 : 1.0;
-    mesh.material.transparent = mesh.material.opacity < 1;
+    mesh.material = sharedMaterial(simulationColors[role] ?? 0x8d979f, role === 'walkable' ? 0.62 : 1.0);
   }
-
-  mesh.material.wireframe = wireframe;
-  mesh.material.needsUpdate = true;
 }
 
 function applyVisibility() {
+  requestRender();
   for (const mesh of meshes.values()) {
     const item = mesh.userData.item;
     let visible = itemPassesFilters(item);
@@ -459,12 +465,12 @@ function buildGeometry(item) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
+  geometry.computeBoundingBox();         // no normals: shared materials use flat shading
   return geometry;
 }
 
 function fitBox(box, padding = 1.25) {
+  requestRender();
   if (!box || box.isEmpty()) return;
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
@@ -483,6 +489,7 @@ function fitBox(box, padding = 1.25) {
 }
 
 function fitModel() {
+  requestRender();
   if (planActive) {
     fitPlan();
     return;
@@ -511,6 +518,7 @@ function activeSemanticSelection() {
 }
 
 function fitSelection() {
+  requestRender();
   const sem = activeSemanticSelection();
   if (sem) {
     fitBox(new THREE.Box3().setFromObject(sem), 2.1);
@@ -522,6 +530,7 @@ function fitSelection() {
 }
 
 function selectGuid(guid, emit = true) {
+  requestRender();
   selectedGuid = guid || null;
 
   if (selectionHelper) {
@@ -623,6 +632,7 @@ function levelZ(key) {
 }
 
 function clearGroup(group) {
+  requestRender();
   for (const child of [...group.children]) {
     group.remove(child);
     disposeObjectTree(child);
@@ -647,6 +657,7 @@ function outline(points, z, color, fillOpacity = 0.28) {
 }
 
 function drawEdits() {
+  requestRender();
   clearGroup(editsGroup);
   for (const edit of manualEdits) {
     if (planActive && planLevelKey != null && Number(edit.level_key) !== planLevelKey) continue;
@@ -786,6 +797,7 @@ function emitDraft(cursor, snapKind) {
 }
 
 function drawDraft(cursor, snapKind = null) {
+  requestRender();
   clearGroup(draftGroup);
   const z = levelZ(planLevelKey) + 0.08;
   snapMarker.visible = !!(cursor && snapKind && snapKind !== 'ortho');
@@ -853,6 +865,7 @@ function planClick(event) {
 }
 
 function fitPlan() {
+  requestRender();
   const box = new THREE.Box3();
   for (const child of semanticGroup.children) {
     if (child.visible && child.userData?.semantic) box.expandByObject(child);
@@ -912,6 +925,7 @@ function selectSemantic(object) {
 }
 
 function resize() {
+  requestRender();
   const width = Math.max(host.clientWidth, 1);
   const height = Math.max(host.clientHeight, 1);
   renderer.setSize(width, height, false);
@@ -988,9 +1002,24 @@ const resizeObserver = new ResizeObserver(entries => {
 });
 resizeObserver.observe(host);
 
-function animate() {
-  activeControls().update();
-  renderer.render(scene, activeCam());
+// Render on demand: a frame is drawn when the camera moves or something may have
+// changed (any input, a load, a resize), plus once a second as a safety net. A
+// large model drawn 60 times a second kept Chrome busy even when nothing moved.
+function requestRender() {
+  renderRequested = true;
+}
+for (const c of [controls, planControls]) c.addEventListener('change', requestRender);
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'click', 'input', 'change']) {
+  window.addEventListener(type, requestRender, { passive: true, capture: true });
+}
+
+function animate(time = 0) {
+  const moved = activeControls().update();
+  if (moved || renderRequested || time - lastRender > 1000) {
+    renderRequested = false;
+    lastRender = time;
+    renderer.render(scene, activeCam());
+  }
   requestAnimationFrame(animate);
 }
 resize();
@@ -1011,7 +1040,6 @@ window.IFCViewer = {
       if (existing) {
         modelGroup.remove(existing);
         existing.geometry.dispose();
-        existing.material.dispose();
         meshes.delete(item.global_id);
       }
 
@@ -1052,6 +1080,7 @@ window.IFCViewer = {
   },
 
   setMode(nextMode) {
+    requestRender();
     mode = ['simulation', 'overlay'].includes(nextMode) ? nextMode : 'source';
     const useSemantic = mode !== 'source' && semanticLoaded;
     modelGroup.visible = mode !== 'simulation' || !semanticLoaded;
@@ -1063,6 +1092,7 @@ window.IFCViewer = {
   },
 
   loadSemantic(model) {
+    requestRender();
     addSemanticPreview(model || {});
     drawEdits();
     if (planActive) requestAnimationFrame(() => rebuildSnapTargets());
@@ -1092,6 +1122,7 @@ window.IFCViewer = {
 
   // ---- 2D plan -------------------------------------------------------------
   enterPlan(levelKey) {
+    requestRender();
     if (!semanticLoaded) return false;
     planActive = true;
     planLevelKey = Number(levelKey);
@@ -1107,6 +1138,7 @@ window.IFCViewer = {
   },
 
   exitPlan() {
+    requestRender();
     planActive = false;
     planPoints = [];
     clearGroup(focusGroup);
@@ -1119,6 +1151,7 @@ window.IFCViewer = {
   },
 
   setPlanLevel(levelKey) {
+    requestRender();
     planLevelKey = Number(levelKey);
     planPoints = [];
     clearGroup(focusGroup);
@@ -1186,6 +1219,7 @@ window.IFCViewer = {
 
   // Screen position (client px) of an IFC plan point on the current plan level (QA helper).
   planScreenPoint(x, y) {
+    activeCam().updateMatrixWorld();      // frames are drawn on demand: matrices may be one change behind
     const v = new THREE.Vector3(Number(x), levelZ(planLevelKey), -Number(y)).project(activeCam());
     const rect = renderer.domElement.getBoundingClientRect();
     return { x: rect.left + (v.x + 1) / 2 * rect.width, y: rect.top + (1 - v.y) / 2 * rect.height };
@@ -1193,6 +1227,7 @@ window.IFCViewer = {
 
   // Centre the plan on (x, y) of the current plan level and ring it (review queue).
   focusPlanPoint(x, y, radius = 1.5, halfHeight = 9) {
+    requestRender();
     if (!planActive) return false;
     clearGroup(focusGroup);
     const z = levelZ(planLevelKey) + 0.05;

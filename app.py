@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ifc_geometry_service import EXTRACTOR_VERSION, GeometryFailed
+from ifc_geometry_service import EXTRACTOR_VERSION, VIEW_MAX_TRIANGLES, GeometryFailed
 import model_jobs
 from model_jobs import JobFailed
 from ifc_service import ifcopenshell_version
@@ -69,6 +69,16 @@ def _host_only(value: str) -> str:
     if value.startswith("["):
         return value.split("]")[0] + "]"
     return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """The UI files change with every update of the app: the browser must check
+    them (cheap 304 when unchanged) instead of running a cached older viewer."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.middleware("http")
@@ -529,9 +539,12 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="ต้องตรวจ IFC ก่อนโหลดโมเดล 3D")
 
     cache_path = ifc_cache_path(path, request.mode, request.storey_ids, request.tier)
+    # The browser gets a lighter copy (heavy meshes as footprint prisms); the full
+    # meshes stay in cache_path for the pedestrian model.
+    view_path = cache_path.with_name(cache_path.stem + f"_view{VIEW_MAX_TRIANGLES}.json")
     try:
         result = model_jobs.run(
-            "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path,
+            "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path, view_path,
             files=[path], kind="geometry",
             mode=request.mode, storey_ids=request.storey_ids, tier=request.tier,
             source_sha256=upload_sha256(path), max_elements=VIEW_MAX_ELEMENTS,
@@ -546,7 +559,7 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
             "การเตรียมโมเดลคนเดินไม่ได้ใช้ขีดจำกัดนี้"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
-    prune_geometry_cache(keep=cache_path)
+    prune_geometry_cache(keep=view_path)
 
     with store.lock:
         state = reread_state_for(path)
@@ -573,7 +586,7 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         store.write(state)
     # The meshes go to the browser straight from the cache file: the server
     # process never parses them (a 371 MB IFC gives about 140 MB of meshes).
-    return FileResponse(cache_path, media_type="application/json")
+    return FileResponse(view_path, media_type="application/json")
 
 
 @app.get("/api/revision")

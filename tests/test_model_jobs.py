@@ -106,7 +106,8 @@ def test_reimported_file_reuses_cached_geometry(tmp_path, monkeypatch):
         assert geo["outcome"] == "success" and geo["element_count"] == 1
         sources.append(geo["source_file"])
     assert sources[0] == sources[1]                     # second import served from the first one's cache
-    assert len(list((tmp_path / "CACHE_DIR").glob("geo_*.json"))) == 1
+    cached = sorted(p.name for p in (tmp_path / "CACHE_DIR").glob("geo_*.json"))
+    assert len(cached) == 2 and cached[1].endswith("_view2000.json")    # full meshes + lighter view copy
     assert c.post("/api/ifc/semantic").status_code == 200
 
 
@@ -125,3 +126,23 @@ def test_elements_that_could_not_be_meshed_reach_the_checklist(tmp_path):
     assert any("could not be tessellated" in w for w in sem["ifc_semantic"]["warnings"])
     item = next(i for i in evaluate_gate(sem, None)["items"] if i["id"] == "mesh_failed")
     assert item["policy"] == "check" and slab.GlobalId in item["identities"]
+
+
+def test_view_copy_simplifies_only_heavy_meshes():
+    from ifc_geometry_service import view_payload
+
+    heavy_v, heavy_i = [], []
+    for k in range(400):                               # a finely tessellated 1 x 0.1 x 2 m door
+        x = k / 400
+        heavy_v += [x, 0, 0, x, 0.1, 0, x, 0, 2.0]
+        heavy_i += [3 * k, 3 * k + 1, 3 * k + 2] * 6
+    light = {"global_id": "W", "vertices": [0, 0, 0, 1, 0, 0, 0, 1, 0], "indices": [0, 1, 2]}
+    door = {"global_id": "D", "vertices": heavy_v, "indices": heavy_i}
+    out = view_payload({"elements": [light, door], "triangle_count": 2401}, max_triangles=2000)
+    w, d = out["elements"]
+    assert w == light                                    # untouched
+    assert d["simplified_from_triangles"] == 2400 and len(d["indices"]) // 3 < 20
+    zs = d["vertices"][2::3]
+    xs = d["vertices"][0::3]
+    assert min(zs) == 0 and max(zs) == 2.0 and min(xs) == 0 and max(xs) >= 0.99
+    assert out["simplified_elements"] == 1 and out["source_triangle_count"] == 2401

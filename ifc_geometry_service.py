@@ -390,10 +390,72 @@ def extract_ifc_geometry(
     return payload
 
 
-def extract_to_cache(path: Path, cache_path: Path, **kwargs: Any) -> dict[str, Any]:
-    """Worker-process entry: extract (or reuse) geometry into ``cache_path`` and
-    return only a summary, so the meshes never pass through the server process."""
+# The 3D view gets a lighter copy of the meshes: an element with more triangles
+# than this (manufacturer door families reach 148,000) is shown as its footprint
+# hull extruded over its height. Measured on one storey of a 371 MB model: 246
+# doors were 1.7 M of its 2.3 M triangles; with this limit the storey is ~0.3 M.
+# The pedestrian model always uses the full meshes.
+VIEW_MAX_TRIANGLES = 2000
+
+
+def _hull_prism(vertices: list[float]) -> tuple[list[float], list[int]] | None:
+    """Convex footprint of the vertices extruded from their lowest to highest z."""
+    from shapely.geometry import MultiPoint, Polygon as _Polygon
+
+    xs, ys, zs = vertices[0::3], vertices[1::3], vertices[2::3]
+    hull = MultiPoint(list(zip(xs, ys))).convex_hull
+    z0, z1 = min(zs), max(zs)
+    if not isinstance(hull, _Polygon) or hull.area <= 1e-9:
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        pad = 0.005                                   # flat or thin: a slim box
+        ring = [(x0 - pad, y0 - pad), (x1 + pad, y0 - pad), (x1 + pad, y1 + pad), (x0 - pad, y1 + pad)]
+    else:
+        ring = list(hull.exterior.coords)[:-1]
+    n = len(ring)
+    verts: list[float] = []
+    for z in (z0, z1):
+        for x, y in ring:
+            verts += [round(x, 6), round(y, 6), round(z, 6)]
+    faces: list[int] = []
+    for i in range(1, n - 1):                         # convex: fan triangulation
+        faces += [0, i + 1, i, n, n + i, n + i + 1]
+    for i in range(n):
+        j = (i + 1) % n
+        faces += [i, j, n + j, i, n + j, n + i]
+    return verts, faces
+
+
+def view_payload(payload: dict[str, Any], max_triangles: int = VIEW_MAX_TRIANGLES) -> dict[str, Any]:
+    """Copy of a geometry payload for the browser, heavy meshes simplified."""
+    elements = []
+    simplified = 0
+    triangles = vertices = 0
+    for item in payload.get("elements", []):
+        tris = len(item["indices"]) // 3
+        if tris > max_triangles:
+            prism = _hull_prism(item["vertices"])
+            if prism is not None:
+                item = {**item, "vertices": prism[0], "indices": prism[1], "simplified_from_triangles": tris}
+                simplified += 1
+        triangles += len(item["indices"]) // 3
+        vertices += len(item["vertices"]) // 3
+        elements.append(item)
+    return {**payload, "elements": elements, "triangle_count": triangles, "vertex_count": vertices,
+            "source_triangle_count": payload.get("triangle_count"), "simplified_elements": simplified,
+            "view_max_triangles": max_triangles}
+
+
+def extract_to_cache(path: Path, cache_path: Path, view_path: Path | None = None, **kwargs: Any) -> dict[str, Any]:
+    """Worker-process entry: extract (or reuse) geometry into ``cache_path`` (and a
+    lighter copy for the 3D view into ``view_path``) and return only a summary, so
+    the meshes never pass through the server process."""
     payload = extract_ifc_geometry(path, cache_path=cache_path, **kwargs)
+    if view_path is not None:
+        view = view_payload(payload)
+        tmp = view_path.with_name(view_path.name + ".tmp")
+        tmp.write_text(json.dumps(view, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, view_path)
+        payload = view
     return {key: payload.get(key) for key in (
         "outcome", "element_count", "candidate_element_count", "triangle_count", "vertex_count",
-        "mesh_failures", "storeys", "categories")}
+        "mesh_failures", "storeys", "categories", "simplified_elements")}
