@@ -84,6 +84,19 @@ build 0.4 s, JS heap 322 MB. The per-request view limit is now 25,000
 on a real GPU with ~17k separate meshes is not measured yet (the test machine
 renders in software); merging meshes per storey/class is the fix if it is slow.
 
+## Ground storey of model C (reported: Chrome nearly froze)
+
+7,541 elements, 2.26 M triangles, of which 246 doors (manufacturer families up
+to 148,000 triangles each) were 1.7 M; the review tier adds 1.9 M more.
+
+- Old version on the 7.8 GB test machine: the server process was killed by the
+  system (out of memory) while opening this storey.
+- New version: the storey job peaked at 4.2 GB (one job at a time), and the
+  browser received the view copy: 294k triangles, JSON parse 0.15 s, mesh build
+  0.14 s, JS heap 67 MB. The 3D view also shares materials and draws frames on
+  demand. Tessellating the storey took 232 s on 2 cores (each storey request
+  reads the whole 371 MB IFC again).
+
 ## Still open
 
 - Frame rate with tens of thousands of meshes on a real GPU (see above).
