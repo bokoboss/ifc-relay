@@ -153,7 +153,9 @@ def current_upload_or_404() -> Path:
 # Heavy IFC work (audit, tessellation, pedestrian model, stairs) runs as jobs in
 # fresh worker processes scheduled against the computer's memory (model_jobs.py):
 # the server process never holds a large IFC, and a job that dies is reported.
-model_jobs.LOG_PATH = RUNTIME_DIR / "logs" / "performance.jsonl"
+_perf_log = os.environ.get("VBB_PERF_LOG")          # "" turns the log off (tests)
+model_jobs.LOG_PATH = (Path(_perf_log) if _perf_log else None) if _perf_log is not None \
+    else RUNTIME_DIR / "logs" / "performance.jsonl"
 
 
 # The 12,000-element guard protects the browser, which receives every mesh.
@@ -446,7 +448,15 @@ def analyze() -> dict[str, Any]:
 
     if suffix == ".ifc":
         try:
-            result = model_jobs.run("audit", "ifc_service:audit_ifc", path, files=[path], kind="open")
+            # The audit of the same file content is reused (re-imports, revisions).
+            audit_cache = CACHE_DIR / f"audit_{upload_sha256(path)[:24]}_{APP_VERSION}.json"
+            if audit_cache.exists():
+                result = json.loads(audit_cache.read_text(encoding="utf-8"))
+                result["source_file"] = str(path)
+            else:
+                result = model_jobs.run("audit", "ifc_service:audit_ifc", path, files=[path], kind="open")
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                audit_cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         except ImportError as exc:
             raise HTTPException(
                 status_code=500,
