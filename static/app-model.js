@@ -205,25 +205,82 @@ function renderVerticalConnections(connections) {
   }
 }
 
+// Stair/ramp units and the engineer's decisions. The state is never shown as
+// "0 stairs" when it is only unknown (loading or failed) (UX-04).
 let stairOverview = null;
+let stairState = 'unknown';         // unknown | loading | ready | error
+let stairBusy = false;
 
-function renderStairOverview(overview) {
-  stairOverview = overview;
-  const counts = overview?.counts || { units: 0, include: 0, review: 0, exclude: 0 };
-  document.getElementById('stairUnits').textContent = counts.units;
-  document.getElementById('stairIncluded').textContent = counts.include;
-  document.getElementById('stairReview').textContent = counts.review;
+function renderStairOverview(overview, state = overview ? 'ready' : stairState) {
+  stairOverview = overview || stairOverview;
+  stairState = state;
+  const counts = stairState === 'ready' ? (stairOverview?.counts || {}) : null;
+  const show = v => (counts ? String(v ?? 0) : stairState === 'loading' ? '…' : '–');
+  document.getElementById('stairUnits').textContent = show(counts?.units);
+  document.getElementById('stairIncluded').textContent = show(counts?.include);
+  document.getElementById('stairReview').textContent = show(counts?.review);
   const btn = document.getElementById('stairBulkBtn');
-  if (btn) btn.disabled = !counts.review;
-  document.getElementById('stairResetBtn')?.classList.toggle('hidden', !counts.include);
+  if (btn) {
+    btn.disabled = stairBusy || stairState === 'loading' || (stairState === 'ready' && !counts.review);
+    btn.textContent = stairBusy ? 'กำลังนำเข้าบันได…'
+      : stairState === 'loading' ? 'กำลังอ่านรายการบันได…'
+      : stairState === 'error' ? 'อ่านรายการบันไดไม่สำเร็จ · ลองใหม่'
+      : 'นำเข้าบันไดทั้งหมด…';
+    btn.classList.toggle('needs-action', stairState === 'ready' && counts.review > 0);
+  }
+  document.getElementById('stairResetBtn')?.classList.toggle('hidden', !(counts && counts.include));
+  // Pending decisions are visible next to "prepare", not only at the bottom of the left panel (UX-02).
+  const chip = document.getElementById('stairPendingChip');
+  if (chip) {
+    const pending = counts ? counts.review : 0;
+    chip.classList.toggle('hidden', !pending);
+    chip.textContent = pending ? `บันได ${pending} ชุดยังไม่ได้นำเข้า` : '';
+  }
 }
 
 async function refreshStairOverview() {
+  renderStairOverview(null, 'loading');
   try {
-    renderStairOverview(await api('/api/stairs'));
+    renderStairOverview(await api('/api/stairs'), 'ready');
   } catch (error) {
-    renderStairOverview(null);
+    renderStairOverview(null, 'error');
+    setMessage(`อ่านรายการบันไดไม่สำเร็จ: ${error.message} · กดปุ่มในบล็อก "บันไดและทางลาด" เพื่อลองใหม่`);
   }
+}
+
+function showStairBlock() {
+  const block = document.getElementById('stairReviewBlock');
+  if (!block) return;
+  block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  block.classList.remove('flash');
+  void block.offsetWidth;                 // restart the highlight
+  block.classList.add('flash');
+  document.getElementById('stairBulkBtn')?.focus({ preventScroll: true });
+}
+document.getElementById('stairPendingChip')?.addEventListener('click', showStairBlock);
+
+// Before preparing: units still in review will not be in the model. Asked once per
+// pending count, so re-preparing does not nag; "include" applies the bulk action first.
+let stairSkipAcknowledged = null;
+async function confirmStairsBeforePrepare() {
+  const pending = stairState === 'ready' ? stairOverview?.counts?.review || 0 : 0;
+  if (!pending || stairSkipAcknowledged === pending) return true;
+  const dialog = document.getElementById('stairPrepareConfirm');
+  if (!dialog) return true;
+  document.getElementById('stairPrepareLead').textContent =
+    `IFC มีบันได/ทางลาด ${stairOverview.counts.units} ชุด · ยังไม่ได้นำเข้า ${pending} ชุด · ถ้าเตรียมต่อ โมเดลคนเดินรอบนี้จะไม่มีบันไดเหล่านี้`;
+  const choice = await new Promise(resolve => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true });
+    dialog.returnValue = '';
+    dialog.showModal();
+    document.getElementById('stairPrepareInclude').focus();
+  });
+  if (choice === 'include') return runStairBulk('include');
+  if (choice === 'skip') {
+    stairSkipAcknowledged = pending;
+    return true;
+  }
+  return false;                           // Esc: nothing happens
 }
 
 function hideStairConfirm() {
@@ -249,7 +306,11 @@ async function applyStairBulk(status) {
 }
 
 document.getElementById('stairBulkBtn')?.addEventListener('click', async () => {
-  await refreshStairOverview();
+  if (stairBusy) return;
+  if (stairState !== 'ready') {
+    await refreshStairOverview();
+    if (stairState !== 'ready') return;
+  }
   const c = stairOverview?.counts;
   if (!c || !c.review) {
     setMessage('ไม่มีบันไดหรือทางลาดที่รอตรวจสอบ');
@@ -263,24 +324,39 @@ document.getElementById('stairBulkBtn')?.addEventListener('click', async () => {
 
 document.getElementById('stairCancelBtn')?.addEventListener('click', hideStairConfirm);
 
+// Bulk include with a visible busy state; a second click while it runs does nothing (UX-03).
+async function runStairBulk(status) {
+  if (stairBusy) return false;
+  stairBusy = true;
+  renderStairOverview(null, stairState);
+  const confirmBtn = document.getElementById('stairConfirmBtn');
+  if (confirmBtn) confirmBtn.disabled = true;
+  const started = Date.now();
+  const tick = setInterval(() => setMessage(
+    `${status === 'include' ? 'กำลังนำเข้าบันได/ทางลาด' : 'กำลังคืนสถานะบันได'} · ${Math.round((Date.now() - started) / 1000)} วิ`), 1000);
+  try {
+    const result = await applyStairBulk(status);
+    setMessage(status === 'include'
+      ? `นำเข้าบันได/ทางลาดแล้ว ${result.overview.counts.include} ชุด · กด "เตรียมโมเดลคนเดิน" เพื่อดูลูกศรทิศขึ้นใน 3D`
+      : 'คืนบันได/ทางลาดทั้งหมดเป็น "รอตรวจสอบ" แล้ว');
+    return true;
+  } catch (error) {
+    setMessage(`${status === 'include' ? 'นำเข้าบันได' : 'คืนสถานะบันได'}ไม่สำเร็จ: ${error.message}`);
+    return false;
+  } finally {
+    clearInterval(tick);
+    stairBusy = false;
+    if (confirmBtn) confirmBtn.disabled = false;
+    renderStairOverview(null, stairState);
+  }
+}
+
 document.getElementById('stairConfirmBtn')?.addEventListener('click', async () => {
   hideStairConfirm();
-  try {
-    const result = await applyStairBulk('include');
-    setMessage(`นำเข้าบันได/ทางลาดแล้ว ${result.overview.counts.include} ชุด · กด "เตรียมโมเดลคนเดิน" เพื่อดูลูกศรทิศขึ้นใน 3D`);
-  } catch (error) {
-    setMessage(`นำเข้าบันไดไม่สำเร็จ: ${error.message}`);
-  }
+  await runStairBulk('include');
 });
 
-document.getElementById('stairResetBtn')?.addEventListener('click', async () => {
-  try {
-    await applyStairBulk('auto');
-    setMessage('คืนบันได/ทางลาดทั้งหมดเป็น "รอตรวจสอบ" แล้ว');
-  } catch (error) {
-    setMessage(`คืนสถานะบันไดไม่สำเร็จ: ${error.message}`);
-  }
-});
+document.getElementById('stairResetBtn')?.addEventListener('click', () => runStairBulk('auto'));
 
 function renderConnectivity(con) {
   const note = document.getElementById('connectivityNote');
@@ -430,7 +506,9 @@ function runAutoPrepare() {
   prepareModel({ auto: true });
 }
 
-generateSemanticBtn.addEventListener('click', () => prepareModel());
+generateSemanticBtn.addEventListener('click', async () => {
+  if (await confirmStairsBeforePrepare()) prepareModel();
+});
 
 async function prepareModel({ auto = false } = {}) {
   if (preparing) return;

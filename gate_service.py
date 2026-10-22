@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-22.1"
+POLICY_VERSION = "2026-10-22.2"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -107,6 +107,13 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
                            "พื้นที่สีแดงใน 3D · วัดจากโครงข่ายใหญ่ที่สุด (ยังไม่ได้กำหนดทางออก) · "
                            "ประตู/ช่องเปิดหรือบันไดที่ขาด หรือเป็นห้องปิด/ช่องท่อ"))
 
+    stairs = info.get("stair_decisions") or {}
+    if stairs.get("review"):
+        n, total = int(stairs["review"]), int(stairs.get("units") or 0)
+        items.append(_item("stairs_pending", "check", stairs.get("pending_global_ids") or [f"stairs_pending:{n}"],
+                           f"บันได/ทางลาดที่ยังไม่ได้นำเข้า ({n} จาก {total} ชุด)",
+                           "โมเดลนี้ไม่มีบันได/ทางลาดเหล่านี้ · นำเข้าในแผงซ้าย \"บันไดและทางลาด\" แล้วเตรียมใหม่ "
+                           "หรือสร้างเองใน Viswalk", count=n))
     review_dir = [str(v.get("ifc_global_id") or v.get("key")) for v in vcs if v.get("direction_status") == "needs_review"]
     if review_dir:
         items.append(_item("stair_direction_review", "check", review_dir, "ทิศบันไดหาจาก Geometry ไม่ได้",

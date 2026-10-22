@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=10" />
+  <link rel="stylesheet" href="/static/app.css?v=11" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -60,6 +60,7 @@
               title="แปลงพื้น ผนัง ช่องเปิด เสา และองค์ประกอบที่เลือกเป็น Geometry สำหรับ Viswalk พร้อมแสดง Simulation Preview ใน 3D">
               เตรียมโมเดลคนเดิน
             </button>
+            <button id="stairPendingChip" type="button" class="decision-chip hidden" title="บันได/ทางลาดที่ยังไม่ได้นำเข้าจะไม่อยู่ในโมเดลคนเดิน · คลิกเพื่อไปที่รายการบันได"></button>
             <button id="validateBtn" class="secondary-btn" disabled
               title="ให้ Geometry Engine ตรวจว่าสร้างไฟล์จากโมเดลนี้ได้หรือไม่ และรวบรวมเรื่องที่ต้องไปตรวจใน Viswalk · ไม่ใช่การรับรองโมเดล">ตรวจ Geometry</button>
             <button id="buildViswalkBtn" class="build-btn" disabled
@@ -543,6 +544,17 @@
       </section>
       </div>
 
+      <dialog id="stairPrepareConfirm" class="build-confirm" aria-labelledby="stairPrepareTitle">
+        <form method="dialog">
+          <h2 id="stairPrepareTitle">บันได/ทางลาดยังไม่ได้นำเข้า</h2>
+          <p id="stairPrepareLead"></p>
+          <p class="build-confirm-note">ค่าเริ่มต้นของบันไดทุกตัวคือ "รอตรวจสอบ" · ชุดที่ตั้งเป็น "ไม่ใช้" จะไม่ถูกเปลี่ยน</p>
+          <div class="build-confirm-actions">
+            <button value="skip" class="secondary-btn">เตรียมต่อโดยยังไม่ใส่</button>
+            <button value="include" class="build-btn" id="stairPrepareInclude">นำเข้าทั้งหมดแล้วเตรียม</button>
+          </div>
+        </form>
+      </dialog>
       <dialog id="buildConfirm" class="build-confirm" aria-labelledby="buildConfirmTitle">
         <form method="dialog">
           <h2 id="buildConfirmTitle">สร้างไฟล์ Viswalk</h2>
@@ -565,7 +577,7 @@
 
   <script src="/static/app.js?v=057" defer></script>
   <script src="/static/app-plan.js?v=055" defer></script>
-  <script src="/static/app-model.js?v=054" defer></script>
+  <script src="/static/app-model.js?v=058" defer></script>
   <script src="/static/app-review.js?v=054" defer></script>
   <script src="/static/app-tree.js?v=054" defer></script>
   <script src="/static/app-build.js?v=054" defer></script>

@@ -190,6 +190,13 @@ def job_error_detail(exc: Exception, what: str) -> str:
     return f"{what}: {type(exc).__name__}: {exc}"
 
 
+def write_json_atomic(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 _SHA_MEMO: dict[tuple[str, int, float], str] = {}
 
 
@@ -469,9 +476,10 @@ def analyze() -> dict[str, Any]:
                 result = json.loads(audit_cache.read_text(encoding="utf-8"))
                 result["source_file"] = str(path)
             else:
-                result = model_jobs.run("audit", "ifc_service:audit_ifc", path, files=[path], kind="open")
-                CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                audit_cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+                result, stairs = model_jobs.run("audit", "ifc_vertical_service:audit_with_stairs", path,
+                                                files=[path], kind="open")
+                write_json_atomic(audit_cache, result)
+                write_json_atomic(stair_structure_cache(path), stairs)
         except ImportError as exc:
             raise HTTPException(
                 status_code=500,
@@ -656,12 +664,29 @@ class StairBulkUpdate(BaseModel):
     status: Literal["include", "auto"]
 
 
+def stair_structure_cache(path: Path) -> Path:
+    return CACHE_DIR / f"stairs_{upload_sha256(path)[:24]}_{APP_VERSION}.json"
+
+
 def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]:
+    """Stair/ramp units with the current decisions. The units come from the
+    audit's read of the IFC (cached by content), so counting and bulk changes
+    do not read the IFC again."""
+    from ifc_vertical_service import stair_overview_from_structure
+
+    cache = stair_structure_cache(path)
     try:
-        return model_jobs.run("stairs", "ifc_vertical_service:stair_overview_for_file", path, overrides,
-                              files=[path], kind="open")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "Stair overview failed"))
+        structure = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else None
+    except (OSError, ValueError):
+        structure = None
+    if structure is None:
+        try:
+            structure = model_jobs.run("stairs", "ifc_vertical_service:stair_structure_for_file", path,
+                                       files=[path], kind="open")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=job_error_detail(exc, "อ่านรายการบันไดไม่สำเร็จ"))
+        write_json_atomic(cache, structure)
+    return stair_overview_from_structure(structure, overrides)
 
 
 @app.get("/api/stairs")
