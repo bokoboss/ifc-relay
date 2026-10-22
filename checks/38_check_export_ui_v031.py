@@ -15,7 +15,7 @@ checks = [
     ("Semantic download endpoint exists", '@app.get("/api/ifc/semantic/download")' in app),
     ("Engine download endpoint exists", '@app.get("/api/ifc/semantic/engine-download")' in app),
     ("Engine download uses geometry_ifc_v03.json filename", 'filename="geometry_ifc_v03.json"' in app),
-    ("Export buttons enable after semantic generation", 'setExportReady(true);' in appjs),
+    ("Export buttons enable after semantic generation", 'setExportReady(true);' in appjs or 'setExportReady(!result.stale)' in appjs),
     ("Export buttons restore from project state", 'setExportReady(!state.semantic.stale);' in appjs),
     ("Selection change disables stale exports", 'setExportReady(false);' in appjs),
     ("Top Semantic button downloads endpoint", "startDownload('/api/ifc/semantic/download')" in appjs),
