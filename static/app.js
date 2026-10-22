@@ -666,10 +666,15 @@ async function runLoad3d() {
     if (request.tier === 'core') loadReviewTier(request, seq);
     updateSelectionSummary();
     refreshStairOverview();
+    // Partial success is said, never shown as a complete model.
+    const failed = (geometry.mesh_failures || []).length;
+    const partial = failed
+      ? ` · ⚠ ${failed} ชิ้นสร้างรูปทรงไม่ได้ จึงไม่อยู่ในมุมมองนี้ (ตัวอย่าง: ${String(geometry.mesh_failures[0].error || '').slice(0, 80)})`
+      : '';
     setMessage(
-      request.append
+      (request.append
         ? 'เพิ่มชั้นในมุมมอง 3D แล้ว · ตรวจการคัดเลือก หรือเพิ่มชั้นถัดไป'
-        : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"'
+        : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"') + partial
     );
     return true;
   } catch (error) {

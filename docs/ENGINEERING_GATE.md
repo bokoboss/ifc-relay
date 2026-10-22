@@ -1,6 +1,6 @@
 # Before the build: what stops it, what to check in Viswalk
 
-This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-21.3). The build endpoint re-validates and re-evaluates the list before starting Vissim.
+This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-22.1). The build endpoint re-validates and re-evaluates the list before starting Vissim.
 
 | Item | Policy | Why |
 | --- | --- | --- |
@@ -15,6 +15,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Stair ends using a z offset | check | Check the connection in Vissim |
 | Slabs 0.25–0.40 m off the floor merged into it (a step people may not walk over) | check | Add an obstacle or ramp in Viswalk if it is a real step |
 | Far off-level slabs left out of the floor | check | Usually sunscreens/canopies; include them if walkable |
+| Elements IfcOpenShell could not tessellate (missing from the model) | check | Check them in a BIM viewer; add them in Viswalk if they matter |
 | Doors that could not become openings | check | The wall stays closed there |
 | Walkable-looking openings still closed | check | Open real passages in the app or in Viswalk |
 | Multi-storey wall copies without door gaps | check | Upper storeys may need doors |

@@ -540,3 +540,13 @@ def stair_overview(model: Any, overrides: dict[str, str], parent_of: dict[int, A
         "exclude": sum(1 for u in units if u["state"] == "exclude"),
     }
     return {"counts": counts, "units": units}
+
+
+def stair_overview_for_file(path: Any, overrides: dict[str, str]) -> dict[str, Any]:
+    """Worker-process entry: open the IFC and summarise its stairs/ramps."""
+    import ifcopenshell
+
+    from ifc_semantic_service import _parent_map
+
+    model = ifcopenshell.open(str(path))
+    return stair_overview(model, overrides, _parent_map(model), children_map(model))

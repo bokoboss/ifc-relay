@@ -15,3 +15,12 @@ def test_cross_site_and_foreign_host_are_refused():
     assert c.post("/api/project/reset", headers={"Origin": "http://127.0.0.1:8765"}).status_code == 200
     assert c.post("/api/project/reset", headers={"Origin": "http://localhost:8765",
                                                  "Sec-Fetch-Site": "same-origin"}).status_code == 200
+
+
+def test_ui_files_are_revalidated():
+    from fastapi.testclient import TestClient
+
+    import app as app_module
+
+    c = TestClient(app_module.app)
+    assert c.get("/static/app3d.js").headers.get("cache-control") == "no-cache"

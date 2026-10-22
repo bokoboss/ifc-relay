@@ -4,6 +4,7 @@ from version import GEOMETRY_PAYLOAD_VERSION
 
 import json
 import multiprocessing
+import os
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -16,6 +17,15 @@ from ifc_service import (
     resolve_storey,
     storey_lookup,
 )
+
+
+# Bump when the extracted meshes change, so cached geometry of an older
+# extractor is never reused (cache files carry it in their name).
+EXTRACTOR_VERSION = "g2"
+
+
+class GeometryFailed(RuntimeError):
+    """No usable geometry: the message says why (shown to the engineer)."""
 
 
 SKIP_TYPES = (
@@ -68,6 +78,25 @@ def _is_simulation_relevant(entity: Any) -> bool:
     # Review candidates remain available in the simulation-relevant view so the
     # engineer can explicitly promote/reject them.
     return status in {"include", "review"}
+
+
+def _placed_mesh(shape: Any, shared: dict[Any, tuple[Any, list[int]]]) -> tuple[list[float], list[int]]:
+    """World vertices (rounded) and triangle indices of one iterator shape.
+
+    The local mesh is read once per shared geometry; the shape's 4x4 placement
+    (column-major) moves it to world coordinates. Same result as the iterator's
+    world-coordinate mode."""
+    import numpy as np
+
+    geom = shape.geometry
+    cached = shared.get(geom.id)
+    if cached is None:
+        cached = (np.asarray(geom.verts, dtype=float).reshape(-1, 3), [int(v) for v in geom.faces])
+        shared[geom.id] = cached
+    local, faces = cached
+    m = np.asarray(shape.transformation.matrix, dtype=float).reshape(4, 4).T
+    world = local @ m[:3, :3].T + m[:3, 3]
+    return _round_list(world.ravel().tolist()), list(faces)
 
 
 def _round_list(values: Any, digits: int = 6) -> list[float]:
@@ -157,6 +186,7 @@ def extract_ifc_geometry(
     storey_ids: Iterable[int] | None = None,
     tier: str = "all",
     extra_guids: Iterable[str] | None = None,
+    source_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Extract browser/semantic mesh geometry with large-model filtering.
 
@@ -175,9 +205,10 @@ def extract_ifc_geometry(
     extra = sorted({str(g) for g in (extra_guids or [])})
 
     if cache_path is not None and cache_path.exists():
-        source_mtime = path.stat().st_mtime
-        cache_mtime = cache_path.stat().st_mtime
-        if cache_mtime >= source_mtime:
+        # Content-keyed caches (source_sha256) stay valid for a re-imported copy of
+        # the same file; otherwise the cache must be newer than the IFC.
+        fresh = (source_sha256 is not None) or cache_path.stat().st_mtime >= path.stat().st_mtime
+        if fresh:
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
             meta = cached.get("request", {})
             if (
@@ -185,7 +216,13 @@ def extract_ifc_geometry(
                 and {int(v) for v in meta.get("storey_ids", [])} == requested_storeys
                 and meta.get("tier", "all") == tier
                 and sorted(meta.get("extra_guids", [])) == extra
+                and cached.get("source_sha256") == source_sha256
+                and cached.get("extractor") == EXTRACTOR_VERSION
             ):
+                try:
+                    os.utime(cache_path)            # recently used: kept by the cache pruning
+                except OSError:
+                    pass
                 return cached
 
     ifcopenshell, util_element, _ = _imports()
@@ -209,9 +246,14 @@ def extract_ifc_geometry(
             "(preparing the pedestrian model: raise VBB_SEMANTIC_MAX_ELEMENTS if the computer has the memory)."
         )
 
+    # Local coordinates: elements that share a representation (mapped items,
+    # repeated types) are tessellated once by the iterator and placed here with
+    # their own transformation. World coordinates would tessellate every
+    # instance again (measured: 451 s -> 27 s for one large model's review tier).
     settings = ifcopenshell.geom.settings()
-    settings.set("use-world-coords", True)
+    settings.set("use-world-coords", False)
     settings.set("apply-default-materials", True)
+    shared: dict[Any, tuple[Any, list[int]]] = {}
 
     num_threads = max(1, min(8, multiprocessing.cpu_count()))
     iterator = ifcopenshell.geom.iterator(
@@ -227,16 +269,19 @@ def extract_ifc_geometry(
     total_triangles = 0
     total_vertices = 0
 
-    if iterator.initialize():
+    if elements and not iterator.initialize():
+        raise GeometryFailed(
+            f"IfcOpenShell could not start tessellating {len(elements)} element(s) of this IFC "
+            "(the geometry iterator did not initialise). The file may use geometry this IfcOpenShell "
+            "version cannot read; try loading one storey, or check the IFC in a BIM viewer."
+        )
+    if elements:
         while True:
             shape = None
             try:
                 shape = iterator.get()
                 element = model.by_id(shape.id)
-                geom = shape.geometry
-
-                verts = _round_list(geom.verts)
-                faces = [int(v) for v in geom.faces]
+                verts, faces = _placed_mesh(shape, shared)
 
                 if verts and faces:
                     storey = resolve_storey(element, lookup, util_element)
@@ -280,6 +325,12 @@ def extract_ifc_geometry(
             if not iterator.next():
                 break
 
+    if elements and not result_elements:
+        first = failures[0]["error"] if failures else "no triangles"
+        raise GeometryFailed(
+            f"None of the {len(elements)} element(s) produced a mesh ({len(failures)} failed; first: {first})."
+        )
+
     if model_bounds is None:
         model_bounds = {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]}
 
@@ -307,6 +358,10 @@ def extract_ifc_geometry(
             "extra_guids": extra,
             "filtered": mode != "full" or bool(requested_storeys) or tier != "all",
         },
+        "source_sha256": source_sha256,
+        "extractor": EXTRACTOR_VERSION,
+        # success: every element meshed; partial: some failed (listed in mesh_failures).
+        "outcome": "partial" if failures else "success",
         "candidate_element_count": len(elements),
         "element_count": len(result_elements),
         "mesh_failures": failures,
@@ -333,3 +388,74 @@ def extract_ifc_geometry(
         )
 
     return payload
+
+
+# The 3D view gets a lighter copy of the meshes: an element with more triangles
+# than this (manufacturer door families reach 148,000) is shown as its footprint
+# hull extruded over its height. Measured on one storey of a 371 MB model: 246
+# doors were 1.7 M of its 2.3 M triangles; with this limit the storey is ~0.3 M.
+# The pedestrian model always uses the full meshes.
+VIEW_MAX_TRIANGLES = 2000
+
+
+def _hull_prism(vertices: list[float]) -> tuple[list[float], list[int]] | None:
+    """Convex footprint of the vertices extruded from their lowest to highest z."""
+    from shapely.geometry import MultiPoint, Polygon as _Polygon
+
+    xs, ys, zs = vertices[0::3], vertices[1::3], vertices[2::3]
+    hull = MultiPoint(list(zip(xs, ys))).convex_hull
+    z0, z1 = min(zs), max(zs)
+    if not isinstance(hull, _Polygon) or hull.area <= 1e-9:
+        x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+        pad = 0.005                                   # flat or thin: a slim box
+        ring = [(x0 - pad, y0 - pad), (x1 + pad, y0 - pad), (x1 + pad, y1 + pad), (x0 - pad, y1 + pad)]
+    else:
+        ring = list(hull.exterior.coords)[:-1]
+    n = len(ring)
+    verts: list[float] = []
+    for z in (z0, z1):
+        for x, y in ring:
+            verts += [round(x, 6), round(y, 6), round(z, 6)]
+    faces: list[int] = []
+    for i in range(1, n - 1):                         # convex: fan triangulation
+        faces += [0, i + 1, i, n, n + i, n + i + 1]
+    for i in range(n):
+        j = (i + 1) % n
+        faces += [i, j, n + j, i, n + j, n + i]
+    return verts, faces
+
+
+def view_payload(payload: dict[str, Any], max_triangles: int = VIEW_MAX_TRIANGLES) -> dict[str, Any]:
+    """Copy of a geometry payload for the browser, heavy meshes simplified."""
+    elements = []
+    simplified = 0
+    triangles = vertices = 0
+    for item in payload.get("elements", []):
+        tris = len(item["indices"]) // 3
+        if tris > max_triangles:
+            prism = _hull_prism(item["vertices"])
+            if prism is not None:
+                item = {**item, "vertices": prism[0], "indices": prism[1], "simplified_from_triangles": tris}
+                simplified += 1
+        triangles += len(item["indices"]) // 3
+        vertices += len(item["vertices"]) // 3
+        elements.append(item)
+    return {**payload, "elements": elements, "triangle_count": triangles, "vertex_count": vertices,
+            "source_triangle_count": payload.get("triangle_count"), "simplified_elements": simplified,
+            "view_max_triangles": max_triangles}
+
+
+def extract_to_cache(path: Path, cache_path: Path, view_path: Path | None = None, **kwargs: Any) -> dict[str, Any]:
+    """Worker-process entry: extract (or reuse) geometry into ``cache_path`` (and a
+    lighter copy for the 3D view into ``view_path``) and return only a summary, so
+    the meshes never pass through the server process."""
+    payload = extract_ifc_geometry(path, cache_path=cache_path, **kwargs)
+    if view_path is not None:
+        view = view_payload(payload)
+        tmp = view_path.with_name(view_path.name + ".tmp")
+        tmp.write_text(json.dumps(view, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, view_path)
+        payload = view
+    return {key: payload.get(key) for key in (
+        "outcome", "element_count", "candidate_element_count", "triangle_count", "vertex_count",
+        "mesh_failures", "storeys", "categories", "simplified_elements")}

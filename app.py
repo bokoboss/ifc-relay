@@ -16,10 +16,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ifc_geometry_service import extract_ifc_geometry
-from ifc_semantic_service import build_semantic_model, write_semantic_model
-from ifc_service import audit_ifc, ifcopenshell_version
-from revision_service import compare_revisions, report_messages
+from ifc_geometry_service import EXTRACTOR_VERSION, VIEW_MAX_TRIANGLES, GeometryFailed
+import model_jobs
+from model_jobs import JobFailed
+from ifc_service import ifcopenshell_version
+from revision_service import report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
@@ -68,6 +69,16 @@ def _host_only(value: str) -> str:
     if value.startswith("["):
         return value.split("]")[0] + "]"
     return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    """The UI files change with every update of the app: the browser must check
+    them (cheap 304 when unchanged) instead of running a cached older viewer."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.middleware("http")
@@ -149,40 +160,69 @@ def current_upload_or_404() -> Path:
     return path
 
 
-# Tessellation (IfcOpenShell geometry iterator) holds the Python GIL for long
-# stretches, so running it in the server process stalls every other request
-# (e.g. "prepare pedestrian model" waited minutes behind the background
-# furniture/proxy load). It runs in worker processes instead.
-_GEOMETRY_POOL = None
+# Heavy IFC work (audit, tessellation, pedestrian model, stairs) runs as jobs in
+# fresh worker processes scheduled against the computer's memory (model_jobs.py):
+# the server process never holds a large IFC, and a job that dies is reported.
+_perf_log = os.environ.get("VBB_PERF_LOG")          # "" turns the log off (tests)
+model_jobs.LOG_PATH = (Path(_perf_log) if _perf_log else None) if _perf_log is not None \
+    else RUNTIME_DIR / "logs" / "performance.jsonl"
 
 
 # The 12,000-element guard protects the browser, which receives every mesh.
 # Preparing the pedestrian model runs in a worker process and never sends the
 # meshes to the browser, so it gets a much higher, configurable ceiling (PERF-01).
 SEMANTIC_MAX_ELEMENTS = int(os.environ.get("VBB_SEMANTIC_MAX_ELEMENTS", "80000"))
+# Per request to the 3D view. One storey of a 371 MB test model has 16,816
+# curtain-wall members/plates (818k triangles): 0.9 s to parse and 0.4 s to build
+# in the browser, so 12,000 refused a storey the browser handles. Frame rate on a
+# real GPU with that many meshes is still to be measured (batching is next).
+VIEW_MAX_ELEMENTS = int(os.environ.get("VBB_VIEW_MAX_ELEMENTS", "25000"))
+
+# Cached geometry is keyed by file content, so it is kept across re-imports;
+# the oldest files go when the folder grows past this.
+CACHE_MAX_MB = int(float(os.environ.get("VBB_CACHE_MAX_GB", "4")) * 1024)
 
 
-def extract_geometry_isolated(path: Path, **kwargs: Any) -> dict[str, Any]:
-    global _GEOMETRY_POOL
-    from concurrent.futures import ProcessPoolExecutor
-    from concurrent.futures.process import BrokenProcessPool
+def job_error_detail(exc: Exception, what: str) -> str:
+    """Message for a failed heavy job: plain for known causes, technical otherwise."""
+    if isinstance(exc, (JobFailed, GeometryFailed)):
+        return f"{what}: {exc}"
+    return f"{what}: {type(exc).__name__}: {exc}"
 
-    if os.environ.get("VBB_GEOMETRY_IN_PROCESS") == "1":
-        return extract_ifc_geometry(path, **kwargs)
-    for attempt in range(2):
-        if _GEOMETRY_POOL is None:
-            import multiprocessing
 
-            # "spawn" (the Windows default) everywhere: a forked copy of the running
-            # server would inherit uvicorn's state.
-            _GEOMETRY_POOL = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
+_SHA_MEMO: dict[tuple[str, int, float], str] = {}
+
+
+def upload_sha256(path: Path) -> str:
+    """SHA-256 of the imported IFC (recorded at import; computed once otherwise)."""
+    upload = store.read().get("upload") or {}
+    if upload.get("path") == str(path) and upload.get("sha256"):
+        return str(upload["sha256"])
+    stat = path.stat()
+    key = (str(path), stat.st_size, stat.st_mtime)
+    if key not in _SHA_MEMO:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(8 * 1024 * 1024), b""):
+                digest.update(chunk)
+        _SHA_MEMO[key] = digest.hexdigest()
+    return _SHA_MEMO[key]
+
+
+def prune_geometry_cache(keep: Path | None = None) -> None:
+    """Drop the least recently used cached geometry beyond CACHE_MAX_MB."""
+    try:
+        files = sorted(CACHE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    total = 0
+    for p in files:
         try:
-            return _GEOMETRY_POOL.submit(extract_ifc_geometry, path, **kwargs).result()
-        except BrokenProcessPool:
-            _GEOMETRY_POOL = None
-            if attempt:
-                raise
-    raise RuntimeError("geometry worker unavailable")
+            total += p.stat().st_size
+        except OSError:
+            continue
+        if total > CACHE_MAX_MB * 1024 * 1024 and p != keep:
+            p.unlink(missing_ok=True)
 
 
 def ifc_cache_path(
@@ -192,15 +232,15 @@ def ifc_cache_path(
     tier: str = "all",
     extra_guids: list[str] | None = None,
 ) -> Path:
-    import hashlib
-
-    token = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)
+    """Cached geometry for one request, keyed by the IFC's content (not the
+    upload name), the extractor version and every request condition."""
+    sha = upload_sha256(path)
     storey_token = "all" if not storey_ids else "s" + "-".join(str(int(v)) for v in sorted(set(storey_ids)))
     mode_token = "sim" if mode == "simulation_relevant" else "full"
     tier_token = "" if tier == "all" else f"_{tier}"
     if extra_guids:
         tier_token += "_x" + hashlib.sha1("|".join(sorted(extra_guids)).encode()).hexdigest()[:8]
-    return CACHE_DIR / f"{token}_geometry_v041_{mode_token}_{storey_token}{tier_token}.json"
+    return CACHE_DIR / f"geo_{sha[:24]}_{EXTRACTOR_VERSION}_{mode_token}_{storey_token}{tier_token}.json"
 
 
 def ifc_semantic_path(path: Path) -> Path:
@@ -349,10 +389,12 @@ async def import_file(
     target = UPLOAD_DIR / f"{token}_{original}"
     limit = int(float(os.environ.get("VBB_MAX_UPLOAD_MB", "2048")) * 1024 * 1024)
     size = 0
+    digest = hashlib.sha256()
     try:
         with open(target, "wb") as fh:
             while chunk := await file.read(4 * 1024 * 1024):
                 size += len(chunk)
+                digest.update(chunk)
                 if size > limit:
                     raise HTTPException(status_code=413,
                                         detail=f"ไฟล์ใหญ่เกิน {limit // (1024 * 1024)} MB (ตั้งค่า VBB_MAX_UPLOAD_MB ได้)")
@@ -385,6 +427,7 @@ async def import_file(
                 "path": str(target),
                 "extension": suffix,
                 "size_bytes": content_size,
+                "sha256": digest.hexdigest(),
             },
             "analysis": None,
             "geometry": None,
@@ -420,31 +463,37 @@ def analyze() -> dict[str, Any]:
 
     if suffix == ".ifc":
         try:
-            result = audit_ifc(path)
+            # The audit of the same file content is reused (re-imports, revisions).
+            audit_cache = CACHE_DIR / f"audit_{upload_sha256(path)[:24]}_{APP_VERSION}.json"
+            if audit_cache.exists():
+                result = json.loads(audit_cache.read_text(encoding="utf-8"))
+                result["source_file"] = str(path)
+            else:
+                result = model_jobs.run("audit", "ifc_service:audit_ifc", path, files=[path], kind="open")
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                audit_cache.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         except ImportError as exc:
             raise HTTPException(
                 status_code=500,
                 detail=f"IfcOpenShell is not installed. Run install.bat first. Details: {exc}",
             )
         except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"IFC audit failed: {type(exc).__name__}: {exc}",
-            )
+            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC audit failed"))
 
         revision = state.get("revision") or {}
         if revision.get("status") == "pending":
             previous_path_text = (revision.get("previous_upload") or {}).get("path")
             try:
-                carried, report = compare_revisions(
-                    Path(previous_path_text) if previous_path_text else None,
-                    path,
-                    (state.get("selection") or {}).get("overrides", {}),
+                previous_path = Path(previous_path_text) if previous_path_text else None
+                carried, report = model_jobs.run(
+                    "revision", "revision_service:compare_revisions",
+                    previous_path, path, (state.get("selection") or {}).get("overrides", {}),
+                    files=[p for p in (previous_path, path) if p is not None], kind="open",
                 )
             except Exception as exc:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Revision carry-over failed: {type(exc).__name__}: {exc}",
+                    detail=job_error_detail(exc, "Revision carry-over failed"),
                 )
             state.setdefault("selection", {"mode": "auto"})["overrides"] = carried
             state["revision"] = report
@@ -489,19 +538,28 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
     if not state.get("analysis"):
         raise HTTPException(status_code=400, detail="ต้องตรวจ IFC ก่อนโหลดโมเดล 3D")
 
+    cache_path = ifc_cache_path(path, request.mode, request.storey_ids, request.tier)
+    # The browser gets a lighter copy (heavy meshes as footprint prisms); the full
+    # meshes stay in cache_path for the pedestrian model.
+    view_path = cache_path.with_name(cache_path.stem + f"_view{VIEW_MAX_TRIANGLES}.json")
     try:
-        result = extract_geometry_isolated(
-            path,
-            cache_path=ifc_cache_path(path, request.mode, request.storey_ids, request.tier),
-            mode=request.mode,
-            storey_ids=request.storey_ids,
-            tier=request.tier,
+        result = model_jobs.run(
+            "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path, view_path,
+            files=[path], kind="geometry",
+            mode=request.mode, storey_ids=request.storey_ids, tier=request.tier,
+            source_sha256=upload_sha256(path), max_elements=VIEW_MAX_ELEMENTS,
         )
+    except ValueError as exc:
+        if "safety limit" not in str(exc):
+            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+        count = re.search(r"contains (\d+)", str(exc))
+        raise HTTPException(status_code=413, detail=(
+            f"ส่วนที่ขอเปิดมีชิ้นส่วน {count.group(1) if count else 'เกิน'} ชิ้น เกินที่จอ 3D รับได้ต่อครั้ง "
+            f"({VIEW_MAX_ELEMENTS:,} ชิ้น) · เลือกเปิดทีละชั้น หรือตั้ง VBB_VIEW_MAX_ELEMENTS ให้สูงขึ้นถ้าเครื่องแรงพอ · "
+            "การเตรียมโมเดลคนเดินไม่ได้ใช้ขีดจำกัดนี้"))
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"IFC geometry extraction failed: {type(exc).__name__}: {exc}",
-        )
+        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+    prune_geometry_cache(keep=view_path)
 
     with store.lock:
         state = reread_state_for(path)
@@ -526,7 +584,9 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
                 "message": "Filtered 3D IFC loaded. Review selection before semantic extraction.",
             }
         store.write(state)
-    return result
+    # The meshes go to the browser straight from the cache file: the server
+    # process never parses them (a 371 MB IFC gives about 140 MB of meshes).
+    return FileResponse(view_path, media_type="application/json")
 
 
 @app.get("/api/revision")
@@ -597,13 +657,11 @@ class StairBulkUpdate(BaseModel):
 
 
 def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]:
-    import ifcopenshell
-
-    from ifc_semantic_service import _parent_map
-    from ifc_vertical_service import children_map, stair_overview
-
-    model = ifcopenshell.open(str(path))
-    return stair_overview(model, overrides, _parent_map(model), children_map(model))
+    try:
+        return model_jobs.run("stairs", "ifc_vertical_service:stair_overview_for_file", path, overrides,
+                              files=[path], kind="open")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=job_error_detail(exc, "Stair overview failed"))
 
 
 @app.get("/api/stairs")
@@ -684,23 +742,21 @@ def generate_ifc_semantic() -> dict[str, Any]:
         # Review-rule elements (proxies, furniture...) are slow to tessellate and
         # only matter when the engineer included them, so mesh just those.
         included = sorted(g for g, status in overrides.items() if status == "include")
-        geometry = extract_geometry_isolated(
-            path,
-            cache_path=ifc_cache_path(path, "simulation_relevant", [], "core", included),
-            mode="simulation_relevant",
-            storey_ids=[],
-            tier="core",
-            extra_guids=included,
-            max_elements=SEMANTIC_MAX_ELEMENTS,
-        )
-        semantic = build_semantic_model(path, geometry, overrides, state.get("manual_edits") or [])
         output_path = ifc_semantic_path(path)
-        write_semantic_model(output_path, semantic)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"IFC semantic extraction failed: {type(exc).__name__}: {exc}",
+        geometry_cache = ifc_cache_path(path, "simulation_relevant", [], "core", included)
+        model_jobs.run(
+            "semantic", "ifc_semantic_service:build_semantic_to_file",
+            path, output_path, overrides, state.get("manual_edits") or [],
+            files=[path], kind="geometry",
+            geometry_cache_path=geometry_cache,
+            geometry_kwargs={"mode": "simulation_relevant", "storey_ids": [], "tier": "core",
+                             "extra_guids": included, "max_elements": SEMANTIC_MAX_ELEMENTS,
+                             "source_sha256": upload_sha256(path)},
         )
+        semantic = json.loads(output_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC semantic extraction failed"))
+    prune_geometry_cache(keep=geometry_cache)
 
     summary = semantic["ifc_semantic"]["summary"]
     warnings = semantic["ifc_semantic"]["warnings"]
