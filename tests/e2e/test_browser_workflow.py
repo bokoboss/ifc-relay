@@ -192,6 +192,9 @@ def _dock(page, tab):
 
 
 def _enter_plan(page, level="1"):
+    # After preparing, the issue list may open (pending items); draw with it folded.
+    if page.get_attribute("#reviewDock", "data-open") == "true":
+        page.click("#dockToggle")
     page.click("#planModeBtn")
     page.select_option("#planLevelSelect", level)
     page.evaluate("document.getElementById('viewerCanvasHost').scrollIntoView({block: 'center'})")
@@ -286,6 +289,10 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     _open(page, b.write(tmp_path / "plan.ifc"))
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    # UX-26: an unreachable floor is pending, so the issue list opens on it
+    page.wait_for_function("document.getElementById('reviewDock').dataset.open === 'true'")
+    assert page.get_attribute('.dock-tab[data-tab="issues"]', "aria-selected") == "true"
+    assert "เรื่องให้ตัดสินใจหรือตรวจ" in page.text_content("#messageText")
     _enter_plan(page)
     page.click("#autoPrepareBtn[aria-pressed=true]")                     # step through by hand first
     page.click(".plan-tool[data-tool=passage]")

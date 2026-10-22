@@ -266,6 +266,11 @@ async function refreshWorkflowState() {
     el.setAttribute('aria-description', words[steps[step]]);
   }
   document.getElementById('staleBanner').classList.toggle('hidden', !stale);
+  // Views of the pedestrian model look unavailable until it exists (UX-23).
+  for (const id of ['simulationModeBtn', 'overlayModeBtn', 'planModeBtn']) {
+    const b = document.getElementById(id);
+    if (b) { b.dataset.unavailable = String(!ready); b.title = ready ? '' : 'ใช้ได้หลังกด "เตรียมโมเดลคนเดิน"'; }
+  }
 }
 
 document.getElementById('staleRegenerateBtn').addEventListener('click', () => generateSemanticBtn.click());

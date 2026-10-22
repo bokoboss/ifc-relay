@@ -835,6 +835,8 @@ def generate_ifc_semantic() -> dict[str, Any]:
         "download_url": "/api/ifc/semantic/download",
         "engine_export_url": "/api/ifc/semantic/export-engine-input",
         "model": semantic,
+        # UX-25: the selection or plan edits changed while this ran.
+        "stale": changed_meanwhile,
     }
 
 

@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=12" />
+  <link rel="stylesheet" href="/static/app.css?v=13" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -350,6 +350,15 @@
             <div id="openingCandidateSection" class="opening-candidates hidden">
               <h3>ช่องเปิดในผนังที่ไม่มีประตู</h3>
               <p class="opening-candidates-note">ระบบปิดไว้จนกว่าจะติ๊กเลือก · ติ๊กเฉพาะช่องที่เป็นทางเดินจริง แล้วกด "เตรียมโมเดลคนเดิน" อีกครั้ง</p>
+              <div class="opening-filters">
+                <label><span class="sr-only">ชั้น</span><select id="openingLevelFilter"><option value="">ทุกชั้น</option></select></label>
+                <label><span class="sr-only">ชนิด</span><select id="openingKindFilter">
+                  <option value="">ทุกชนิด</option>
+                  <option value="passage_candidate">อาจเป็นทางเดิน</option>
+                  <option value="open">ที่เปิดแล้ว</option>
+                </select></label>
+                <span id="openingCount" class="check-count"></span>
+              </div>
               <div id="openingCandidateList"></div>
             </div>
             <div id="offLevelSection" class="opening-candidates hidden">
@@ -580,12 +589,12 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=058" defer></script>
-  <script src="/static/app-tasks.js?v=058" defer></script>
-  <script src="/static/app-plan.js?v=055" defer></script>
-  <script src="/static/app-model.js?v=058" defer></script>
-  <script src="/static/app-review.js?v=058" defer></script>
-  <script src="/static/app-tree.js?v=054" defer></script>
-  <script src="/static/app-build.js?v=058" defer></script>
+  <script src="/static/app.js?v=059" defer></script>
+  <script src="/static/app-tasks.js?v=059" defer></script>
+  <script src="/static/app-plan.js?v=059" defer></script>
+  <script src="/static/app-model.js?v=059" defer></script>
+  <script src="/static/app-review.js?v=059" defer></script>
+  <script src="/static/app-tree.js?v=059" defer></script>
+  <script src="/static/app-build.js?v=059" defer></script>
 </body>
 </html>

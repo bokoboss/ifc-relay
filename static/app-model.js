@@ -423,22 +423,44 @@ function renderOffLevelSlabs(slabs) {
   }
 }
 
+// Openings without a door: every one can be decided (UX-10). The list is
+// filtered by level and kind and shown a page at a time.
+const OPENING_PAGE = 200;
+let openingCandidates = [];
+let openingShown = OPENING_PAGE;
+
 function renderOpeningCandidates(candidates) {
+  openingCandidates = candidates || [];
+  openingShown = OPENING_PAGE;
+  const levels = [...new Set(openingCandidates.map(c => c.level_key).filter(v => v != null))].sort((x, y) => x - y);
+  const level = document.getElementById('openingLevelFilter');
+  if (level) {
+    const keep = level.value;
+    level.innerHTML = '<option value="">ทุกชั้น</option>' +
+      levels.map(k => `<option value="${escapeHtml(String(k))}">ชั้น ${escapeHtml(String(k))}</option>`).join('');
+    if (levels.map(String).includes(keep)) level.value = keep;
+  }
+  drawOpeningCandidates();
+}
+
+function drawOpeningCandidates() {
   const section = document.getElementById('openingCandidateSection');
   const root = document.getElementById('openingCandidateList');
   if (!section || !root) return;
   root.innerHTML = '';
-  section.classList.toggle('hidden', !candidates.length);
-  const ordered = [...candidates].sort((a, b) =>
-    (a.classification === 'passage_candidate' ? 0 : 1) - (b.classification === 'passage_candidate' ? 0 : 1));
-  const SHOWN = 500;            // the list is complete; only the display is capped
-  if (ordered.length > SHOWN) {
-    const more = document.createElement('p');
-    more.className = 'opening-candidates-note';
-    more.textContent = `แสดง ${SHOWN} จาก ${ordered.length} ช่อง (ที่อาจเป็นทางเดินอยู่ก่อน) · checklist ใช้ครบทุกช่อง`;
-    root.appendChild(more);
+  section.classList.toggle('hidden', !openingCandidates.length);
+  const level = document.getElementById('openingLevelFilter')?.value ?? '';
+  const kind = document.getElementById('openingKindFilter')?.value ?? '';
+  const filtered = openingCandidates.filter(c =>
+    (level === '' || String(c.level_key) === level)
+    && (kind === '' || (kind === 'open' ? c.decision === 'include' : c.classification === kind)));
+  const ordered = [...filtered].sort((x, y) =>
+    (x.classification === 'passage_candidate' ? 0 : 1) - (y.classification === 'passage_candidate' ? 0 : 1));
+  const count = document.getElementById('openingCount');
+  if (count) {
+    count.textContent = `${ordered.length} ช่อง` + (filtered.length < openingCandidates.length ? ` จาก ${openingCandidates.length}` : '');
   }
-  for (const c of ordered.slice(0, SHOWN)) {
+  for (const c of ordered.slice(0, openingShown)) {
     const row = document.createElement('label');
     row.className = 'check-row opening-row';
     const input = document.createElement('input');
@@ -473,6 +495,18 @@ function renderOpeningCandidates(candidates) {
     row.append(input, text, tag);
     root.appendChild(row);
   }
+  if (ordered.length > openingShown) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'tree-more';
+    more.textContent = `แสดงเพิ่ม (${Math.min(OPENING_PAGE, ordered.length - openingShown)} จาก ${ordered.length - openingShown} ที่เหลือ)`;
+    more.addEventListener('click', () => { openingShown += OPENING_PAGE; drawOpeningCandidates(); });
+    root.appendChild(more);
+  }
+}
+
+for (const id of ['openingLevelFilter', 'openingKindFilter']) {
+  document.getElementById(id)?.addEventListener('change', () => { openingShown = OPENING_PAGE; drawOpeningCandidates(); });
 }
 
 // UX-02: plan edits re-prepare the model by themselves once drawing pauses. The
@@ -493,15 +527,28 @@ autoPrepareBtn.addEventListener('click', () => {
 let autoPrepareTimer = null;
 let autoPrepareQueued = false;
 let preparing = false;
+// UX-16: automatic re-preparing is for models that prepare quickly. When the last
+// run took longer than this, edits wait for the engineer's "prepare" instead of
+// starting a multi-minute run after every edit.
+const AUTO_PREPARE_MAX_SEC = 20;
+let lastPrepareSec = 0;
+const autoPrepareActive = () => autoPrepareOn() && lastPrepareSec <= AUTO_PREPARE_MAX_SEC;
+
+// What happens to a plan edit, said the same way everywhere (UX-27).
+function editAppliesText() {
+  if (autoPrepareActive()) return 'จะเตรียมโมเดลใหม่ให้อัตโนมัติเมื่อหยุดวาด';
+  if (autoPrepareOn()) return `โมเดลนี้เตรียมแต่ละครั้งใช้ราว ${Math.round(lastPrepareSec)} วิ จึงไม่เตรียมอัตโนมัติ · แก้ให้ครบแล้วกด "เตรียมโมเดลคนเดิน" ครั้งเดียว`;
+  return 'กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล';
+}
 
 function scheduleAutoPrepare() {
-  if (!autoPrepareOn()) return;
+  if (!autoPrepareActive()) return;
   clearTimeout(autoPrepareTimer);
   autoPrepareTimer = setTimeout(runAutoPrepare, AUTO_PREPARE_DELAY);
 }
 
 function runAutoPrepare() {
-  if (!autoPrepareOn()) return;
+  if (!autoPrepareActive()) return;
   if (pendingShape || viewer()?.planHasFirstPoint?.()) { scheduleAutoPrepare(); return; }   // still drawing
   if (preparing || generateSemanticBtn.disabled) { autoPrepareQueued = true; return; }
   prepareModel({ auto: true });
@@ -514,6 +561,7 @@ generateSemanticBtn.addEventListener('click', async () => {
 async function prepareModel({ auto = false } = {}) {
   if (preparing) return;
   preparing = true;
+  const prepareStarted = performance.now();
   clearTimeout(autoPrepareTimer);
   document.getElementById('staleBanner').classList.toggle('auto', auto);
   generateSemanticBtn.disabled = true;
@@ -526,10 +574,19 @@ async function prepareModel({ auto = false } = {}) {
     currentValidation = null;
     currentBuild = null;
     renderSemanticSummary(result);
-    if (!auto) dock.select('details', { open: false });   // counts update; the viewer keeps its size
-    setExportReady(true);
+    // Checkpoint after preparing (UX-26): when the model leaves things to decide
+    // or check, the list opens at them; otherwise only the counts update and the
+    // viewer keeps its size.
+    let pending = 0;
+    if (!auto) {
+      const gate = result.stale ? null : await refreshGate();
+      pending = (gate?.items || []).filter(i => i.policy !== 'info').length;
+      if (pending) dock.select('issues');
+      else dock.select('details', { open: false });
+    }
+    setExportReady(!result.stale);           // changed while it ran: not exportable (UX-25)
     setBuildOutputReady(false);
-    document.getElementById('stepSemantic').classList.add('done');
+    if (!result.stale) document.getElementById('stepSemantic').classList.add('done');
 
     // The source IFC viewer is already open. After generating semantic geometry,
     // switch it to the simulation-facing walkable/obstacle model automatically.
@@ -564,7 +621,9 @@ async function prepareModel({ auto = false } = {}) {
       const summary = result.summary || result.ifc_semantic?.summary || {};
       document.getElementById('viewerStatus').textContent =
         `โมเดลคนเดิน · พื้นที่เดิน ${summary.walkable_regions ?? summary.walkable_areas ?? 0} · ผนัง ${summary.physical_wall_segments ?? 0} · Preview ${previewMeshes} ชิ้น`;
-      setMessage('เตรียมโมเดลคนเดินเสร็จแล้ว · กำลังแสดงพื้นที่เดินและสิ่งกีดขวางใน 3D · โปรดตรวจสอบก่อนสร้างไฟล์ Viswalk');
+      setMessage(pending
+        ? `เตรียมโมเดลคนเดินเสร็จแล้ว · มี ${pending} เรื่องให้ตัดสินใจหรือตรวจ (เปิดรายการด้านล่าง) · ยังตรวจ Geometry และสร้างไฟล์ได้`
+        : 'เตรียมโมเดลคนเดินเสร็จแล้ว · กำลังแสดงพื้นที่เดินและสิ่งกีดขวางใน 3D · กด "ตรวจ Geometry" ต่อ');
     } else {
       setMessage(`เตรียมข้อมูลโมเดลคนเดินแล้ว แต่เปิด Preview ไม่สำเร็จ: ${previewIssue} · ยังสามารถดาวน์โหลด JSON และตรวจสอบปัญหาได้`);
     }
@@ -575,6 +634,7 @@ async function prepareModel({ auto = false } = {}) {
     generateSemanticBtn.removeAttribute('aria-busy');
     document.getElementById('staleBanner').classList.remove('auto');
     preparing = false;
+    lastPrepareSec = (performance.now() - prepareStarted) / 1000;
     if (autoPrepareQueued) { autoPrepareQueued = false; scheduleAutoPrepare(); }
   }
 }

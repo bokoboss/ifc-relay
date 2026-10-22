@@ -29,7 +29,7 @@ document.getElementById('planModeBtn').addEventListener('click', () => {
     v.setPlanTool(planTool);
     setViewerBadge('plan');
     setActiveModeButton('planModeBtn');
-    setMessage('แปลน 2D: เลื่อน/ซูมด้วยเมาส์ · เลือกเครื่องมือด้านขวาบน · การแก้ไขมีผลเมื่อกด "เตรียมโมเดลคนเดิน" อีกครั้ง');
+    setMessage('แปลน 2D: เลื่อน/ซูมด้วยเมาส์ · เลือกเครื่องมือด้านขวาบน · การแก้ไข: ' + editAppliesText());
   }
 });
 
@@ -222,7 +222,7 @@ async function undoEdit() {
       remapEdit(step.edit, again);
       editHistory.redo.push({ type: 'delete', edit: again });
     }
-    setMessage('ย้อนการแก้ไขแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
+    setMessage(`ย้อนการแก้ไขแล้ว · ${editAppliesText()}`);
   } catch (error) {
     setMessage(`ย้อนไม่สำเร็จ: ${error.message}`);
   }
@@ -241,7 +241,7 @@ async function redoEdit() {
       await removeEdit(step.edit, { record: false });
       editHistory.undo.push({ type: 'delete', edit: step.edit });
     }
-    setMessage('ทำซ้ำแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
+    setMessage(`ทำซ้ำแล้ว · ${editAppliesText()}`);
   } catch (error) {
     setMessage(`ทำซ้ำไม่สำเร็จ: ${error.message}`);
   }
@@ -267,7 +267,7 @@ document.getElementById('planConfirmBtn').addEventListener('click', async () => 
   hideConfirm();
   try {
     const edit = await saveEdit(shape);
-    setMessage(`บันทึก${EDIT_KIND_TH[shape.tool] || 'การแก้ไข'} ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
+    setMessage(`บันทึก${EDIT_KIND_TH[shape.tool] || 'การแก้ไข'} ${edit.id} แล้ว · ${editAppliesText()}`);
   } catch (error) {
     setMessage(`บันทึกการแก้ไขไม่สำเร็จ: ${error.message}`);
   }
@@ -357,7 +357,7 @@ function renderEdits(edits) {
     del.addEventListener('click', async () => {
       try {
         await removeEdit(edit);
-        setMessage(`ลบ ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล (ย้อนได้)`);
+        setMessage(`ลบ ${edit.id} แล้ว (ย้อนได้) · ${editAppliesText()}`);
       } catch (error) {
         setMessage(`ลบไม่สำเร็จ: ${error.message}`);
       }
@@ -403,6 +403,10 @@ document.getElementById('sourceModeBtn').addEventListener('click', () => {
 });
 
 document.getElementById('simulationModeBtn').addEventListener('click', () => {
+  if (!currentSemantic) {                 // UX-23: nothing to show yet
+    setMessage('โมเดลคนเดินยังไม่มี · กด "เตรียมโมเดลคนเดิน" ก่อน แล้วจึงดูโมเดลคนเดินหรือแปลน 2D');
+    return;
+  }
   leavePlanIfActive();
   viewer()?.setMode('simulation');
   setViewerBadge('simulation');

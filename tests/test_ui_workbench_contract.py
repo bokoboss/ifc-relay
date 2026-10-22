@@ -133,7 +133,7 @@ def test_semantic_preparation_activates_simulation_preview_automatically() -> No
 
 def test_studio_css_offline_and_responsive() -> None:
     dom = parsed()
-    assert "/static/app.css?v=12" in dom.anchors                    # one stylesheet, fonts bundled
+    assert "/static/app.css?v=13" in dom.anchors                    # one stylesheet, fonts bundled
     assert (ROOT / "static" / "fonts" / "OFL.txt").exists()
     assert "@media (max-width:730px)" in STUDIO
     assert "@media (max-width:1060px)" in STUDIO
