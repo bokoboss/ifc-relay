@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from ifc_geometry_service import EXTRACTOR_VERSION, VIEW_MAX_TRIANGLES, GeometryFailed
 import model_jobs
-from model_jobs import JobFailed
+from model_jobs import JobCancelled, JobFailed
 from ifc_service import ifcopenshell_version
 from revision_service import report_messages
 from project_paths import base_network_path, engine_path, project_root
@@ -181,6 +181,13 @@ VIEW_MAX_ELEMENTS = int(os.environ.get("VBB_VIEW_MAX_ELEMENTS", "25000"))
 # Cached geometry is keyed by file content, so it is kept across re-imports;
 # the oldest files go when the folder grows past this.
 CACHE_MAX_MB = int(float(os.environ.get("VBB_CACHE_MAX_GB", "4")) * 1024)
+
+
+def job_http_error(exc: Exception, what: str) -> HTTPException:
+    """409 when the engineer cancelled the job, 500 otherwise."""
+    if isinstance(exc, JobCancelled):
+        return HTTPException(status_code=409, detail=f"{what}: ยกเลิกแล้ว")
+    return HTTPException(status_code=500, detail=job_error_detail(exc, what))
 
 
 def job_error_detail(exc: Exception, what: str) -> str:
@@ -486,7 +493,7 @@ def analyze() -> dict[str, Any]:
                 detail=f"IfcOpenShell is not installed. Run install.bat first. Details: {exc}",
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC audit failed"))
+            raise job_http_error(exc, "IFC audit failed")
 
         revision = state.get("revision") or {}
         if revision.get("status") == "pending":
@@ -499,10 +506,7 @@ def analyze() -> dict[str, Any]:
                     files=[p for p in (previous_path, path) if p is not None], kind="open",
                 )
             except Exception as exc:
-                raise HTTPException(
-                    status_code=500,
-                    detail=job_error_detail(exc, "Revision carry-over failed"),
-                )
+                raise job_http_error(exc, "Revision carry-over failed")
             state.setdefault("selection", {"mode": "auto"})["overrides"] = carried
             state["revision"] = report
         if (state.get("revision") or {}).get("status") == "applied":
@@ -554,19 +558,21 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
         result = model_jobs.run(
             "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path, view_path,
             files=[path], kind="geometry",
+            title=("โหลด 3D · ชิ้นส่วนรอตรวจ (พื้นหลัง)" if request.tier == "review" else "โหลด 3D")
+            + (f" · {len(request.storey_ids)} ชั้น" if request.storey_ids else " · ทั้งอาคาร"),
             mode=request.mode, storey_ids=request.storey_ids, tier=request.tier,
             source_sha256=upload_sha256(path), max_elements=VIEW_MAX_ELEMENTS,
         )
     except ValueError as exc:
         if "safety limit" not in str(exc):
-            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+            raise job_http_error(exc, "IFC geometry extraction failed")
         count = re.search(r"contains (\d+)", str(exc))
         raise HTTPException(status_code=413, detail=(
             f"ส่วนที่ขอเปิดมีชิ้นส่วน {count.group(1) if count else 'เกิน'} ชิ้น เกินที่จอ 3D รับได้ต่อครั้ง "
             f"({VIEW_MAX_ELEMENTS:,} ชิ้น) · เลือกเปิดทีละชั้น หรือตั้ง VBB_VIEW_MAX_ELEMENTS ให้สูงขึ้นถ้าเครื่องแรงพอ · "
             "การเตรียมโมเดลคนเดินไม่ได้ใช้ขีดจำกัดนี้"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+        raise job_http_error(exc, "IFC geometry extraction failed")
     prune_geometry_cache(keep=view_path)
 
     with store.lock:
@@ -595,6 +601,19 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
     # The meshes go to the browser straight from the cache file: the server
     # process never parses them (a 371 MB IFC gives about 140 MB of meshes).
     return FileResponse(view_path, media_type="application/json")
+
+
+@app.get("/api/jobs")
+def list_jobs() -> dict[str, Any]:
+    """Heavy jobs waiting for memory or running, for the progress panel."""
+    return {"jobs": model_jobs.active_jobs()}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    if not model_jobs.cancel(job_id):
+        raise HTTPException(status_code=404, detail="ไม่พบงานนี้ หรืองานจบไปแล้ว")
+    return {"status": "cancelling"}
 
 
 @app.get("/api/revision")
@@ -684,7 +703,7 @@ def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]
             structure = model_jobs.run("stairs", "ifc_vertical_service:stair_structure_for_file", path,
                                        files=[path], kind="open")
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=job_error_detail(exc, "อ่านรายการบันไดไม่สำเร็จ"))
+            raise job_http_error(exc, "อ่านรายการบันไดไม่สำเร็จ")
         write_json_atomic(cache, structure)
     return stair_overview_from_structure(structure, overrides)
 
@@ -780,7 +799,7 @@ def generate_ifc_semantic() -> dict[str, Any]:
         )
         semantic = json.loads(output_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC semantic extraction failed"))
+        raise job_http_error(exc, "IFC semantic extraction failed")
     prune_geometry_cache(keep=geometry_cache)
 
     summary = semantic["ifc_semantic"]["summary"]

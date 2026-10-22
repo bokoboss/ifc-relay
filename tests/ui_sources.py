@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
-APP_JS_FILES = ("app.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js")
+APP_JS_FILES = ("app.js", "app-tasks.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js")
 
 
 def app_js() -> str:

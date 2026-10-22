@@ -146,3 +146,63 @@ def test_view_copy_simplifies_only_heavy_meshes():
     xs = d["vertices"][0::3]
     assert min(zs) == 0 and max(zs) == 2.0 and min(xs) == 0 and max(xs) >= 0.99
     assert out["simplified_elements"] == 1 and out["source_triangle_count"] == 2401
+
+
+def test_queued_job_can_be_cancelled_and_is_listed(monkeypatch):
+    monkeypatch.setattr(model_jobs.SCHEDULER, "budget_mb", lambda: 1000)
+    release = threading.Event()
+    seen = {}
+
+    def holder():
+        with model_jobs.SCHEDULER.slot(900):
+            release.wait(5)
+
+    t = threading.Thread(target=holder)
+    t.start()
+    time.sleep(0.1)
+
+    def waiter():
+        try:
+            model_jobs.run("geometry", "math:sqrt", 4.0, files=[])
+        except model_jobs.JobCancelled as exc:
+            seen["cancelled"] = str(exc)
+
+    monkeypatch.setattr(model_jobs, "estimate_mb", lambda files, kind: 900)
+    w = threading.Thread(target=waiter)
+    w.start()
+    for _ in range(50):
+        jobs = model_jobs.active_jobs()
+        if jobs:
+            break
+        time.sleep(0.05)
+    assert jobs[0]["state"] == "queued" and jobs[0]["title"] == "สร้างรูปทรง 3D" and jobs[0]["can_cancel"]
+    assert model_jobs.cancel(jobs[0]["id"])
+    w.join(5)
+    release.set()
+    t.join(5)
+    assert "ยกเลิก" in seen["cancelled"] and model_jobs.active_jobs() == []
+
+
+def test_running_worker_can_be_stopped(tmp_path, monkeypatch):
+    monkeypatch.delenv("VBB_GEOMETRY_IN_PROCESS", raising=False)
+    monkeypatch.setattr(model_jobs, "LOG_PATH", None)
+    out = {}
+
+    def run():
+        try:
+            model_jobs.run("semantic", "time:sleep", 30, files=[])
+        except model_jobs.JobCancelled:
+            out["cancelled"] = True
+
+    t = threading.Thread(target=run)
+    t.start()
+    for _ in range(100):
+        jobs = model_jobs.active_jobs()
+        if jobs and jobs[0]["state"] == "running":
+            break
+        time.sleep(0.05)
+    time.sleep(1.0)                                       # the worker process has started
+    started = time.time()
+    assert model_jobs.cancel(jobs[0]["id"])
+    t.join(15)
+    assert out.get("cancelled") and time.time() - started < 15

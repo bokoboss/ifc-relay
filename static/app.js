@@ -215,7 +215,15 @@ function formatBytes(bytes) {
 }
 
 async function api(url, options = {}) {
-  const response = await fetch(url, options);
+  // Heavy requests run as server jobs: the task panel polls them while any request is open.
+  const tracked = typeof taskPanel !== 'undefined';   // app-tasks.js (shared global)
+  if (tracked) taskPanel.requestStarted();
+  let response;
+  try {
+    response = await fetch(url, options);
+  } finally {
+    if (tracked) taskPanel.requestEnded();
+  }
   const payload = await response.json().catch(() => ({}));
   // Any change on the server can make the pedestrian model stale or move the
   // workflow on: re-read the project state once things settle.

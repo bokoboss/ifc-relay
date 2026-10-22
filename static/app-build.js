@@ -47,6 +47,7 @@ const jobPanel = (() => {
 
   return {
     start() {
+      document.getElementById('jobCloseBtn')?.classList.add('hidden');
       panel.classList.remove('hidden');
       panel.dataset.state = 'running';
       render({ stages: [], stage_index: 0, elapsed_sec: 0 });
@@ -57,10 +58,16 @@ const jobPanel = (() => {
     async stop() {
       clearInterval(timer);
       await poll();
-      setTimeout(() => panel.classList.add('hidden'), panel.dataset.state === 'success' ? 4000 : 8000);
+      // Success fades; a failure stays until the engineer closes it (UX-22).
+      if (panel.dataset.state === 'success') setTimeout(() => panel.classList.add('hidden'), 4000);
+      else document.getElementById('jobCloseBtn')?.classList.remove('hidden');
     },
   };
 })();
+
+document.getElementById('jobCloseBtn')?.addEventListener('click', () => {
+  document.getElementById('jobPanel').classList.add('hidden');
+});
 
 buildViswalkBtn.addEventListener('click', async () => {
   const checks = (currentGate?.items || []).filter(i => i.policy === 'check');

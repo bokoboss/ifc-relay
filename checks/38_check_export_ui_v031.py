@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 index = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-appjs = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
+appjs = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-tasks.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
 app = (ROOT / "app.py").read_text(encoding="utf-8")
 
 checks = [

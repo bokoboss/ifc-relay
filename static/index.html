@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=11" />
+  <link rel="stylesheet" href="/static/app.css?v=12" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -152,9 +152,9 @@
           <div class="filter-block stair-review" id="stairReviewBlock">
             <div class="filter-title">บันไดและทางลาด</div>
             <div class="mini-summary">
-              <div><span>ทั้งหมด (ชุด)</span><strong id="stairUnits">0</strong></div>
-              <div><span>นำเข้าแล้ว</span><strong id="stairIncluded">0</strong></div>
-              <div><span>รอตรวจสอบ</span><strong id="stairReview">0</strong></div>
+              <div><span>ทั้งหมด (ชุด)</span><strong id="stairUnits">–</strong></div>
+              <div><span>นำเข้าแล้ว</span><strong id="stairIncluded">–</strong></div>
+              <div><span>รอตรวจสอบ</span><strong id="stairReview">–</strong></div>
             </div>
             <button id="stairBulkBtn" class="secondary-btn stair-bulk-btn" disabled>นำเข้าบันไดทั้งหมด…</button>
             <div id="stairConfirm" class="stair-confirm hidden" role="dialog" aria-live="polite">
@@ -233,11 +233,15 @@
                 <li><i class="line" style="--c:#b86c4d"></i>ทางออก</li>
               </ul>
             </details>
+            <section id="taskPanel" class="task-panel hidden" role="status" aria-live="polite" aria-label="งานที่กำลังทำ">
+              <ul id="taskList" class="task-list"></ul>
+            </section>
             <section id="jobPanel" class="job-panel hidden" role="status" aria-live="polite" aria-label="ความคืบหน้าการสร้างไฟล์">
               <div class="job-head">
                 <span class="job-spinner" aria-hidden="true"></span>
                 <strong id="jobTitle">กำลังสร้างไฟล์ Viswalk</strong>
                 <span id="jobElapsed" class="job-elapsed">0:00</span>
+                <button id="jobCloseBtn" type="button" class="job-close hidden" aria-label="ปิด" title="ปิด"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
               </div>
               <ol id="jobStages" class="job-stages"></ol>
               <div class="job-bar" aria-hidden="true"><span id="jobBar"></span></div>
@@ -575,11 +579,12 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=057" defer></script>
+  <script src="/static/app.js?v=058" defer></script>
+  <script src="/static/app-tasks.js?v=058" defer></script>
   <script src="/static/app-plan.js?v=055" defer></script>
   <script src="/static/app-model.js?v=058" defer></script>
-  <script src="/static/app-review.js?v=054" defer></script>
+  <script src="/static/app-review.js?v=058" defer></script>
   <script src="/static/app-tree.js?v=054" defer></script>
-  <script src="/static/app-build.js?v=054" defer></script>
+  <script src="/static/app-build.js?v=058" defer></script>
 </body>
 </html>

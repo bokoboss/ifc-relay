@@ -381,11 +381,11 @@ def extract_ifc_geometry(
     }
 
     if cache_path is not None:
+        # Atomic: a cancelled or killed worker never leaves a half-written cache.
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
-            json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
-            encoding="utf-8",
-        )
+        tmp = cache_path.with_name(cache_path.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(payload, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, cache_path)
 
     return payload
 

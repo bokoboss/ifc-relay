@@ -18,7 +18,7 @@ ifc = (ROOT / "ifc_service.py").read_text(encoding="utf-8")
 geom = (ROOT / "ifc_geometry_service.py").read_text(encoding="utf-8")
 semantic = (ROOT / "ifc_semantic_service.py").read_text(encoding="utf-8")
 html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-js = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
+js = "\n".join((ROOT / "static" / n).read_text(encoding="utf-8") for n in ("app.js", "app-tasks.js", "app-plan.js", "app-model.js", "app-review.js", "app-tree.js", "app-build.js"))
 app3d = (ROOT / "static" / "app3d.js").read_text(encoding="utf-8")
 
 add("app version from version.py", 'version=APP_VERSION' in app)
