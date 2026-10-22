@@ -483,55 +483,66 @@ def children_map(model: Any) -> dict[int, list[Any]]:
     return result
 
 
-def stair_overview(model: Any, overrides: dict[str, str], parent_of: dict[int, Any],
-                   children_of: dict[int, list[Any]]) -> dict[str, Any]:
-    """Stair/ramp units for bulk review, without double counting.
+def stair_structure(model: Any, parent_of: dict[int, Any], children_of: dict[int, list[Any]]) -> list[dict[str, Any]]:
+    """Stair/ramp units of the IFC, without decisions (cacheable per file).
 
     A unit is a parent ``IfcStair``/``IfcRamp`` (driving its flights) or a
-    flight that has no parent stair/ramp. Bulk actions set the decision on
-    these drivers only; child flights follow their parent, and a child flight
-    the engineer excluded explicitly stays excluded.
-    """
-    def decision(entity: Any) -> str:
-        guid = global_id(entity)
-        return overrides.get(guid, "auto") if guid else "auto"
-
+    flight that has no parent stair/ramp."""
     units: list[dict[str, Any]] = []
     for parent_type in PARENT_TYPES:
         for parent in model.by_type(parent_type):
             flights = [c for c in children_of.get(int(parent.id()), []) if any(is_a(c, t) for t in FLIGHT_TYPES)]
-            own = decision(parent)
-            child = [decision(f) for f in flights]
-            if own == "include" or "include" in child:
-                state = "include"
-            elif own == "exclude":
-                state = "exclude"
-            else:
-                state = "review"
             units.append({
+                "driver": "parent",
                 "global_id": global_id(parent),
                 "name": entity_name(parent, ""),
                 "kind": "stair" if is_a(parent, "IfcStair") else "ramp",
                 "flights": len(flights),
                 "flight_global_ids": [g for g in (global_id(f) for f in flights) if g],
-                "excluded_flights": child.count("exclude"),
-                "state": state,
             })
     for flight_type in FLIGHT_TYPES:
         for flight in model.by_type(flight_type):
             parent = parent_of.get(int(flight.id()))
             if parent is not None and any(is_a(parent, t) for t in PARENT_TYPES):
                 continue
-            d = decision(flight)
             units.append({
+                "driver": "flight",
                 "global_id": global_id(flight),
                 "name": entity_name(flight, ""),
                 "kind": "stair" if is_a(flight, "IfcStairFlight") else "ramp",
                 "flights": 1,
                 "flight_global_ids": [],
-                "excluded_flights": 0,
-                "state": d if d in ("include", "exclude") else "review",
             })
+    return units
+
+
+def stair_overview_from_structure(structure: list[dict[str, Any]], overrides: dict[str, str]) -> dict[str, Any]:
+    """Apply the engineer's decisions to the stair/ramp units (cheap; no IFC).
+
+    Bulk actions set the decision on the drivers only; child flights follow
+    their parent, and a child flight the engineer excluded explicitly stays
+    excluded."""
+    def decision(guid: str | None) -> str:
+        return overrides.get(guid, "auto") if guid else "auto"
+
+    units = []
+    for base in structure:
+        own = decision(base.get("global_id"))
+        if base.get("driver") == "parent":
+            child = [decision(g) for g in base.get("flight_global_ids", [])]
+            if own == "include" or "include" in child:
+                state = "include"
+            elif own == "exclude":
+                state = "exclude"
+            else:
+                state = "review"
+            excluded = child.count("exclude")
+        else:
+            state = own if own in ("include", "exclude") else "review"
+            excluded = 0
+        unit = {k: v for k, v in base.items() if k != "driver"}
+        unit.update(excluded_flights=excluded, state=state)
+        units.append(unit)
     counts = {
         "units": len(units),
         "flights": sum(u["flights"] for u in units),
@@ -542,6 +553,22 @@ def stair_overview(model: Any, overrides: dict[str, str], parent_of: dict[int, A
     return {"counts": counts, "units": units}
 
 
+def stair_overview(model: Any, overrides: dict[str, str], parent_of: dict[int, Any],
+                   children_of: dict[int, list[Any]]) -> dict[str, Any]:
+    """Stair/ramp units for bulk review, without double counting."""
+    return stair_overview_from_structure(stair_structure(model, parent_of, children_of), overrides)
+
+
+def stair_structure_for_file(path: Any) -> list[dict[str, Any]]:
+    """Worker-process entry: open the IFC and list its stair/ramp units."""
+    import ifcopenshell
+
+    from ifc_semantic_service import _parent_map
+
+    model = ifcopenshell.open(str(path))
+    return stair_structure(model, _parent_map(model), children_map(model))
+
+
 def stair_overview_for_file(path: Any, overrides: dict[str, str]) -> dict[str, Any]:
     """Worker-process entry: open the IFC and summarise its stairs/ramps."""
     import ifcopenshell
@@ -550,3 +577,17 @@ def stair_overview_for_file(path: Any, overrides: dict[str, str]) -> dict[str, A
 
     model = ifcopenshell.open(str(path))
     return stair_overview(model, overrides, _parent_map(model), children_map(model))
+
+
+def audit_with_stairs(path: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Worker-process entry: one read of the IFC gives the audit and the stair
+    units (a 371 MB IFC takes ~12 s just to open)."""
+    from pathlib import Path
+
+    import ifcopenshell
+
+    from ifc_semantic_service import _parent_map
+    from ifc_service import audit_ifc
+
+    model = ifcopenshell.open(str(path))
+    return audit_ifc(Path(path), model), stair_structure(model, _parent_map(model), children_map(model))

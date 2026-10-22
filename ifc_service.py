@@ -296,9 +296,10 @@ def _opening_fill_breakdown(model: Any) -> dict[str, int]:
     return dict(result)
 
 
-def audit_ifc(path: Path) -> dict[str, Any]:
+def audit_ifc(path: Path, model: Any = None) -> dict[str, Any]:
     ifcopenshell, util_element, util_unit = _imports()
-    model = ifcopenshell.open(str(path))
+    if model is None:
+        model = ifcopenshell.open(str(path))
 
     unit_scale = float(util_unit.calculate_unit_scale(model))
     unit_entity = util_unit.get_project_unit(model, "LENGTHUNIT")

@@ -1,6 +1,6 @@
 # Before the build: what stops it, what to check in Viswalk
 
-This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-22.1). The build endpoint re-validates and re-evaluates the list before starting Vissim.
+This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anything the engineer can fix in Viswalk after the build is listed, not enforced (`gate_service.py`, policy version 2026-10-22.2). The build endpoint re-validates and re-evaluates the list before starting Vissim.
 
 | Item | Policy | Why |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Stair/ramp end not on a walkable area (Engine) | check | Viswalk will error at that ramp; connect it to an Area in Viswalk |
 | Connectivity diagnostic failed or missing | check | Listed, never read as "all connected"; does not affect the file |
 | Manual plan edit that could not be applied | check | The file will not contain it; redraw it or fix in Viswalk |
+| Stair/ramp units of the IFC still in review (not converted) | check | The model has no such stairs; include them or build them in Viswalk |
 | Stair end reaches no free walking space (connectivity) | check | Blocked by a wall or no floor; people cannot use it |
 | Walking zones not reachable from the marked exits (or, with none marked, from the largest network) | check | Missing door/stair, or a closed room/shaft |
 | Exit mark that touches no free walking space | check | Ignored by the connectivity check; redraw it over the floor |

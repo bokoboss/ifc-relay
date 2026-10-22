@@ -665,3 +665,16 @@ button[aria-busy="true"]::after {
 .tree-dot.review {background:var(--warning);}
 .tree-dot.exclude {background:var(--danger);}
 @media (prefers-reduced-motion: reduce) {.tree-node > summary::before {transition:none;}}
+
+/* Pending stair decisions: next to "prepare", and the block it points to (UX-01/02) */
+.decision-chip {
+  display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:3px 10px;margin-left:6px;
+  border:1px solid #e3c98f;border-radius:999px;background:var(--warning-soft);color:#7d4f0e;
+  font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.decision-chip::before {content:"";width:7px;height:7px;border-radius:50%;background:var(--warning);}
+.decision-chip:hover {border-color:var(--warning);}
+.stair-bulk-btn.needs-action {border-color:var(--warning);color:#7d4f0e;background:var(--warning-soft);font-weight:600;}
+.stair-review.flash {animation:stair-flash 1.6s ease-out 1;}
+@keyframes stair-flash {0%,35% {box-shadow:0 0 0 3px rgba(166,107,23,.45);border-radius:var(--r-md);} 100% {box-shadow:0 0 0 0 rgba(166,107,23,0);}}
+@media (prefers-reduced-motion: reduce) {.stair-review.flash {animation:none;outline:2px solid var(--warning);}}

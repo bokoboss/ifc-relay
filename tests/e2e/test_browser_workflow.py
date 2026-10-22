@@ -137,6 +137,28 @@ def test_bim_tree_opens_storey_class_element(page, tmp_path):
     assert page.errors == []
 
 
+def test_pending_stairs_are_never_silent(page, tmp_path):
+    """UX-01..04: stairs in review show next to "prepare", prepare asks, the bulk
+    include runs from the dialog, and the model then has the stair."""
+    b, _ = _two_storeys(with_stair=True)              # the stair stays "review" (no overrides)
+    _open(page, b.write(tmp_path / "stairs.ifc"))
+    page.wait_for_selector("#stairPendingChip:not(.hidden)", timeout=60000)
+    assert "บันได 1 ชุดยังไม่ได้นำเข้า" in page.text_content("#stairPendingChip")
+    page.click("#stairPendingChip")                    # takes the engineer to the stair block
+    page.wait_for_selector("#stairReviewBlock.flash")
+    page.click("#generateSemanticBtn")
+    page.wait_for_selector("#stairPrepareConfirm[open]")
+    assert "ยังไม่ได้นำเข้า 1 ชุด" in page.text_content("#stairPrepareLead")
+    page.click("#stairPrepareInclude")
+    page.wait_for_selector("#stairPendingChip.hidden", state="attached", timeout=60000)
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    assert page.text_content("#stairIncluded") == "1"
+    sem = page.evaluate("currentSemantic")
+    assert len(sem["vertical_connections"]) == 1
+    assert sem["ifc_semantic"]["stair_decisions"]["review"] == 0
+    assert page.errors == []
+
+
 def test_viswalk_checks_listed_but_build_enabled(page, tmp_path):
     b, _ = _two_storeys(with_stair=False)          # closed room -> isolated zone: a Viswalk check, not a stop
     _open(page, b.write(tmp_path / "room.ifc"))
