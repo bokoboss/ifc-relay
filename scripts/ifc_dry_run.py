@@ -556,7 +556,7 @@ def group_semantic_warnings(warnings: list[str]) -> tuple[list[dict[str, Any]], 
 def render_markdown(p: dict[str, Any]) -> str:
     src, ifc, geo, sem, eng = (p.get(k, {}) for k in ("source", "ifc", "geometry", "semantic", "engine_validation"))
     L = [
-        "# IFC Relay - Real IFC check (dry run, no Vissim)",
+        "# IFC Relay - IFC check (dry run, no Vissim)",
         "",
         f"**Overall: {p['overall']}** · generated {p['generated']} · total {p.get('total_seconds', '?')} s"
         + (" · redacted" if p.get("redacted") else ""),

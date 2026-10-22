@@ -1,4 +1,4 @@
-# Viswalk BIM Builder - Real IFC check (dry run, no Vissim)
+# IFC Relay - IFC check (dry run, no Vissim)
 
 **Overall: WARN** · generated 2026-10-18T17:46:20 · total <1 s
 
