@@ -162,6 +162,11 @@ model_jobs.LOG_PATH = (Path(_perf_log) if _perf_log else None) if _perf_log is n
 # Preparing the pedestrian model runs in a worker process and never sends the
 # meshes to the browser, so it gets a much higher, configurable ceiling (PERF-01).
 SEMANTIC_MAX_ELEMENTS = int(os.environ.get("VBB_SEMANTIC_MAX_ELEMENTS", "80000"))
+# Per request to the 3D view. One storey of a 371 MB test model has 16,816
+# curtain-wall members/plates (818k triangles): 0.9 s to parse and 0.4 s to build
+# in the browser, so 12,000 refused a storey the browser handles. Frame rate on a
+# real GPU with that many meshes is still to be measured (batching is next).
+VIEW_MAX_ELEMENTS = int(os.environ.get("VBB_VIEW_MAX_ELEMENTS", "25000"))
 
 # Cached geometry is keyed by file content, so it is kept across re-imports;
 # the oldest files go when the folder grows past this.
@@ -529,8 +534,16 @@ def load_ifc_geometry(request: GeometryRequest) -> dict[str, Any]:
             "geometry", "ifc_geometry_service:extract_to_cache", path, cache_path,
             files=[path], kind="geometry",
             mode=request.mode, storey_ids=request.storey_ids, tier=request.tier,
-            source_sha256=upload_sha256(path),
+            source_sha256=upload_sha256(path), max_elements=VIEW_MAX_ELEMENTS,
         )
+    except ValueError as exc:
+        if "safety limit" not in str(exc):
+            raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
+        count = re.search(r"contains (\d+)", str(exc))
+        raise HTTPException(status_code=413, detail=(
+            f"ส่วนที่ขอเปิดมีชิ้นส่วน {count.group(1) if count else 'เกิน'} ชิ้น เกินที่จอ 3D รับได้ต่อครั้ง "
+            f"({VIEW_MAX_ELEMENTS:,} ชิ้น) · เลือกเปิดทีละชั้น หรือตั้ง VBB_VIEW_MAX_ELEMENTS ให้สูงขึ้นถ้าเครื่องแรงพอ · "
+            "การเตรียมโมเดลคนเดินไม่ได้ใช้ขีดจำกัดนี้"))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=job_error_detail(exc, "IFC geometry extraction failed"))
     prune_geometry_cache(keep=cache_path)

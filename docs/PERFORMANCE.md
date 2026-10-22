@@ -72,8 +72,21 @@ without plan edits) are byte-identical before and after.
 Re-import of the same file (model A, through the app with real worker
 processes): audit 4.2 s → 0.0 s, geometry 52 s → 0.5 s.
 
+## One storey over the view limit
+
+Through the app (real worker processes), model C opens one storey at a time,
+but its "second level" storey alone has 16,816 simulation-relevant elements
+(10,034 IfcMember + 6,129 IfcPlate, a curtain-wall roof): the 3D view refused it
+at 12,000 elements per request, so that storey could not be opened at all.
+With the limit raised for the test: 818k triangles, browser parse 0.9 s, mesh
+build 0.4 s, JS heap 322 MB. The per-request view limit is now 25,000
+(`VBB_VIEW_MAX_ELEMENTS`), and going over it gives a plain message. Frame rate
+on a real GPU with ~17k separate meshes is not measured yet (the test machine
+renders in software); merging meshes per storey/class is the fix if it is slow.
+
 ## Still open
 
+- Frame rate with tens of thousands of meshes on a real GPU (see above).
 - Peak memory per job is unchanged (meshes are held as Python lists): the
   scheduler keeps jobs from adding up, but one model-C job still needs ~4.7 GB.
 - Model C's meshes are 140 MB of JSON per request: binary transfer and
