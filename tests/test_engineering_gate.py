@@ -127,6 +127,15 @@ def test_build_writes_viswalk_checklist(client, tmp_path, monkeypatch):
     assert any(c["id"] == "isolated_zones" for c in manifest["check_in_viswalk"])
     checklist = (tmp_path / "api_viswalk_checklist.md").read_text(encoding="utf-8")
     assert "พื้นที่ที่เดินไปไม่ถึง" in checklist and "api.ifc" in checklist
+    assert "not exits in the .inpx" in checklist                  # UX-12: what the converter does not make
+    # UX-14: one download with everything needed to check the file in Viswalk
+    import io
+    import zipfile
+    r = client.get("/api/build/latest/package")
+    assert r.status_code == 200
+    names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+    assert {"api_viswalk.inpx", "api_viswalk_checklist.md", "api_build_manifest.json",
+            "api_checklist_ids.json"} <= names
 
 
 def test_all_closed_passage_candidates_reach_the_checklist():
@@ -190,3 +199,28 @@ def test_checklist_reads_codes_not_warning_text():
     items = {i["id"]: i for i in evaluate_gate(sem, OK)["items"]}
     assert items["doors_not_converted"]["identities"] == ["2O2Fr$t4X7Zf8NOew3FLOH"]
     assert items["multi_storey_no_doors"]["count"] == 3
+
+
+def test_checklist_lists_a_sample_but_the_annex_keeps_every_id():
+    """UX-15: the Markdown shows 30 ids and says so; the JSON annex has all."""
+    from gate_service import checklist_ids, checklist_markdown
+
+    cands = [{"global_id": f"OP{n}", "classification": "passage_candidate", "decision": "auto"} for n in range(251)]
+    sem = {"ifc_semantic": {"summary": {}, "warnings": [], "connectivity": CLEAN_CONNECTIVITY,
+                            "opening_candidates": cands}}
+    gate = evaluate_gate(sem, OK)
+    md = checklist_markdown(gate, "x.ifc", "x.inpx", "now")
+    assert "showing 30 of 251" in md
+    annex = next(i for i in checklist_ids(gate)["items"] if i["id"] == "passages_closed")
+    assert len(annex["identities"]) == 251
+
+
+def test_connectivity_from_the_largest_network_is_said():
+    """UX-13: without exit marks the check is preliminary, and the list says so."""
+    sem = {"ifc_semantic": {"summary": {}, "warnings": [],
+                            "connectivity": {**CLEAN_CONNECTIVITY, "basis": "largest"}}}
+    item = next(i for i in evaluate_gate(sem, OK)["items"] if i["id"] == "exit_anchor_missing")
+    assert item["policy"] == "info" and "ไม่สร้าง Exit" in item["detail"]
+    anchored = {"ifc_semantic": {"summary": {}, "warnings": [],
+                                 "connectivity": {**CLEAN_CONNECTIVITY, "basis": "anchors"}}}
+    assert "exit_anchor_missing" not in {i["id"] for i in evaluate_gate(anchored, OK)["items"]}

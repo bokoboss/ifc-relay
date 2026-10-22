@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-22.2"
+POLICY_VERSION = "2026-10-22.3"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -44,7 +44,8 @@ def _item(item_id: str, policy: str, identities: list[str], title: str, detail: 
         "title": title,
         "detail": detail,
         "fingerprint": fingerprint(item_id, ids),
-        "identities": ids[:200],
+        "identities": ids[:200],          # the UI pages through these
+        "identities_all": ids,            # the checklist annex keeps all
     }
 
 
@@ -114,6 +115,11 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
                            f"บันได/ทางลาดที่ยังไม่ได้นำเข้า ({n} จาก {total} ชุด)",
                            "โมเดลนี้ไม่มีบันได/ทางลาดเหล่านี้ · นำเข้าในแผงซ้าย \"บันไดและทางลาด\" แล้วเตรียมใหม่ "
                            "หรือสร้างเองใน Viswalk", count=n))
+    if con and con.get("basis") == "largest":
+        items.append(_item("exit_anchor_missing", "info", ["exit_anchor_missing"],
+                           "ยังไม่ได้กำหนดจุดอ้างอิงทางออก",
+                           "การตรวจการเชื่อมต่อวัดจากโครงข่ายใหญ่ที่สุด (เบื้องต้น) · วาด \"อ้างอิงทางออก\" บนแปลนเพื่อวัดจากทางออกจริง "
+                           "· จุดนี้ไม่สร้าง Exit ใน INPX", count=1))
     review_dir = [str(v.get("ifc_global_id") or v.get("key")) for v in vcs if v.get("direction_status") == "needs_review"]
     if review_dir:
         items.append(_item("stair_direction_review", "check", review_dir, "ทิศบันไดหาจาก Geometry ไม่ได้",
@@ -247,8 +253,21 @@ def checklist_markdown(gate: dict[str, Any], source_name: str, output_name: str,
         lines.append("Nothing flagged by the converter. Still review the model in Viswalk before use.")
     for item in checks:
         lines.append(f"- [ ] **{item['title']}** ({item['count']}) - {item['detail']}")
-        shown = item.get("identities", [])[:30]
+        ids = item.get("identities_all") or item.get("identities", [])
+        shown = ids[:30]
         if shown:
-            lines.append("  - " + ", ".join(f"`{x}`" for x in shown)
-                         + (" ..." if item["count"] > len(shown) else ""))
+            more = f" ... (showing {len(shown)} of {len(ids)}; full list in the _checklist_ids.json file)" \
+                if len(ids) > len(shown) else ""
+            lines.append("  - " + ", ".join(f"`{x}`" for x in shown) + more)
+    lines += ["", "## Not made by the converter (set up in Viswalk)", "",
+              "- [ ] Pedestrian inputs, routes and exits for the scenario being simulated "
+              "(exit marks drawn in the app only check connectivity; they are not exits in the .inpx)",
+              "- [ ] Open the model, check levels, stairs and their directions, then run a short simulation"]
     return "\n".join(lines) + "\n"
+
+
+def checklist_ids(gate: dict[str, Any]) -> dict[str, Any]:
+    """Every object id of every item (the Markdown list shows the first 30)."""
+    return {"policy_version": gate.get("policy_version"),
+            "items": [{"id": i["id"], "policy": i["policy"], "title": i["title"], "count": i["count"],
+                       "identities": i.get("identities_all") or i.get("identities", [])} for i in gate["items"]]}

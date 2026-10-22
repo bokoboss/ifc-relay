@@ -25,7 +25,7 @@ from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
 from version import APP_VERSION, PROJECT_STATE_VERSION, versions
-from gate_service import checklist_markdown, evaluate_gate, gate_message_th
+from gate_service import checklist_ids, checklist_markdown, evaluate_gate, gate_message_th
 from vissim_build_service import (build_preflight, build_progress, build_vissim_model, progress_finish,
                                   progress_start, validate_engine_input)
 
@@ -1093,6 +1093,9 @@ def write_build_manifest(result: dict[str, Any], gate: dict[str, Any], validatio
     checklist.write_text(checklist_markdown(gate, str(upload.get("original_name")), out.name, manifest["built_at"]),
                          encoding="utf-8")
     result["checklist_path"] = str(checklist)
+    ids = out.with_name(stem + "_checklist_ids.json")
+    ids.write_text(json.dumps(checklist_ids(gate), indent=2, ensure_ascii=False), encoding="utf-8")
+    result["checklist_ids_path"] = str(ids)
 
 
 def _gate_passed_quiet(state: dict[str, Any]) -> bool:
@@ -1240,6 +1243,28 @@ def download_latest_build_log() -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Build log is missing: {path}")
     return FileResponse(path, media_type="text/plain", filename=path.name)
+
+
+@app.get("/api/build/latest/package")
+def download_latest_build_package() -> FileResponse:
+    """The .inpx with everything needed to check it in Viswalk, as one ZIP:
+    checklist (+ full id list), manifest, validation, engine report, build log."""
+    import zipfile
+
+    result = current_build_result_or_404()
+    out = Path(result["output_path"])
+    if not out.exists():
+        raise HTTPException(status_code=404, detail=f"ไม่พบไฟล์ .inpx: {out}")
+    keys = ("output_path", "checklist_path", "checklist_ids_path", "manifest_path", "validation_path",
+            "report_path", "log_path")
+    files = [Path(result[k]) for k in keys if result.get(k) and Path(result[k]).exists()]
+    package = out.with_name(out.stem.replace("_viswalk", "") + "_package.zip")
+    tmp = package.with_name(package.name + ".tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, f.name)
+    os.replace(tmp, package)
+    return FileResponse(package, media_type="application/zip", filename=package.name)
 
 
 @app.post("/api/build/latest/open-folder")

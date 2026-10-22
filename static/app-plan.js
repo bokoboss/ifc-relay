@@ -43,7 +43,7 @@ const PLAN_HINTS = {
   walkable: 'คลิกสองมุมของพื้นที่เดินที่ต้องการเพิ่ม',
   obstacle: 'คลิกสองมุมของสิ่งกีดขวางที่ต้องการเพิ่ม',
   passage: 'คลิกสองมุมคร่อมผนังตรงที่ต้องการเปิดทางผ่าน',
-  exit: 'คลิกสองมุมทับพื้นที่ทางออก/จุดเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง',
+  exit: 'คลิกสองมุมทับพื้นที่ทางออก/จุดเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึงเท่านั้น ไม่สร้าง Exit ใน INPX',
 };
 document.querySelectorAll('.plan-tool[data-tool]').forEach(button => {
   button.addEventListener('click', () => {
@@ -60,7 +60,7 @@ window.addEventListener('plan-measure', event => {
   if (final) setMessage(`วัดระยะบนแปลน: ${Number(distance).toFixed(3)} ม.`);
 });
 
-const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน', exit: 'ทางออก' };
+const EDIT_KIND_TH = { walkable: 'พื้นที่เดินเพิ่ม', obstacle: 'สิ่งกีดขวางเพิ่ม', passage: 'ทางผ่าน', exit: 'จุดอ้างอิงทางออก' };
 // F-19: what the last pedestrian-model run did with each edit
 const EDIT_REVIEW_TH = {
   applied: 'ใช้แล้ว',

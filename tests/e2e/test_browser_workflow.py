@@ -333,7 +333,7 @@ def test_plan_passage_reconnects_room(page, tmp_path):
     assert "ทับพื้นที่เดิน" in page.text_content("#planConfirmText")
     page.click("#autoPrepareBtn[aria-pressed=false]")                    # UX-02: re-prepared without a click
     page.click("#planConfirmBtn")
-    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากทางออกที่กำหนด 1 จุด')",
+    page.wait_for_function("document.getElementById('connectivityNote').textContent.includes('วัดจากจุดอ้างอิงทางออก 1 จุด')",
                            timeout=120000)
     page.wait_for_selector("#staleBanner", state="hidden")
     assert page.errors == []

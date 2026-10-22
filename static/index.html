@@ -194,7 +194,7 @@
                 <button data-tool="walkable" class="plan-tool walkable" title="คลิกสองมุมเพื่อเพิ่มพื้นที่เดิน">+ พื้นที่เดิน</button>
                 <button data-tool="obstacle" class="plan-tool obstacle" title="คลิกสองมุมเพื่อเพิ่มสิ่งกีดขวาง">+ สิ่งกีดขวาง</button>
                 <button data-tool="passage" class="plan-tool passage" title="คลิกสองมุมคร่อมผนังเพื่อเปิดทางผ่าน (เช่นประตูที่ IFC ไม่ได้ผูก)">เปิดทางผ่าน</button>
-                <button data-tool="exit" class="plan-tool exit" title="วาดทับพื้นที่ทางออกหรือจุดที่คนเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง ไม่เปลี่ยนรูปทรงโมเดล">ทางออก</button>
+                <button data-tool="exit" class="plan-tool exit" title="จุดอ้างอิงทางออก: วาดทับพื้นที่ทางออกหรือจุดที่คนเริ่มเดิน เพื่อตรวจว่าพื้นที่ไหนเดินไปไม่ถึง · ไม่สร้าง Exit/Input ใน INPX (กำหนดใน Viswalk)">อ้างอิงทางออก</button>
               </div>
               <div class="plan-tools" role="group" aria-label="รูปทรง">
                 <button data-shape="rect" class="plan-shape active" title="คลิกสองมุม">สี่เหลี่ยม</button>
@@ -230,7 +230,7 @@
                 <li><i class="line" style="--c:#2e9e5b"></i>พื้นที่เดินเพิ่ม</li>
                 <li><i class="line" style="--c:#34495e"></i>สิ่งกีดขวางเพิ่ม</li>
                 <li><i class="line" style="--c:#0e9fb6"></i>ทางผ่าน <span class="legend-cut"></span> ผนังที่จะถูกตัด</li>
-                <li><i class="line" style="--c:#b86c4d"></i>ทางออก</li>
+                <li><i class="line" style="--c:#b86c4d"></i>จุดอ้างอิงทางออก (ไม่ส่งเข้า INPX)</li>
               </ul>
             </details>
             <section id="taskPanel" class="task-panel hidden" role="status" aria-live="polite" aria-label="งานที่กำลังทำ">
@@ -384,6 +384,7 @@
                 <h2>Geometry Engine v0.3 → Vissim COM (2025 / 2026)</h2>
               </div>
               <div class="semantic-actions">
+                <button id="downloadPackageBtn" class="build-btn" disabled title=".inpx + checklist สำหรับตรวจใน Viswalk + manifest + รายงาน (ZIP)">ดาวน์โหลดชุดไฟล์งาน</button>
                 <button id="downloadInpxBtn" class="secondary-btn" disabled>ดาวน์โหลด .inpx</button>
                 <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
                 <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>

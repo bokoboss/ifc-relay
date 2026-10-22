@@ -89,7 +89,7 @@ buildViswalkBtn.addEventListener('click', async () => {
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
     dock.select('build');
-    setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
+    setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · ยังไม่ได้ตรวจยืนยันใน Viswalk · "ดาวน์โหลดชุดไฟล์งาน" มี checklist สำหรับตรวจ`);
   } catch (error) {
     document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
     setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
@@ -104,6 +104,7 @@ buildViswalkBtn.addEventListener('click', async () => {
 
 downloadInpxTopBtn.addEventListener('click', () => startDownload('/api/build/latest/download'));
 downloadInpxBtn.addEventListener('click', () => startDownload('/api/build/latest/download'));
+downloadPackageBtn.addEventListener('click', () => startDownload('/api/build/latest/package'));
 downloadBuildReportBtn.addEventListener('click', () => startDownload('/api/build/latest/report'));
 downloadValidationBtn.addEventListener('click', () => startDownload('/api/build/latest/validation'));
 downloadBuildLogBtn.addEventListener('click', () => startDownload('/api/build/latest/log'));
