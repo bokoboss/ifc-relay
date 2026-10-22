@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-21.3"
+POLICY_VERSION = "2026-10-22.1"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -129,6 +129,10 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     if doors:
         items.append(_item("doors_not_converted", "check", doors, "ประตูที่แปลงเป็นช่องเปิดไม่ได้",
                            "ประตูไม่ผูกกับช่องเปิด/ผนังใน IFC · ผนังตรงนั้นยังปิดอยู่ · ใช้ \"เปิดทางผ่าน\" ในแปลน 2D ได้"))
+    unmeshed = [i for d in (diagnostics or []) if d.get("code") == "mesh_failed" for i in d.get("ids", [])]
+    if unmeshed:
+        items.append(_item("mesh_failed", "check", unmeshed, "ชิ้นส่วนที่สร้างรูปทรงไม่ได้",
+                           "IfcOpenShell อ่านรูปทรงชิ้นเหล่านี้ไม่ได้ · ไม่อยู่ในโมเดลคนเดิน · ตรวจใน BIM viewer แล้วเพิ่มใน Viswalk ถ้าจำเป็น"))
     closed = [str(c.get("global_id")) for c in info.get("opening_candidates", [])
               if c.get("classification") == "passage_candidate" and c.get("decision") != "include"]
     if closed:

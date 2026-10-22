@@ -59,6 +59,10 @@ SIMULATION_MESH_TYPES = (
 
 # Above this many simulation-relevant meshes the 3D view opens one storey at a time.
 WHOLE_MODEL_MESH_LIMIT = 4000
+# ... and above this file size, whatever the count: tessellating the whole model
+# then needs several GB (measured about 13x the file size) and its meshes run to
+# tens of MB per request.
+WHOLE_MODEL_SIZE_LIMIT_MB = 150
 
 def simulation_mesh_candidate(entity: Any) -> bool:
     """True when an IfcElement can appear in default simulation-relevant 3D."""
@@ -525,10 +529,14 @@ def audit_ifc(path: Path) -> dict[str, Any]:
             "file_size_bytes": file_size_bytes,
             "file_size_mb": round(file_size_mb, 2),
             # The browser handles a few thousand simulation meshes comfortably (the
-            # 30-storey structural fixture: 2,471 meshes / 304k triangles), so only
-            # fall back to one storey at a time above that, whatever the file size.
+            # 30-storey structural fixture: 2,471 meshes / 304k triangles); above that,
+            # or above WHOLE_MODEL_SIZE_LIMIT_MB, open one storey at a time.
             "simulation_mesh_total": simulation_mesh_total,
-            "recommended_load_mode": "simulation_storey" if simulation_mesh_total > WHOLE_MODEL_MESH_LIMIT else "simulation_all",
+            "recommended_load_mode": (
+                "simulation_storey"
+                if simulation_mesh_total > WHOLE_MODEL_MESH_LIMIT or file_size_mb > WHOLE_MODEL_SIZE_LIMIT_MB
+                else "simulation_all"
+            ),
             "structural_like": structural_like,
             "simulation_counts": {
                 "walls": wall_count,

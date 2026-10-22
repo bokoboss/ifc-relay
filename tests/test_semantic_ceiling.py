@@ -17,13 +17,15 @@ def test_semantic_preparation_uses_its_own_ceiling(tmp_path, monkeypatch):
         monkeypatch.setattr(app_module, name, tmp_path / name)
     monkeypatch.setattr(app_module, "store", ProjectStateStore(tmp_path / "state.json"))
     seen = {}
-    real = app_module.extract_geometry_isolated
+    real = app_module.model_jobs.run
 
-    def spy(path, **kwargs):
-        seen.setdefault("calls", []).append(kwargs.get("max_elements"))
-        return real(path, **kwargs)
+    def spy(label, target, *args, **kwargs):
+        if label in ("geometry", "semantic"):
+            ceiling = (kwargs.get("geometry_kwargs") or kwargs).get("max_elements")
+            seen.setdefault("calls", []).append(ceiling)
+        return real(label, target, *args, **kwargs)
 
-    monkeypatch.setattr(app_module, "extract_geometry_isolated", spy)
+    monkeypatch.setattr(app_module.model_jobs, "run", spy)
     b = Building([0.0, 3.0])
     b.slab([(0, 0), (8, 0), (8, 6), (0, 6)], 0.0, b.storeys[0])
     path = b.write(tmp_path / "c.ifc")

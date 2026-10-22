@@ -271,6 +271,21 @@ def build_semantic_model(
     def diag(code: str, ids: list[str] | None = None, **metrics: Any) -> None:
         diagnostics.append({"code": code, "ids": [str(i) for i in (ids or []) if i], **metrics})
 
+    # Elements IfcOpenShell could not tessellate are missing from this model: say so.
+    mesh_failed = geometry_payload.get("mesh_failures") or []
+    if mesh_failed:
+        failed_ids = []
+        for failure in mesh_failed:
+            try:
+                failed_ids.append(global_id(model.by_id(int(failure.get("shape_id")))) or str(failure.get("shape_id")))
+            except Exception:  # noqa: BLE001 - unknown id: keep the number
+                failed_ids.append(str(failure.get("shape_id")))
+        warnings.append(
+            f"{len(mesh_failed)} element(s) could not be tessellated by IfcOpenShell and are missing from the "
+            f"pedestrian model (first: {mesh_failed[0].get('error')})."
+        )
+        diag("mesh_failed", failed_ids, count=len(mesh_failed))
+
     for door in model.by_type("IfcDoor"):
         if effective_status(door, selection_overrides) != "include":
             continue
@@ -1083,3 +1098,19 @@ def write_semantic_model(path: Path, model: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     os.replace(tmp, path)          # readers never see a half-written model
+
+
+def build_semantic_to_file(path: Path, output_path: Path, overrides: dict[str, str],
+                           manual_edits: list[dict[str, Any]] | None, *,
+                           geometry_cache_path: Path | None, geometry_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Worker-process entry for "prepare pedestrian model": tessellate (or reuse
+    cached geometry), build the semantic model and write it to ``output_path``.
+    Returns only the summary and warnings; the server reads the file."""
+    from ifc_geometry_service import extract_ifc_geometry
+
+    geometry = extract_ifc_geometry(path, cache_path=geometry_cache_path, **geometry_kwargs)
+    model = build_semantic_model(path, geometry, overrides, manual_edits or [])
+    write_semantic_model(output_path, model)
+    info = model["ifc_semantic"]
+    return {"summary": info["summary"], "warnings": info["warnings"],
+            "outcome": "partial" if geometry.get("mesh_failures") else "success"}
