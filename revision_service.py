@@ -252,11 +252,29 @@ def inspect_project_identity(path: Path) -> dict[str, Any]:
     sites = []
     for entry in entities("IfcSite"):
         sites.append({
-            "GlobalId": getattr(entry, "GlobalId", None),
+            # Site GUID is *not* a spatial reference; exporters may regenerate it.
             "RefLatitude": list(getattr(entry, "RefLatitude", []) or []),
             "RefLongitude": list(getattr(entry, "RefLongitude", []) or []),
             "RefElevation": getattr(entry, "RefElevation", None),
         })
+    # Relative placements of spatial containers affect the geometry world XY.
+    # Include cumulative transforms (get_local_placement follows PlacementRelTo)
+    # without relying on replaceable site/building/storey GlobalIds.
+    import ifcopenshell.util.placement
+    spatial_placements = []
+    for spatial_type in ("IfcSite", "IfcBuilding", "IfcBuildingStorey", "IfcSpace"):
+        for entry in entities(spatial_type):
+            placement = getattr(entry, "ObjectPlacement", None)
+            if placement is None:
+                signature = None
+            else:
+                try:
+                    matrix = ifcopenshell.util.placement.get_local_placement(placement)
+                    signature = [float(value) for row in matrix for value in row]
+                except Exception:
+                    signature = "unverified"
+            spatial_placements.append({"type": spatial_type, "transform": signature})
+    spatial_placements.sort(key=lambda record: (record["type"], str(record["transform"])))
     return {
         "project_guid": guid,
         "unit_scale_to_m": scale,
@@ -265,6 +283,7 @@ def inspect_project_identity(path: Path) -> dict[str, Any]:
         "projected_crs": projected,
         "contexts": contexts,
         "sites": sites,
+        "spatial_placements": spatial_placements,
     }
 
 
@@ -285,7 +304,7 @@ def compare_project_identity(previous: dict[str, Any] | None,
         reasons.append("ไม่สามารถตรวจหน่วย IFC ได้ครบ")
     elif a["unit_scale_to_m"] != b["unit_scale_to_m"]:
         mismatches.append("หน่วยหรือมาตราส่วน IFC ต่างกัน")
-    for field in ("map_conversion", "projected_crs", "contexts", "sites"):
+    for field in ("map_conversion", "projected_crs", "contexts", "sites", "spatial_placements"):
         if a.get(field) != b.get(field):
             mismatches.append(f"ข้อมูลพิกัด/Georeference ต่างกัน: {field}")
     if not a.get("map_conversion") or not b.get("map_conversion"):
@@ -294,6 +313,10 @@ def compare_project_identity(previous: dict[str, Any] | None,
         reasons.append("ไม่มี Projected CRS ที่ตรวจสอบได้ครบ")
     if not a.get("contexts") or not b.get("contexts"):
         reasons.append("ไม่มี Representation Context ที่ตรวจสอบได้ครบ")
+    if (not a.get("spatial_placements") or not b.get("spatial_placements")
+            or any(item.get("transform") == "unverified"
+                   for item in a["spatial_placements"] + b["spatial_placements"])):
+        reasons.append("ข้อมูล ObjectPlacement ของชั้น/อาคารตรวจสอบได้ไม่ครบ")
     status = "mismatch" if mismatches else "unverified" if reasons else "verified"
     return {"status": status, "reasons": mismatches or reasons,
             "previous": a, "incoming": b}
