@@ -1006,10 +1006,13 @@ renderer.domElement.addEventListener('pointerdown', event => {
   pointerDownAt = event.button === 0 ? [event.clientX, event.clientY] : null;
 });
 renderer.domElement.addEventListener('pointerup', event => {
-  if (event.button !== 0 || !pointerDownAt) return;
+  if (event.button !== 0) return;
   const down = pointerDownAt;
   pointerDownAt = null;
-  if (Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
+  // OrbitControls may manage pointer capture and drop/move the down event.
+  // Keep the original click fallback if pointerdown was not observed; only
+  // suppress actual gestures measured from a known down coordinate.
+  if (down && Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
   if (planActive && planTool !== 'select') {
     if (planShape === 'poly') {
       recentPolygonClicks.push({ x: event.clientX, y: event.clientY, time: performance.now() });
