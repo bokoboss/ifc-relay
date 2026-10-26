@@ -543,6 +543,26 @@
       </section>
       </div>
 
+      <dialog id="importConfirm" class="build-confirm" aria-labelledby="importConfirmTitle">
+        <h2 id="importConfirmTitle">ยืนยันการเปิดไฟล์ IFC ใหม่</h2>
+        <p id="importConfirmFiles"></p>
+        <p id="importConfirmEdits"></p>
+        <p id="importConfirmIdentity"></p>
+        <p id="importConfirmSpatial" class="build-confirm-note"></p>
+        <label class="append-option">
+          <input type="checkbox" id="importConfirmCarry" />
+          <span>นำรูปทรงที่วิศวกรแก้ไขเองจากไฟล์เดิมมาใช้ (ค่าเริ่มต้น: ไม่เลือก)</span>
+        </label>
+        <label class="append-option" id="importConfirmRiskRow">
+          <input type="checkbox" id="importConfirmRisk" />
+          <span>ยอมรับความเสี่ยง: ไม่มีข้อมูลพิกัดเพียงพอรับรองว่ารูปทรงเดิมตรงกับไฟล์ใหม่</span>
+        </label>
+        <div class="build-confirm-actions">
+          <button type="button" id="importConfirmCancel" class="secondary-btn">ยกเลิก · เก็บโครงการเดิม</button>
+          <button type="button" id="importConfirmGo" class="build-btn">เปิด IFC ใหม่</button>
+        </div>
+      </dialog>
+
       <dialog id="buildConfirm" class="build-confirm" aria-labelledby="buildConfirmTitle">
         <form method="dialog">
           <h2 id="buildConfirmTitle">สร้างไฟล์ Viswalk</h2>
