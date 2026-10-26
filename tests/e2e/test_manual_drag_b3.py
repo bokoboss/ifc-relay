@@ -133,9 +133,19 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     assert moved["shape_type"] == edit["shape_type"]
     expected = [[x + 2, y + 1] for x, y in before]
     debug = page.evaluate("window.__b3Debug")
-    assert moved["polygon"] == expected, (
+    # Screen coordinates are floating point. A 1-metre move can be encoded
+    # as 0.999999 m after pixel-to-world conversion; a 0.01-mm tolerance
+    # preserves the intended engineering invariant without changing state.
+    tolerance_m = 1e-5
+    assert len(moved["polygon"]) == len(expected) and all(
+        len(actual) == len(wanted) and all(
+            abs(float(a) - float(b)) <= tolerance_m
+            for a, b in zip(actual, wanted)
+        )
+        for actual, wanted in zip(moved["polygon"], expected)
+    ), (
         f"B3 trace: pre_drag={pre_drag}, after={moved}, expected={expected}, "
-        f"playwright_requests={patches}, browser_trace={debug}"
+        f"tolerance_m={tolerance_m}, playwright_requests={patches}, browser_trace={debug}"
     )
     assert len(patches) == 1  # no requests during pointermove
     page.wait_for_function(
