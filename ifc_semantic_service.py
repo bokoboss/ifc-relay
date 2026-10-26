@@ -940,7 +940,7 @@ def build_semantic_model(
         diag("multi_storey_no_doors", [], count=int(multi_closed))
 
     # Engineer's manual plan edits (added floor / obstacles / passages).
-    from manual_edits import apply_manual_edits
+    from manual_edits import apply_manual_edits, edit_revision, edit_shape_type, polygon_fingerprint
     manual_status: dict[str, dict[str, Any]] = {}
     exit_anchors: list[dict[str, Any]] = []
     manual_applied = apply_manual_edits(
@@ -1064,6 +1064,19 @@ def build_semantic_model(
             "diagnostics": diagnostics,
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
+            # Immutable record of inputs actually used by this semantic generation.
+            # Keeping both UID and normalized geometry prevents a revised E1 from
+            # inheriting the old E1's 'applied' review status after PATCH.
+            "manual_edits_snapshot": [
+                {
+                    "id": e.get("id"),
+                    "uid": e.get("uid") or e.get("created_at"),
+                    "revision": edit_revision(e),
+                    "shape_type": edit_shape_type(e),
+                    "polygon_fingerprint": polygon_fingerprint(e.get("polygon")),
+                }
+                for e in manual_edits or []
+            ],
             "manual_edits_applied": manual_applied,
             "manual_edits_status": manual_status,
             "door_logic": {
