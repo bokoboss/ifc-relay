@@ -26,7 +26,8 @@ document.getElementById('planModeBtn').addEventListener('click', () => {
   }
   if (keep && levels.some(l => String(l.key) === keep)) select.value = keep;
   if (v.enterPlan(Number(select.value))) {
-    v.setPlanTool(planTool);
+    v.setPlanShape(planShapeKind);
+    setPlanToolAndHint(planTool, { cancelPending: false });
     setViewerBadge('plan');
     setActiveModeButton('planModeBtn');
     setMessage('แปลน 2D: เลื่อน/ซูมด้วยเมาส์ · เลือกเครื่องมือด้านขวาบน · การแก้ไขมีผลเมื่อกด "เตรียมโมเดลคนเดิน" อีกครั้ง');
@@ -34,24 +35,48 @@ document.getElementById('planModeBtn').addEventListener('click', () => {
 });
 
 document.getElementById('planLevelSelect').addEventListener('change', event => {
+  if (pendingShape) hideConfirm();
+  planDraftVertices = 0;
   viewer()?.setPlanLevel(Number(event.target.value));
+  refreshPlanHint();
 });
 
 const PLAN_HINTS = {
-  select: 'คลิกวัตถุเพื่อดูรายละเอียด',
-  measure: 'คลิกจุดเริ่ม แล้วคลิกจุดปลาย',
-  walkable: 'คลิกสองมุมของพื้นที่เดินที่ต้องการเพิ่ม',
-  obstacle: 'คลิกสองมุมของสิ่งกีดขวางที่ต้องการเพิ่ม',
-  passage: 'คลิกสองมุมคร่อมผนังตรงที่ต้องการเปิดทางผ่าน',
-  exit: 'คลิกสองมุมทับพื้นที่ทางออก/จุดเริ่มเดิน · ใช้ตรวจว่าพื้นที่ไหนเดินไปไม่ถึง',
+  select: 'คลิกวัตถุเพื่อดูรายละเอียด · ลากพื้นที่ว่างเพื่อเลื่อนแปลน',
+  measure: 'คลิกจุดเริ่มต้น แล้วคลิกจุดปลายเพื่อวัดระยะ',
+  walkable: 'พื้นที่เดิน', obstacle: 'สิ่งกีดขวาง',
+  passage: 'ช่องเปิดในผนัง', exit: 'ทางออก/จุดเริ่มเดิน',
 };
+let planShapeKind = 'rect';
+let planDraftVertices = 0;
+
+function planHintText(extra = '') {
+  if (planTool === 'select' || planTool === 'measure') return PLAN_HINTS[planTool];
+  const label = PLAN_HINTS[planTool] || planTool;
+  const guidance = planShapeKind === 'poly'
+    ? (planDraftVertices >= 3
+      ? 'คลิกจุดแรก หรือ Enter/ดับเบิลคลิกเพื่อปิดรูป · Esc ยกเลิก'
+      : `คลิกมุมรูปหลายเหลี่ยมทีละจุด (${planDraftVertices}/3 ขั้นต่ำ) · Enter เมื่อครบ 3 มุม · Esc ยกเลิก`)
+    : (`คลิกมุมแรกและมุมตรงข้าม (2 คลิก) · Enter ใช้ขนาดที่ระบุ · Esc ยกเลิก`);
+  return `${label}: ${guidance}${extra ? ' · ' + extra : ''}`;
+}
+function refreshPlanHint(extra = '') {
+  document.getElementById('planHint').textContent = planHintText(extra);
+}
+function setPlanToolAndHint(next, { cancelPending = true } = {}) {
+  if (cancelPending && pendingShape) {
+    hideConfirm();
+    setMessage('ยกเลิกรูปทรงที่รอยืนยันก่อนเปลี่ยนเครื่องมือ');
+  }
+  planTool = next || 'select';
+  planDraftVertices = 0;
+  document.querySelectorAll('.plan-tool[data-tool]').forEach(b =>
+    b.classList.toggle('active', b.dataset.tool === planTool));
+  viewer()?.setPlanTool(planTool);
+  refreshPlanHint();
+}
 document.querySelectorAll('.plan-tool[data-tool]').forEach(button => {
-  button.addEventListener('click', () => {
-    planTool = button.dataset.tool;
-    document.querySelectorAll('.plan-tool[data-tool]').forEach(b => b.classList.toggle('active', b === button));
-    viewer()?.setPlanTool(planTool);
-    document.getElementById('planHint').textContent = PLAN_HINTS[planTool] || '';
-  });
+  button.addEventListener('click', () => setPlanToolAndHint(button.dataset.tool));
 });
 
 window.addEventListener('plan-measure', event => {
@@ -374,8 +399,10 @@ async function redoEdit() {
 }
 
 function showConfirm(shape) {
-  pendingShape = shape;
-  document.getElementById('planConfirmText').textContent = previewSummary(shape);
+  pendingShape = { ...shape,
+    shape_type: shape.shape_type || (planShapeKind === 'poly' ? 'polygon' : 'rectangle') };
+  planDraftVertices = 0;
+  document.getElementById('planConfirmText').textContent = previewSummary(pendingShape);
   document.getElementById('planConfirm').classList.remove('hidden');
 }
 
@@ -390,6 +417,7 @@ document.getElementById('planConfirmBtn').addEventListener('click', async () => 
   if (!pendingShape) return;
   const shape = pendingShape;
   hideConfirm();
+  refreshPlanHint();
   try {
     const edit = await saveEdit(shape);
     setMessage(`บันทึก${EDIT_KIND_TH[shape.tool] || 'การแก้ไข'} ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล`);
@@ -397,14 +425,26 @@ document.getElementById('planConfirmBtn').addEventListener('click', async () => 
     setMessage(`บันทึกการแก้ไขไม่สำเร็จ: ${error.message}`);
   }
 });
-document.getElementById('planCancelBtn').addEventListener('click', hideConfirm);
+document.getElementById('planCancelBtn').addEventListener('click', () => {
+  hideConfirm();
+  planDraftVertices = 0;
+  refreshPlanHint();
+});
 document.getElementById('planUndoBtn').addEventListener('click', undoEdit);
 document.getElementById('planRedoBtn').addEventListener('click', redoEdit);
 
 document.querySelectorAll('.plan-shape').forEach(button => {
   button.addEventListener('click', () => {
-    document.querySelectorAll('.plan-shape').forEach(b => b.classList.toggle('active', b === button));
-    viewer()?.setPlanShape(button.dataset.shape);
+    if (pendingShape) {
+      hideConfirm();
+      setMessage('ยกเลิกรูปทรงที่รอยืนยันก่อนเปลี่ยนชนิดรูปทรง');
+    }
+    planShapeKind = button.dataset.shape;
+    planDraftVertices = 0;
+    document.querySelectorAll('.plan-shape').forEach(b =>
+      b.classList.toggle('active', b === button));
+    viewer()?.setPlanShape(planShapeKind);
+    refreshPlanHint();
   });
 });
 
@@ -415,8 +455,8 @@ window.addEventListener('plan-draft', event => {
   else if (d.segment != null) parts.push(`ด้านนี้ ${d.segment.toFixed(2)} ม.`);
   if (d.area != null) parts.push(`${d.area.toFixed(2)} ตร.ม.`);
   if (d.snap) parts.push({ vertex: 'จับมุม', edge: 'จับขอบ', ortho: 'แนวตั้ง/นอน' }[d.snap]);
-  if (d.shape === 'poly' && d.vertices >= 3) parts.push('คลิกจุดแรกหรือ Enter เพื่อปิดรูป');
-  document.getElementById('planHint').textContent = parts.join(' · ');
+  planDraftVertices = d.vertices || 0;
+  refreshPlanHint(parts.join(' · '));
 });
 
 function planSizeFromInput() {
@@ -442,7 +482,13 @@ window.addEventListener('keydown', event => {
   const key = event.key.toLowerCase();
   if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); event.shiftKey ? redoEdit() : undoEdit(); return; }
   if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); redoEdit(); return; }
-  if (event.key === 'Escape') { v.planCancel(); hideConfirm(); }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    v.planCancel();
+    hideConfirm();
+    setPlanToolAndHint('select', { cancelPending: false });
+    setMessage('ยกเลิกการวาดแล้ว · กลับสู่เครื่องมือเลือก');
+  }
   else if (event.key === 'Backspace') { event.preventDefault(); v.planUndoVertex(); }
   else if (event.key === 'Enter') {
     if (pendingShape) document.getElementById('planConfirmBtn').click();
@@ -451,6 +497,33 @@ window.addEventListener('keydown', event => {
 });
 
 let lastEdits = [];
+let selectedManualEditUid = null;
+
+function focusManualEditFromList(edit) {
+  if (!edit?.uid || !currentSemantic) return;
+  const levels = planLevels();
+  if (!levels.some(l => Number(l.key) === Number(edit.level_key))) {
+    setMessage('ระดับนี้ยังไม่มีพื้นที่เดินจาก IFC · ต้องกำหนดชั้นที่แก้ไขได้ก่อน');
+    return;
+  }
+  if (!viewer()?.isPlan()) document.getElementById('planModeBtn').click();
+  const levelSelect = document.getElementById('planLevelSelect');
+  if (String(levelSelect.value) !== String(edit.level_key)) {
+    levelSelect.value = String(edit.level_key);
+    levelSelect.dispatchEvent(new Event('change'));
+  }
+  setPlanToolAndHint('select');
+  // setPlanLevel schedules a fit: queue focus after the view transition.
+  requestAnimationFrame(() => requestAnimationFrame(() =>
+    viewer()?.selectManualEdit(edit.uid, true)));
+}
+window.addEventListener('manual-edit-selected', event => {
+  const edit = event.detail?.edit;
+  if (!edit?.uid) return;
+  selectedManualEditUid = edit.uid;
+  document.querySelectorAll('#editsList .edit-row').forEach(row =>
+    row.classList.toggle('selected', row.dataset.uid === edit.uid));
+});
 function renderEdits(edits) {
   const list = Array.isArray(edits) ? edits : [];
   lastEdits = list;
@@ -470,6 +543,20 @@ function renderEdits(edits) {
     const h = Math.max(...ys) - Math.min(...ys);
     const review = edit.review || { state: 'pending', detail: '' };
     row.dataset.review = review.state;
+    row.dataset.uid = edit.uid || '';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', `เลือกและดูตำแหน่ง ${edit.id}`);
+    row.classList.toggle('selected', edit.uid === selectedManualEditUid);
+    row.addEventListener('click', event => {
+      if (event.target.closest('button')) return;
+      focusManualEditFromList(edit);
+    });
+    row.addEventListener('keydown', event => {
+      if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      focusManualEditFromList(edit);
+    });
     const shownLevel = review.state === 'rebound' && review.level_key != null
       ? `${levelName(edit.level_key)} → ${levelName(review.level_key)}` : levelName(edit.level_key);
     row.innerHTML = `<span class="edit-kind">${escapeHtml(edit.id)} · ${escapeHtml(EDIT_KIND_TH[edit.kind] || edit.kind)}</span>` +
