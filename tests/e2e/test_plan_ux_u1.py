@@ -106,6 +106,17 @@ def test_u1_four_distinct_polygon_clicks_preserve_every_vertex(page, tmp_path):
     _enter_plan(page)
     page.click(".plan-tool[data-tool=obstacle]")
     page.click(".plan-shape[data-shape=poly]")
+    page.evaluate("""() => {
+        window.u1MouseEvents = [];
+        const canvas = document.querySelector('#viewerCanvasHost canvas');
+        for (const name of ['pointerdown', 'pointerup', 'pointercancel', 'click', 'dblclick']) {
+            canvas.addEventListener(name, e => window.u1MouseEvents.push({
+                event: name, button: e.button, buttons: e.buttons,
+                x: Math.round(e.clientX), y: Math.round(e.clientY),
+                detail: e.detail, isTrusted: e.isTrusted,
+            }), true);
+        }
+    }""")
     expected = ((0.03,0.02), (4,0), (4,3), (2,4.5))
     for i, (x,y) in enumerate(expected, 1):
         _click_plan(page, x, y)
@@ -116,6 +127,7 @@ def test_u1_four_distinct_polygon_clicks_preserve_every_vertex(page, tmp_path):
             shape: planShapeKind,
             hint: document.getElementById('planHint').textContent,
         })""")
+        events = page.evaluate("window.u1MouseEvents")
         assert len(state["points"]) == i and state["pending"] is None, (
-            f"After click {i} at {(x,y)} expected {i} points: {state}"
+            f"After click {i} at {(x,y)} expected {i} points: {state}; events={events}"
         )
