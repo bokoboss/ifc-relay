@@ -693,3 +693,9 @@ button[aria-busy="true"]::after {
   .plan-toolbar { max-width: calc(100% - 16px); gap: 5px; }
   .plan-toolbar .plan-tools { flex-wrap: wrap; }
 }
+
+/* B3: cursor indicates a manual edit is being moved, not a plan pan. */
+#viewerCanvasHost canvas.manual-dragging {
+  cursor: grabbing !important;
+  touch-action: none;
+}
