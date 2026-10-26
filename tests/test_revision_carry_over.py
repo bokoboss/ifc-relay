@@ -302,3 +302,21 @@ def test_c3_rejects_invalid_file_with_existing_project(client, tmp_path):
     bad = client.post("/api/import", files={"file": ("invalid.ifc", b"not an IFC")})
     assert bad.status_code == 400
     assert client.get("/api/project").json() == old
+
+
+def test_c3_pending_file_bytes_tampered_same_size_rejected(client, tmp_path):
+    from pathlib import Path
+    import app as app_module
+
+    a, b, *_ = _revisions(tmp_path)
+    _import(client, a)
+    pending = _c3_pending(client, b)
+    old = client.get("/api/project").json()
+    target = Path(app_module._PENDING_IMPORT["target"])
+    with target.open("r+b") as fh:
+        first = fh.read(1)
+        fh.seek(0)
+        fh.write(b"X" if first != b"X" else b"Y")
+    result = _c3_confirm(client, pending)
+    assert result.status_code == 409
+    assert client.get("/api/project").json() == old
