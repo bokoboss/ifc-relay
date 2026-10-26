@@ -701,6 +701,9 @@ function groundPoint(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  // Drawing is on demand. Picking can precede a render after the camera
+  // or viewport changes, so refresh its transform before ray intersection.
+  activeCam().updateMatrixWorld();
   raycaster.setFromCamera(pointer, activeCam());
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -levelZ(planLevelKey));
   const hit = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
@@ -964,20 +967,43 @@ function resize() {
   orthoCamera.updateProjectionMatrix();
 }
 
+// In 2D the displayed edits are planar polygons. Hit-testing the model
+// coordinates directly is deterministic even when WebGL meshes were rebuilt
+// between pointer events; their matrixWorld may not yet have been rendered.
+// Unlike THREE.Line.raycast it has no 1-metre outside-border selection zone.
+function isPointInManualPolygon(point, polygon) {
+  if (!point || !Array.isArray(polygon) || polygon.length < 3) return false;
+  const [px, py] = point;
+  let inside = false;
+  const edgeTolSq = 1e-12; // 0.001 mm on a polygon boundary
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i].map(Number);
+    const [xj, yj] = polygon[j].map(Number);
+    if (![xi, yi, xj, yj].every(Number.isFinite)) return false;
+    const dx = xi - xj, dy = yi - yj;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq > 0) {
+      const t = Math.max(0, Math.min(1,
+        ((px - xj) * dx + (py - yj) * dy) / lenSq));
+      const gapX = px - (xj + t * dx);
+      const gapY = py - (yj + t * dy);
+      if (gapX * gapX + gapY * gapY <= edgeTolSq) return true;
+    }
+    if ((yi > py) !== (yj > py)
+        && px < xj + ((py - yj) * (xi - xj)) / (yi - yj)) inside = !inside;
+  }
+  return inside;
+}
+
 function manualEditAtPointer(event) {
   if (!planActive || planTool !== 'select' || !editsGroup.visible) return null;
-  const rect = renderer.domElement.getBoundingClientRect();
-  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-  activeCam().updateMatrixWorld();
-  raycaster.setFromCamera(pointer, activeCam());
-  for (const hit of raycaster.intersectObjects(editsGroup.children, true)) {
-    // THREE.Line has a default one-world-unit raycast threshold. It is far too
-    // generous for drag start and would turn empty-space pans into PATCHes.
-    // Only the filled top-level manual polygon is a draggable hit target.
-    if (!hit.object.isMesh || hit.object.geometry?.type !== 'ShapeGeometry') continue;
-    const edit = hit.object.parent?.userData?.edit;
-    if (edit?.uid && Number(edit.level_key) === planLevelKey) return edit;
+  const point = groundPoint(event);
+  if (!point) return null;
+  // Last drawn edit is visually topmost; it wins when manual shapes overlap.
+  for (let i = manualEdits.length - 1; i >= 0; i--) {
+    const edit = manualEdits[i];
+    if (edit?.uid && Number(edit.level_key) === planLevelKey
+        && isPointInManualPolygon(point, edit.polygon)) return edit;
   }
   return null;
 }
