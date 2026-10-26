@@ -448,9 +448,12 @@ async function prepareModel({ auto = false } = {}) {
     currentBuild = null;
     renderSemanticSummary(result);
     if (!auto) dock.select('details', { open: false });   // counts update; the viewer keeps its size
-    setExportReady(true);
+    const committedCurrent = result.semantic_state?.status === 'ready'
+      && result.semantic_state.stale === false && result.stale === false;
+    setExportReady(committedCurrent);
     setBuildOutputReady(false);
-    document.getElementById('stepSemantic').classList.add('done');
+    document.getElementById('stepSemantic').classList.toggle('done', committedCurrent);
+    if (!committedCurrent && autoPrepareOn()) autoPrepareQueued = true;
 
     // The source IFC viewer is already open. After generating semantic geometry,
     // switch it to the simulation-facing walkable/obstacle model automatically.
@@ -480,8 +483,12 @@ async function prepareModel({ auto = false } = {}) {
 
     const enginePath = document.getElementById('semanticEnginePath');
     enginePath.classList.remove('hidden');
-    enginePath.textContent = 'เตรียมข้อมูลโมเดลคนเดินแล้ว · สามารถดาวน์โหลด Semantic/Engine JSON หรือดำเนินการตรวจสอบ Geometry';
-    if (previewMeshes > 0) {
+    enginePath.textContent = committedCurrent
+      ? 'เตรียมข้อมูลโมเดลคนเดินแล้ว · สามารถดาวน์โหลด Semantic/Engine JSON หรือดำเนินการตรวจสอบ Geometry'
+      : 'ข้อมูลต้นทางเปลี่ยนระหว่างเตรียมโมเดล · ต้องเตรียมโมเดลคนเดินอีกครั้งก่อนตรวจหรือส่งออก';
+    if (!committedCurrent) {
+      setMessage('โมเดลคนเดินไม่ตรงกับรายการแก้ไขล่าสุด · ต้องเตรียมโมเดลคนเดินใหม่ก่อนดาวน์โหลด ตรวจ หรือสร้างไฟล์');
+    } else if (previewMeshes > 0) {
       const summary = result.summary || result.ifc_semantic?.summary || {};
       document.getElementById('viewerStatus').textContent =
         `โมเดลคนเดิน · พื้นที่เดิน ${summary.walkable_regions ?? summary.walkable_areas ?? 0} · ผนัง ${summary.physical_wall_segments ?? 0} · Preview ${previewMeshes} ชิ้น`;
@@ -523,7 +530,8 @@ exportEngineBtn.addEventListener('click', async () => {
   } catch (error) {
     setMessage(`ส่งออกไฟล์สำหรับ Engine ไม่สำเร็จ: ${error.message}`);
   } finally {
-    exportEngineBtn.disabled = false;
+    // Never re-enable a stale export button after a failed server-side export.
+    scheduleWorkflowRefresh();
   }
 });
 
