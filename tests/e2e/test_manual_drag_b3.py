@@ -22,6 +22,19 @@ def _edits(page, server):
 def _drag(page, sx, sy, ex, ey):
     start = _plan_point(page, sx, sy)
     page.mouse.move(start["x"], start["y"])
+    # Record the actual pointer-down target *after* moving the mouse, because
+    # hovered UI can relayout/overlay the WebGL canvas.
+    page.evaluate("""({x,y}) => {
+      const el = document.elementFromPoint(x, y);
+      if (window.__b3Debug) window.__b3Debug.startHit = {
+        tag: el?.tagName, id: el?.id, className: String(el?.className || ''),
+        point: {x, y},
+        canvas: (() => {
+          const r = document.querySelector('#viewerCanvasHost canvas').getBoundingClientRect();
+          return {x:r.x,y:r.y,width:r.width,height:r.height};
+        })(),
+      };
+    }""", {"x": start["x"], "y": start["y"]})
     page.mouse.down(button="left")
     # Selecting a manual shape reveals Inspector and may resize the canvas.
     # Resolve the destination in the *new* layout, after the down event.
@@ -51,7 +64,7 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     # be delivered asynchronously, so absence there is not conclusive.
     pre_drag = _edits(page, server)[0]
     page.evaluate("""() => {
-      const record = {fetches: [], moves: [], pointers: []};
+      const record = {fetches: [], moves: [], pointers: [], documentPointers: []};
       window.__b3Debug = record;
       const originalFetch = window.fetch.bind(window);
       window.fetch = async (...args) => {
@@ -76,6 +89,13 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
       window.addEventListener('manual-edit-move', e =>
         record.moves.push({uid: e.detail?.edit?.uid,
           oldPolygon: e.detail?.edit?.polygon, polygon: e.detail?.polygon}), true);
+      document.addEventListener('pointerdown', e =>
+        record.documentPointers.push({
+          type: 'pointerdown',
+          target: {tag: e.target?.tagName, id: e.target?.id,
+            cls: String(e.target?.className || '').slice(0, 150)},
+          x: e.clientX, y: e.clientY, button: e.button,
+        }), true);
       const canvas = document.querySelector('#viewerCanvasHost canvas');
       for (const type of ['pointerdown', 'pointerup', 'pointercancel']) {
         canvas.addEventListener(type, e => record.pointers.push({
