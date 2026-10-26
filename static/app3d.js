@@ -1029,10 +1029,20 @@ renderer.domElement.addEventListener('pointerdown', event => {
   if (!edit) return;  // preserve pan/semantic/IFC picking
   const origin = groundPoint(event);
   if (!origin) return;
-  manualDrag = { edit, origin, x: event.clientX, y: event.clientY,
-    pointerId: event.pointerId, moved: false };
+  const bounds = renderer.domElement.getBoundingClientRect();
+  manualDrag = {
+    edit, origin, x: event.clientX, y: event.clientY,
+    pointerId: event.pointerId, moved: false,
+    metresPerPixelX: (orthoCamera.right - orthoCamera.left)
+      / Math.max(bounds.width * orthoCamera.zoom, 1),
+    metresPerPixelY: (orthoCamera.top - orthoCamera.bottom)
+      / Math.max(bounds.height * orthoCamera.zoom, 1),
+  };
   planControls.enabled = false;
-  markManualSelection(edit);
+  // Highlight in WebGL only. Opening the DOM inspector here can resize the
+  // canvas DURING the gesture, corrupting the pixel-to-world mapping.
+  selectedManualUid = edit.uid;
+  drawEdits();
   try { renderer.domElement.setPointerCapture(event.pointerId); } catch { /* optional */ }
   event.preventDefault();
   event.stopImmediatePropagation();
@@ -1046,19 +1056,19 @@ renderer.domElement.addEventListener('pointermove', event => {
     return;
   }
   drag.moved = true;
-  const point = groundPoint(event);
-  if (point) {
-    const dx = point[0] - drag.origin[0], dy = point[1] - drag.origin[1];
-    manualDragPreview = {
-      uid: drag.edit.uid,
-      polygon: drag.edit.polygon.map(p => [
-        Number((Number(p[0]) + dx).toFixed(6)),
-        Number((Number(p[1]) + dy).toFixed(6)),
-      ]),
-    };
-    renderer.domElement.classList.add('manual-dragging');
-    drawEdits();
-  }
+  // Freeze the orthographic pixel scale at pointerdown. Moving the pointer
+  // never depends on a live raycaster/camera or a relayout during Inspector.
+  const dx = (event.clientX - drag.x) * drag.metresPerPixelX;
+  const dy = (drag.y - event.clientY) * drag.metresPerPixelY;
+  manualDragPreview = {
+    uid: drag.edit.uid, delta: [dx, dy],
+    polygon: drag.edit.polygon.map(p => [
+      Number((Number(p[0]) + dx).toFixed(6)),
+      Number((Number(p[1]) + dy).toFixed(6)),
+    ]),
+  };
+  renderer.domElement.classList.add('manual-dragging');
+  drawEdits();
   event.preventDefault();
   event.stopImmediatePropagation();
 }, true);
@@ -1074,7 +1084,11 @@ renderer.domElement.addEventListener('pointerup', event => {
   }
   planControls.enabled = planActive && planTool === 'select';
   renderer.domElement.classList.remove('manual-dragging');
-  if (moved && preview && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)) {
+  // Commit selection/Inspector after the pointer gesture has completed.
+  markManualSelection(drag.edit);
+  if (moved && preview
+      && Math.hypot(...(preview.delta || [0, 0])) >= 0.001
+      && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)) {
     manualMovePending = true;
     window.dispatchEvent(new CustomEvent('manual-edit-move', {
       detail: { edit: drag.edit, polygon: preview.polygon },
