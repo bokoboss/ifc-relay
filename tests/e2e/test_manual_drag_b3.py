@@ -6,6 +6,7 @@ element is modified by the plan gesture.
 from __future__ import annotations
 
 import os
+import time
 
 import pytest
 
@@ -44,12 +45,26 @@ def _drag(page, sx, sy, ex, ey):
 
 
 def _wait_revision(page, revision):
-    page.wait_for_function(
-        """async r => {
-          const result = await (await fetch('/api/edits')).json();
-          return result.edits?.length === 1 && result.edits[0].revision === r;
-        }""",
-        arg=revision, timeout=20000,
+    """Poll an awaited HTTP response, not a truthy unresolved Promise.
+
+    Browser E2E's wait_for_function cannot be relied on to resolve an async
+    JS predicate: it may return before the fetch has completed. page.evaluate
+    explicitly awaits the Promise for each observation.
+    """
+    deadline = time.monotonic() + 20
+    observed = None
+    while time.monotonic() < deadline:
+        observed = page.evaluate("""async () => {
+          const response = await fetch('/api/edits', {cache: 'no-store'});
+          return (await response.json()).edits;
+        }""")
+        if len(observed or []) == 1 and observed[0]["revision"] == revision:
+            return observed[0]
+        page.wait_for_timeout(100)
+    debug = page.evaluate("window.__b3Debug || null")
+    raise AssertionError(
+        f"Expected revision {revision}; latest server edits={observed}; "
+        f"browser trace={debug}"
     )
 
 
