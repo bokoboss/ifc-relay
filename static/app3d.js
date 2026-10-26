@@ -40,6 +40,11 @@ orthoCamera.up.set(0, 0, -1);              // IFC +y points up on screen
 const planControls = new OrbitControls(orthoCamera, renderer.domElement);
 planControls.enableRotate = false;
 planControls.screenSpacePanning = true;
+// In plan view LEFT drag on empty space pans, wheel zooms. B3 owns future
+// manual-object drag capture; do not repurpose LEFT to rotate.
+planControls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+planControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+planControls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 planControls.enabled = false;
 let planActive = false;
 let planLevelKey = null;
@@ -568,6 +573,15 @@ const focusGroup = new THREE.Group();     // "ดูตำแหน่ง" marke
 planOverlay.add(focusGroup);
 const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, exit: 0xb86c4d, measure: 0xd35400 };
 let manualEdits = [];
+let selectedManualUid = null;
+function markManualSelection(edit, emit = true) {
+  selectedManualUid = edit?.uid || null;
+  drawEdits();
+  if (edit && emit) window.dispatchEvent(new CustomEvent('manual-edit-selected', {
+    detail: { edit, origin: 'manual', level_key: edit.level_key },
+  }));
+  return !!edit;
+}
 let semanticWalls = [];            // centre-line walls of the model on screen (for the passage preview)
 
 // UX-02: the part of a wall segment inside a polygon, as [t0, t1] pieces of the
@@ -661,7 +675,9 @@ function drawEdits() {
   clearGroup(editsGroup);
   for (const edit of manualEdits) {
     if (planActive && planLevelKey != null && Number(edit.level_key) !== planLevelKey) continue;
-    const g = outline(edit.polygon, levelZ(edit.level_key) + 0.06, EDIT_COLORS[edit.kind] || 0x888888);
+    const g = outline(edit.polygon, levelZ(edit.level_key) + 0.06,
+      selectedManualUid === edit.uid ? 0xf49b31 : (EDIT_COLORS[edit.kind] || 0x888888),
+      selectedManualUid === edit.uid ? 0.48 : 0.28);
     g.userData.edit = edit;
     if (edit.kind === 'passage') {
       for (const cut of passageCuts(edit)) {
@@ -827,7 +843,8 @@ function finishShape(polygon) {
   clearGroup(draftGroup);
   if (!polygon || polygon.length < 3 || polygonArea(polygon) < 0.01) return;
   window.dispatchEvent(new CustomEvent('plan-shape', {
-    detail: { tool: planTool, level_key: planLevelKey, polygon },
+    detail: { tool: planTool, level_key: planLevelKey, polygon,
+      shape_type: planShape === 'rect' ? 'rectangle' : 'polygon' },
   }));
 }
 
@@ -860,6 +877,11 @@ function planClick(event) {
       return;
     }
   }
+  // Avoid the extra click delivered on double-click and repeated last vertex.
+  if (planPoints.length && Math.hypot(
+    p[0] - planPoints[planPoints.length - 1][0],
+    p[1] - planPoints[planPoints.length - 1][1],
+  ) < 0.001) return;
   planPoints.push(p);
   drawDraft(p);
 }
@@ -945,49 +967,71 @@ function pointerSelect(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, activeCam());
 
-  // Pick only what is on screen: the pedestrian model in simulation mode, the
-  // source IFC otherwise (a hidden parent group hides its meshes too).
+  // U1 selection: manual edits take precedence at the active plan level.
+  // Raycast their filled footprint and border; never turn a source IFC or
+  // generated semantic mesh into an editable manual item.
+  if (planActive && editsGroup.visible) {
+    const hits = raycaster.intersectObjects(editsGroup.children, true);
+    for (const hit of hits) {
+      let candidate = hit.object;
+      while (candidate && !candidate.userData?.edit) candidate = candidate.parent;
+      const edit = candidate?.userData?.edit;
+      if (edit && Number(edit.level_key) === planLevelKey) {
+        markManualSelection(edit);
+        return;
+      }
+    }
+  }
+
   if (semanticGroup.visible) {
-    const targets = semanticGroup.children.filter(child => child.visible && child.userData?.semantic && child !== semanticHelper);
-    // Walkable areas are translucent: a click passes through them to walls,
-    // columns or stairs behind; an area is picked only when nothing else is hit.
+    const targets = semanticGroup.children.filter(child => child.visible
+      && child.userData?.semantic && child !== semanticHelper);
     const owners = raycaster.intersectObjects(targets, true).map(hit => {
       let object = hit.object;
       while (object && !object.userData?.semantic) object = object.parent;
       return object;
     }).filter(Boolean);
     const object = owners.find(o => o.userData.semantic.kind !== 'area') || owners[0];
-    if (object) selectSemantic(object);
-    return;
+    if (object) { selectSemantic(object); return; }
   }
+
+  // Overlay mode also permits inspecting a visible IFC source-only object.
   if (!modelGroup.visible) return;
   const visibleMeshes = Array.from(meshes.values()).filter(mesh => mesh.visible);
   const hit = raycaster.intersectObjects(visibleMeshes, false)[0];
-  if (hit?.object?.userData?.item?.global_id) {
-    selectGuid(hit.object.userData.item.global_id, true);
-  }
+  if (hit?.object?.userData?.item?.global_id) selectGuid(hit.object.userData.item.global_id, true);
 }
 
 // Ignore drags (orbit/pan): select only on a click that did not move.
 let pointerDownAt = null;
-renderer.domElement.addEventListener('pointerdown', event => { pointerDownAt = [event.clientX, event.clientY]; });
-
+renderer.domElement.addEventListener('pointerdown', event => {
+  pointerDownAt = event.button === 0 ? [event.clientX, event.clientY] : null;
+});
 renderer.domElement.addEventListener('pointerup', event => {
-  if (pointerDownAt && Math.hypot(event.clientX - pointerDownAt[0], event.clientY - pointerDownAt[1]) > 5) return;
+  if (event.button !== 0 || !pointerDownAt) return;
+  const down = pointerDownAt;
+  pointerDownAt = null;
+  if (Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
   if (planActive && planTool !== 'select') {
+    // On a polygon double-click only the first pointerup adds the last vertex;
+    // the doubleclick event below finishes it. Otherwise a ghost draft appears.
+    if (planShape === 'poly' && event.detail >= 2) return;
     planClick(event);
     return;
   }
   pointerSelect(event);
 });
+renderer.domElement.addEventListener('pointercancel', () => { pointerDownAt = null; });
 renderer.domElement.addEventListener('pointermove', event => {
   if (!planActive || planTool === 'select') return;
   const { point, kind } = snapPoint(groundPoint(event), event);
   planCursor = point;
   drawDraft(point, kind);
 });
-renderer.domElement.addEventListener('dblclick', () => {
-  if (planActive && planShape === 'poly' && planPoints.length >= 3) finishShape([...planPoints]);
+renderer.domElement.addEventListener('dblclick', event => {
+  if (!planActive || planTool === 'select' || planShape !== 'poly') return;
+  event.preventDefault();
+  if (planPoints.length >= 3) finishShape([...planPoints]);
 });
 window.addEventListener('resize', resize);
 
@@ -1209,8 +1253,26 @@ window.IFCViewer = {
 
   setManualEdits(edits) {
     manualEdits = Array.isArray(edits) ? edits : [];
+    if (selectedManualUid && !manualEdits.some(e => e.uid === selectedManualUid)) {
+      selectedManualUid = null;
+    }
     drawEdits();
     rebuildSnapTargets();
+  },
+
+  selectManualEdit(uid, focus = false) {
+    const edit = manualEdits.find(e => e.uid === uid);
+    if (!edit || !planActive || Number(edit.level_key) !== planLevelKey) return false;
+    markManualSelection(edit);
+    if (focus) {
+      const xs = edit.polygon.map(p => Number(p[0]));
+      const ys = edit.polygon.map(p => Number(p[1]));
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const radius = Math.max(maxX - minX, maxY - minY, 0.5) / 2;
+      this.focusPlanPoint((minX + maxX) / 2, (minY + maxY) / 2, radius, Math.max(5, radius * 4));
+    }
+    return true;
   },
 
   isPlan() {
