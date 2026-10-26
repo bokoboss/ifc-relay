@@ -26,9 +26,9 @@ from shapely.ops import unary_union
 EDIT_KINDS = ("walkable", "obstacle", "passage", "exit")
 MANUAL_OBSTACLE_HEIGHT = 2.0
 
-# Geometry sent to the engine is rounded to five decimal places (_pts).
-# Canonical fingerprints ignore the first vertex, winding, and a closing point.
-POLYGON_FINGERPRINT_DIGITS = 5
+# Fingerprints must retain the exact coordinates used by Shapely operations.
+# In particular, a sub-1e-5 movement can change whether a passage cuts a wall.
+# Canonicalize only the starting vertex, winding, and optional closing point.
 # Maximum absolute cosine of a corner's angle away from 90 degrees.
 RECTANGLE_RIGHT_ANGLE_TOLERANCE = 1e-4
 
@@ -56,7 +56,7 @@ def polygon_fingerprint(points: list[list[float]] | None) -> str | None:
         for point in points:
             if len(point) != 2 or not all(math.isfinite(float(v)) for v in point):
                 return None
-            coords = tuple(round(float(v), POLYGON_FINGERPRINT_DIGITS) for v in point)
+            coords = tuple(float(v) for v in point)
             ring.append(tuple(0.0 if v == 0 else v for v in coords))
     except (TypeError, ValueError, OverflowError):
         return None

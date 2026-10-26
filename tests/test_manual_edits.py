@@ -462,3 +462,40 @@ def test_b1_concurrent_patches_have_one_winner(client, tmp_path):
         responses = list(pool.map(lambda ring: _b1_patch(client, original, ring), [polygon_a, polygon_b]))
     assert sorted(r.status_code for r in responses) == [200, 409]
     assert client.get("/api/edits").json()["edits"][0]["revision"] == 2
+
+
+def test_b1_micro_shift_passage_must_invalidate_semantic_and_cut_wall(client, tmp_path):
+    """Regression for Codex review: < 5 decimal movement changes GEOS topology.
+
+    Old 5-digit hashing treated these shapes as identical, incorrectly keeping
+    Applied/semantic-ready even though the new passage intersects the wall.
+    """
+    from manual_edits import apply_manual_edits, polygon_fingerprint
+
+    old_polygon = [[0, 1], [0.999999, 1], [0.999999, 2], [0, 2]]
+    new_polygon = [[0, 1], [1.000001, 1], [1.000001, 2], [0, 2]]
+    assert polygon_fingerprint(old_polygon) != polygon_fingerprint(new_polygon)
+
+    original = _b1_record(polygon=old_polygon)
+    original["kind"] = "passage"
+    _b1_seed(client, tmp_path, [original], use_explicit_snapshot=True)
+    assert client.get("/api/edits").json()["edits"][0]["review"]["state"] == "applied"
+
+    result = _b1_patch(client, original, new_polygon)
+    assert result.status_code == 200, result.text
+    assert result.json()["edit"]["revision"] == 2
+    assert result.json()["edit"]["polygon"] == new_polygon
+    assert result.json()["edits"][0]["review"]["state"] == "pending"
+    assert client.get("/api/project").json()["semantic"]["stale"] is True
+
+    wall = {"level_key": 1, "name": "boundary", "start": [1, 0], "end": [1, 3]}
+    for ring, expected_cut in ((old_polygon, 0), (new_polygon, 1)):
+        walls = [dict(wall)]
+        status = {}
+        result = apply_manual_edits(
+            [{**original, "polygon": ring}], areas=[], walls=walls, obstacles=[],
+            level_z={1: 0.0}, warnings=[], status=status,
+        )
+        assert result["passage"] == 1
+        assert status["E1"]["walls_cut"] == expected_cut
+        assert len(walls) == (1 if not expected_cut else 2)
