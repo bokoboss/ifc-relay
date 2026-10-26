@@ -68,6 +68,7 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
 
     page.click("#planUndoBtn")  # Undo Delete: POST, new UID, reset revision.
     page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 1")
+    page.wait_for_function("!editTransactionBusy && editHistory.redo.length === 1", timeout=20000)
     revived = _edits(page, server)[0]
     assert revived["uid"] != first["uid"]
     assert revived["revision"] == 1
@@ -79,6 +80,13 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
         return edits.length === 1 && edits[0].revision === 2
           && JSON.stringify(edits[0].polygon) === JSON.stringify([[2,2],[4,2],[4,4],[2,4]]);
     }""", timeout=20000)
+    page.wait_for_function("!editTransactionBusy && editHistory.redo.length === 2", timeout=20000)
+    details = page.evaluate("""async () => {
+        const saved = JSON.parse(localStorage.getItem('ifcrelay.editHistory'));
+        const current = (await (await fetch('/api/edits')).json()).edits;
+        return {fits: historyFits(saved, current), saved, current};
+    }""")
+    assert details["fits"], details
     reverted = _edits(page, server)[0]
     assert reverted["uid"] == revived["uid"]
     assert reverted["revision"] == 2
@@ -92,6 +100,7 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
         const {edits} = await (await fetch('/api/edits')).json();
         return edits.length === 1 && edits[0].revision === 3;
     }""", timeout=20000)
+    page.wait_for_function("!editTransactionBusy && editHistory.redo.length === 1", timeout=20000)
     redone = _edits(page, server)[0]
     assert redone["uid"] == revived["uid"]
     assert redone["revision"] == 3
