@@ -22,6 +22,13 @@ def test_passage_opens_closed_room_and_obstacle_blocks(tmp_path):
     from ifc_semantic_service import build_semantic_model
     sem = build_semantic_model(path, extract_ifc_geometry(path), ov, edits)
     info = sem["ifc_semantic"]
+    from manual_edits import polygon_fingerprint
+    snapshots = info["manual_edits_snapshot"]
+    assert [e["id"] for e in snapshots] == ["E1", "E2", "E3"]
+    assert all(e["revision"] == 1 and e["shape_type"] == "polygon" for e in snapshots)
+    assert [e["polygon_fingerprint"] for e in snapshots] == [
+        polygon_fingerprint(edit["polygon"]) for edit in edits
+    ]
     assert info["manual_edits_applied"] == {"walkable": 1, "obstacle": 1, "passage": 1, "exit": 0, "skipped": 0}
     assert not info["connectivity"]["isolated_zones"]                     # room reachable through E1
     cut = [w for w in sem["walls"] if w.get("manual_edit_id") == "E1"]
@@ -168,3 +175,327 @@ def test_edits_api_reports_review_state_per_edit(client, tmp_path):
     assert r.json()["edit"]["id"] == "E2"
     states = {e["id"]: e["review"]["state"] for e in r.json()["edits"]}
     assert states == {"E1": "applied", "E2": "pending"}
+
+
+# ---- B1: revisioned, optimistic-lock geometry PATCH and guarded DELETE -------
+
+def _b1_record(eid="E1", uid=None, *, shape_type="polygon", polygon=None, legacy=False):
+    from uuid import uuid4
+
+    record = {
+        "id": eid,
+        "uid": uid or uuid4().hex,
+        "kind": "obstacle",
+        "level_key": 1,
+        "level_z": 0.0,
+        "level_name": "Ground",
+        "created_at": "2026-10-01T12:00:00",
+        "note": "engineer annotation",
+        "reviewer": "retained custom metadata",
+        "polygon": polygon or [[0, 0], [2, 0], [2, 2], [0, 2]],
+    }
+    if not legacy:
+        record.update({"revision": 1, "shape_type": shape_type})
+    return record
+
+
+def _b1_seed(client, tmp_path, edits, *, use_explicit_snapshot=False):
+    """Synthetic semantic read-back, with no IFC parsing or Vissim dependency."""
+    import json
+
+    import app as app_module
+    from manual_edits import edit_revision, edit_shape_type, polygon_fingerprint
+
+    records = [{**e} for e in edits]
+    info = {
+        "manual_edits": records,
+        "manual_edits_status": {
+            e["id"]: {"applied": True, "level_key": 1, "note": ""} for e in records
+        },
+    }
+    if use_explicit_snapshot:
+        info["manual_edits_snapshot"] = [
+            {
+                "id": e["id"],
+                "uid": e.get("uid") or e.get("created_at"),
+                "revision": edit_revision(e),
+                "shape_type": edit_shape_type(e),
+                "polygon_fingerprint": polygon_fingerprint(e["polygon"]),
+            }
+            for e in records
+        ]
+    path = tmp_path / "b1-semantic.json"
+    path.write_text(json.dumps({
+        "levels": [{"key": 1, "z": 0.0, "name": "Ground"}],
+        "ifc_semantic": info,
+    }), encoding="utf-8")
+    state = app_module.store.read()
+    state["manual_edits"] = records
+    state["semantic"] = {"status": "ready", "stale": False, "path": str(path)}
+    state["build"] = {"status": "validated"}
+    app_module.store.write(state)
+
+
+def _b1_patch(client, record, polygon, *, uid=None, revision=None, shape_type=None):
+    payload = {
+        "expected_uid": uid if uid is not None else record["uid"],
+        "expected_revision": revision if revision is not None else record.get("revision", 1),
+        "polygon": polygon,
+    }
+    if shape_type is not None:
+        payload["shape_type"] = shape_type
+    return client.patch("/api/edits/" + record["id"], json=payload)
+
+
+def test_b1_post_is_backward_compatible_and_persists_explicit_shapes(client, tmp_path):
+    _b1_seed(client, tmp_path, [])
+    square = [[0, 0], [2, 0], [2, 2], [0, 2]]
+    old_post = client.post("/api/edits", json={
+        "kind": "walkable", "level_key": 1, "polygon": square,
+    })
+    assert old_post.status_code == 200
+    assert old_post.json()["edit"]["revision"] == 1
+    assert old_post.json()["edit"]["shape_type"] == "polygon"
+
+    rectangle = client.post("/api/edits", json={
+        "kind": "obstacle", "level_key": 1, "polygon": square, "shape_type": "rectangle",
+    })
+    assert rectangle.status_code == 200
+    assert rectangle.json()["edit"]["shape_type"] == "rectangle"
+    bad_shape = client.post("/api/edits", json={
+        "kind": "obstacle", "level_key": 1, "polygon": square, "shape_type": "triangle",
+    })
+    assert bad_shape.status_code == 422
+
+
+def test_b1_patch_preserves_identity_sets_stale_and_only_changed_edit_pending(client, tmp_path):
+    original = _b1_record()
+    other = _b1_record("E2")
+    _b1_seed(client, tmp_path, [original, other], use_explicit_snapshot=True)
+    before = client.get("/api/edits").json()["edits"]
+    assert [e["review"]["state"] for e in before] == ["applied", "applied"]
+
+    new_polygon = [[0, 0], [3, 0], [3, 2], [0, 2]]
+    result = _b1_patch(client, original, new_polygon)
+    assert result.status_code == 200, result.text
+    updated = result.json()["edit"]
+    for field in ("id", "uid", "created_at", "kind", "level_key",
+                  "level_z", "level_name", "note", "reviewer"):
+        assert updated[field] == original[field]
+    assert updated["polygon"] == new_polygon
+    assert updated["shape_type"] == "polygon"
+    assert updated["revision"] == 2
+    assert updated["updated_at"]
+
+    edits = result.json()["edits"]
+    assert edits[0]["review"]["state"] == "pending"
+    assert "รูปทรง" in edits[0]["review"]["detail"]
+    assert edits[1]["review"]["state"] == "applied"
+    assert [e["review"]["state"] for e in client.get("/api/edits").json()["edits"]] == [
+        "pending", "applied",
+    ]
+    state = client.get("/api/project").json()
+    assert state["semantic"]["stale"] is True
+    assert state["build"]["status"] == "selection_changed"
+
+
+def test_b1_same_geometry_patch_preserves_revision_stale_and_review(client, tmp_path):
+    original = _b1_record()
+    _b1_seed(client, tmp_path, [original], use_explicit_snapshot=True)
+    for ring in (
+        [[2, 0], [2, 2], [0, 2], [0, 0]],               # cyclic start
+        [[0, 0], [0, 2], [2, 2], [2, 0], [0, 0]],  # winding + closing point
+    ):
+        result = _b1_patch(client, original, ring)
+        assert result.status_code == 200, result.text
+        assert result.json()["edit"]["revision"] == 1
+        assert result.json()["edit"]["polygon"] == original["polygon"]
+        assert "updated_at" not in result.json()["edit"]
+        assert result.json()["edits"][0]["review"]["state"] == "applied"
+        state = client.get("/api/project").json()
+        assert state["semantic"]["stale"] is False
+        assert state["build"]["status"] == "validated"
+
+
+@pytest.mark.parametrize("payload", [
+    {"expected_revision": 1, "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+    {"expected_uid": "known", "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+    {"expected_uid": "known", "expected_revision": 1},
+    {"expected_uid": "known", "expected_revision": 0, "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+    {"expected_uid": "known", "expected_revision": True, "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]]},
+    {"expected_uid": "known", "expected_revision": 1, "polygon": [["bad", 0], [2, 0], [2, 2]]},
+    {"expected_uid": "known", "expected_revision": 1, "polygon": [[0, 0], [2, 0], [2, 2]], "shape_type": "ellipse"},
+])
+def test_b1_patch_schema_errors_422(client, tmp_path, payload):
+    _b1_seed(client, tmp_path, [_b1_record()])
+    response = client.patch("/api/edits/E1", json=payload)
+    assert response.status_code == 422
+
+
+def test_b1_conflicts_return_current_edit_and_do_not_mutate(client, tmp_path):
+    original = _b1_record()
+    _b1_seed(client, tmp_path, [original])
+    polygon = [[0, 0], [3, 0], [3, 2], [0, 2]]
+    for uid, revision in (("obsolete", 1), (original["uid"], 99)):
+        response = _b1_patch(client, original, polygon, uid=uid, revision=revision)
+        assert response.status_code == 409
+        assert response.json()["detail"]["current_edit"]["uid"] == original["uid"]
+        assert response.json()["detail"]["current_edit"]["revision"] == 1
+    missing = client.patch("/api/edits/E999", json={
+        "expected_uid": original["uid"], "expected_revision": 1, "polygon": polygon,
+    })
+    assert missing.status_code == 404
+    state = client.get("/api/project").json()
+    assert state["manual_edits"] == [original]
+    assert state["semantic"]["stale"] is False
+
+
+def test_b1_patch_rejects_invalid_geometry_and_shape_transitions(client, tmp_path):
+    original = _b1_record()
+    _b1_seed(client, tmp_path, [original])
+    invalid = (
+        [[0, 0], [2, 2], [2, 0], [0, 2]],   # self intersection
+        [[0, 0], [0.001, 0], [0, 0.001]],  # tiny area
+    )
+    for polygon in invalid:
+        assert _b1_patch(client, original, polygon).status_code == 400
+    assert _b1_patch(client, original, original["polygon"], shape_type="rectangle").status_code == 400
+
+    rectangle = _b1_record(shape_type="rectangle")
+    _b1_seed(client, tmp_path, [rectangle])
+    skew = [[0, 0], [2, 0], [2.15, 2], [0, 2]]
+    assert _b1_patch(client, rectangle, skew).status_code == 400
+    assert _b1_patch(client, rectangle, rectangle["polygon"], shape_type="rectangle").status_code == 400
+
+    converted = _b1_patch(client, rectangle, skew, shape_type="polygon")
+    assert converted.status_code == 200, converted.text
+    assert converted.json()["edit"]["shape_type"] == "polygon"
+    assert converted.json()["edit"]["revision"] == 2
+    assert converted.json()["edits"][0]["review"]["state"] == "pending"
+
+
+def test_b1_rectangle_tolerance_and_polygon_fingerprint():
+    from manual_edits import polygon_fingerprint, validate_edit
+
+    square = [[0, 0], [2, 0], [2, 2], [0, 2]]
+    almost = [[0, 0], [2, 0], [2.0000001, 2], [0, 2]]
+    skew = [[0, 0], [2, 0], [2.05, 2], [0, 2]]
+    assert validate_edit({"kind": "obstacle", "polygon": square, "shape_type": "rectangle"}) is None
+    assert validate_edit({"kind": "obstacle", "polygon": almost, "shape_type": "rectangle"}) is None
+    assert "orthogonal" in validate_edit({
+        "kind": "obstacle", "polygon": skew, "shape_type": "rectangle",
+    })
+    assert "orthogonal" in validate_edit({
+        "kind": "obstacle", "polygon": [[0, 0], [2, 0], [1, 2]], "shape_type": "rectangle",
+    })
+    assert polygon_fingerprint(square) == polygon_fingerprint(
+        [[2, 2], [2, 0], [0, 0], [0, 2], [2, 2]]
+    )
+    assert polygon_fingerprint(square) != polygon_fingerprint(
+        [[0, 0], [3, 0], [3, 2], [0, 2]]
+    )
+
+
+def test_b1_legacy_edits_default_to_polygon_revision_one(client, tmp_path):
+    original = _b1_record(legacy=True)
+    _b1_seed(client, tmp_path, [original])  # old semantic JSON: raw edits only
+    current = client.get("/api/edits").json()["edits"][0]
+    assert (current["revision"], current["shape_type"]) == (1, "polygon")
+    assert current["review"]["state"] == "applied"
+    changed = _b1_patch(client, original, [[0, 0], [4, 0], [4, 2], [0, 2]])
+    assert changed.status_code == 200
+    assert changed.json()["edit"]["revision"] == 2
+    assert changed.json()["edit"]["shape_type"] == "polygon"
+    assert changed.json()["edits"][0]["review"]["state"] == "pending"
+
+
+def test_b1_delete_preconditions_and_unguarded_legacy_delete(client, tmp_path):
+    first, second = _b1_record(), _b1_record("E2")
+    _b1_seed(client, tmp_path, [first, second])
+    for params in (
+        {"expected_uid": "wrong", "expected_revision": 1},
+        {"expected_uid": first["uid"], "expected_revision": 2},
+    ):
+        conflict = client.delete("/api/edits/E1", params=params)
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["current_edit"]["uid"] == first["uid"]
+        assert client.get("/api/project").json()["semantic"]["stale"] is False
+    bad_query = client.delete("/api/edits/E1", params={"expected_revision": 0})
+    assert bad_query.status_code == 422
+    valid = client.delete("/api/edits/E1", params={
+        "expected_uid": first["uid"], "expected_revision": 1,
+    })
+    assert valid.status_code == 200
+    assert [e["id"] for e in valid.json()["edits"]] == ["E2"]
+    assert client.delete("/api/edits/E2").status_code == 200  # old UI
+    assert client.delete("/api/edits/E2").status_code == 404
+
+
+def test_b1_reused_e1_id_rejects_old_uid_after_delete_and_post(client, tmp_path):
+    old = _b1_record("E1")
+    _b1_seed(client, tmp_path, [old])
+    deleted = client.delete("/api/edits/E1", params={
+        "expected_uid": old["uid"], "expected_revision": 1,
+    })
+    assert deleted.status_code == 200
+    created = client.post("/api/edits", json={
+        "kind": "obstacle", "level_key": 1, "polygon": [[0, 0], [3, 0], [3, 2], [0, 2]],
+    })
+    assert created.status_code == 200, created.text
+    replacement = created.json()["edit"]
+    assert replacement["id"] == "E1"
+    assert replacement["uid"] != old["uid"]
+    response = _b1_patch(client, old, [[0, 0], [4, 0], [4, 2], [0, 2]])
+    assert response.status_code == 409
+    assert response.json()["detail"]["current_edit"]["uid"] == replacement["uid"]
+    assert client.get("/api/project").json()["manual_edits"][0]["uid"] == replacement["uid"]
+
+
+def test_b1_concurrent_patches_have_one_winner(client, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    original = _b1_record()
+    _b1_seed(client, tmp_path, [original])
+    polygon_a = [[0, 0], [3, 0], [3, 2], [0, 2]]
+    polygon_b = [[0, 0], [4, 0], [4, 2], [0, 2]]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda ring: _b1_patch(client, original, ring), [polygon_a, polygon_b]))
+    assert sorted(r.status_code for r in responses) == [200, 409]
+    assert client.get("/api/edits").json()["edits"][0]["revision"] == 2
+
+
+def test_b1_micro_shift_passage_must_invalidate_semantic_and_cut_wall(client, tmp_path):
+    """Regression for Codex review: < 5 decimal movement changes GEOS topology.
+
+    Old 5-digit hashing treated these shapes as identical, incorrectly keeping
+    Applied/semantic-ready even though the new passage intersects the wall.
+    """
+    from manual_edits import apply_manual_edits, polygon_fingerprint
+
+    old_polygon = [[0, 1], [0.999999, 1], [0.999999, 2], [0, 2]]
+    new_polygon = [[0, 1], [1.000001, 1], [1.000001, 2], [0, 2]]
+    assert polygon_fingerprint(old_polygon) != polygon_fingerprint(new_polygon)
+
+    original = _b1_record(polygon=old_polygon)
+    original["kind"] = "passage"
+    _b1_seed(client, tmp_path, [original], use_explicit_snapshot=True)
+    assert client.get("/api/edits").json()["edits"][0]["review"]["state"] == "applied"
+
+    result = _b1_patch(client, original, new_polygon)
+    assert result.status_code == 200, result.text
+    assert result.json()["edit"]["revision"] == 2
+    assert result.json()["edit"]["polygon"] == new_polygon
+    assert result.json()["edits"][0]["review"]["state"] == "pending"
+    assert client.get("/api/project").json()["semantic"]["stale"] is True
+
+    wall = {"level_key": 1, "name": "boundary", "start": [1, 0], "end": [1, 3]}
+    for ring, expected_cut in ((old_polygon, 0), (new_polygon, 1)):
+        walls = [dict(wall)]
+        status = {}
+        result = apply_manual_edits(
+            [{**original, "polygon": ring}], areas=[], walls=walls, obstacles=[],
+            level_z={1: 0.0}, warnings=[], status=status,
+        )
+        assert result["passage"] == 1
+        assert status["E1"]["walls_cut"] == expected_cut
+        assert len(walls) == (1 if not expected_cut else 2)
