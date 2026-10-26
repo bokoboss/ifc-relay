@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import threading
 import uuid
 from pathlib import Path
@@ -20,7 +21,7 @@ from ifc_geometry_service import EXTRACTOR_VERSION, VIEW_MAX_TRIANGLES, Geometry
 import model_jobs
 from model_jobs import JobFailed
 from ifc_service import ifcopenshell_version
-from revision_service import report_messages
+from revision_service import compare_project_identity, inspect_project_identity, report_messages
 from project_paths import base_network_path, engine_path, project_root
 from state_store import ProjectStateStore
 from vissim_com import describe as vissim_describe
@@ -131,6 +132,13 @@ class ManualEdit(BaseModel):
     polygon: list[list[float]]
     shape_type: Literal["rectangle", "polygon"] = "polygon"
     note: str = ""
+
+
+class ImportConfirmation(BaseModel):
+    pending_token: str = Field(min_length=1)
+    expected_sha256: str = Field(min_length=64, max_length=64)
+    carry_manual_edits: bool = False
+    acknowledge_unverified: bool = False
 
 
 class ManualEditPatch(BaseModel):
@@ -376,8 +384,89 @@ def get_project() -> dict[str, Any]:
 @app.post("/api/project/reset")
 @state_transaction
 def reset_project() -> dict[str, Any]:
+    _clear_pending_import()
     store.reset()
     return {"status": "ok", "message": "Local project state reset."}
+
+
+# C3 pending IFC is separate from the committed project state. A second upload
+# supersedes the pending token; a server restart loses tokens but does NOT change
+# the current project. Expired files are removed on the next import/confirmation.
+_PENDING_IMPORT: dict[str, Any] | None = None
+PENDING_IMPORT_TTL_SECONDS = 30 * 60
+# Keep interrupted, long-running uploads safe from cleanup for at least a day;
+# on the next import a staged file with no live token can be garbage-collected.
+PENDING_IMPORT_ORPHAN_GRACE_SECONDS = 24 * 60 * 60
+
+
+def _staging_dir() -> Path:
+    directory = UPLOAD_DIR / ".pending"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _cleanup_orphan_staging_files() -> None:
+    """Recover disk space after a crash/restart without deleting current IFCs.
+
+    Committed uploads never live in .pending. Fresh uploads could still be in
+    progress, so cleanup is intentionally conservative (24h mtime grace).
+    """
+    active = str((_PENDING_IMPORT or {}).get("target") or "")
+    older_than = time.time() - PENDING_IMPORT_ORPHAN_GRACE_SECONDS
+    for staged in _staging_dir().iterdir():
+        if str(staged) == active or not staged.is_file():
+            continue
+        try:
+            if staged.stat().st_mtime < older_than:
+                staged.unlink(missing_ok=True)
+        except OSError:
+            pass  # Files still held open by Windows remain for a later cleanup.
+
+
+def _promote_pending_upload(source: Path, upload: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    """Move a verified IFC to the committed upload directory on the same volume."""
+    destination = UPLOAD_DIR / source.name
+    if destination.exists():
+        raise HTTPException(status_code=409, detail="ชื่อไฟล์ที่รอยืนยันซ้ำกับไฟล์โครงการที่มีอยู่")
+    source.replace(destination)
+    return destination, {**upload, "path": str(destination)}
+
+
+def _clear_pending_import() -> None:
+    global _PENDING_IMPORT
+    previous, _PENDING_IMPORT = _PENDING_IMPORT, None
+    if previous:
+        Path(previous["target"]).unlink(missing_ok=True)
+
+
+def _upload_signature(state: dict[str, Any]) -> tuple[str | None, str | None]:
+    current = state.get("upload") or {}
+    return current.get("path"), current.get("sha256")
+
+
+def _commit_import_state(
+    previous: dict[str, Any], upload: dict[str, Any], *,
+    carry_selection: bool, carry_manual_edits: bool,
+) -> dict[str, Any]:
+    old_upload = previous.get("upload") or {}
+    overrides = dict(((previous.get("selection") or {}).get("overrides")) or {})
+    carry = bool(carry_selection and old_upload.get("extension") == ".ifc" and overrides)
+    edits = list(previous.get("manual_edits") or []) if carry_manual_edits else []
+    return {
+        "schema_version": PROJECT_STATE_VERSION,
+        "upload": upload,
+        "analysis": None,
+        "geometry": None,
+        "selection": {"mode": "auto", "overrides": overrides if carry else {}},
+        "revision": ({
+            "status": "pending",
+            "previous_upload": old_upload,
+            "previous_decisions": len(overrides),
+        } if carry else None),
+        "semantic": None,
+        "build": {"status": "not_ready"},
+        "manual_edits": edits,
+    }
 
 
 @app.post("/api/import")
@@ -385,17 +474,15 @@ async def import_file(
     file: UploadFile = File(...),
     carry_selection: bool = Form(True),
 ) -> dict[str, Any]:
+    """Upload only once. Replacing an open IFC requires a second, explicit action."""
+    global _PENDING_IMPORT
     original = safe_filename(file.filename or "upload")
-    suffix = Path(original).suffix.lower()
+    if Path(original).suffix.lower() != ".ifc":
+        raise HTTPException(status_code=400, detail="รองรับเฉพาะไฟล์ .ifc ในเวอร์ชันนี้")
 
-    if suffix != ".ifc":
-        raise HTTPException(
-            status_code=400,
-            detail="รองรับเฉพาะไฟล์ .ifc ในเวอร์ชันนี้ (การนำเข้า PDF/DXF ยังอยู่ระหว่างพัฒนา)",
-        )
-
-    token = uuid.uuid4().hex[:10]
-    target = UPLOAD_DIR / f"{token}_{original}"
+    token = uuid.uuid4().hex
+    _cleanup_orphan_staging_files()
+    target = _staging_dir() / f"{token[:12]}_{original}"
     limit = int(float(os.environ.get("VBB_MAX_UPLOAD_MB", "2048")) * 1024 * 1024)
     size = 0
     digest = hashlib.sha256()
@@ -403,65 +490,139 @@ async def import_file(
         with open(target, "wb") as fh:
             while chunk := await file.read(4 * 1024 * 1024):
                 size += len(chunk)
-                digest.update(chunk)
                 if size > limit:
                     raise HTTPException(status_code=413,
                                         detail=f"ไฟล์ใหญ่เกิน {limit // (1024 * 1024)} MB (ตั้งค่า VBB_MAX_UPLOAD_MB ได้)")
+                digest.update(chunk)
                 fh.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail="ไฟล์ที่นำเข้าว่างเปล่า")
     except BaseException:
         target.unlink(missing_ok=True)
         raise
-    if size == 0:
-        target.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="ไฟล์ที่นำเข้าว่างเปล่า")
-    content_size = size
+    upload = {
+        "original_name": original, "path": str(target), "extension": ".ifc",
+        "size_bytes": size, "sha256": digest.hexdigest(),
+    }
 
-    # Carry review decisions from the previous IFC import (matched by GlobalId
-    # during Analyze). The previous upload file is kept for the revision diff.
+    # Parsing IFC metadata is done before the short state lock. If the new IFC
+    # is corrupt, the existing project and any previous pending token survive.
     with store.lock:
-        previous = store.read()
-        previous_upload = previous.get("upload") or {}
-        previous_overrides = dict(((previous.get("selection") or {}).get("overrides")) or {})
-        carry = (
-            carry_selection
-            and suffix == ".ifc"
-            and previous_upload.get("extension") == ".ifc"
-            and bool(previous_overrides)
-        )
+        initial_state = store.read()
+        has_current = bool(initial_state.get("upload"))
+    identity = None
+    if has_current:
+        try:
+            incoming_identity = inspect_project_identity(target)
+        except Exception as exc:
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"อ่านข้อมูลโครงการ IFC ใหม่ไม่ได้: {type(exc).__name__}: {exc}")
+        prior_path = ((initial_state.get("upload") or {}).get("path"))
+        try:
+            old_identity = inspect_project_identity(Path(prior_path)) if prior_path else None
+        except Exception:
+            old_identity = None
+        identity = compare_project_identity(old_identity, incoming_identity)
 
-        state = {
-            "schema_version": PROJECT_STATE_VERSION,
-            "upload": {
-                "original_name": original,
-                "path": str(target),
-                "extension": suffix,
-                "size_bytes": content_size,
-                "sha256": digest.hexdigest(),
-            },
-            "analysis": None,
-            "geometry": None,
-            "selection": {"mode": "auto", "overrides": previous_overrides if carry else {}},
-            "revision": (
-                {
-                    "status": "pending",
-                    "previous_upload": previous_upload,
-                    "previous_decisions": len(previous_overrides),
-                }
-                if carry
-                else None
-            ),
-            "semantic": None,
-            "build": {"status": "not_ready"},
-            # Plan edits follow the selection: kept for a new revision of the same model.
-            "manual_edits": (previous.get("manual_edits") or [])
-            if carry_selection and suffix == ".ifc" and previous_upload.get("extension") == ".ifc" else [],
+    with store.lock:
+        current = store.read()
+        if not current.get("upload"):
+            # First project is backward-compatible: no existing project to lose.
+            _clear_pending_import()
+            destination, committed_upload = _promote_pending_upload(target, upload)
+            state = _commit_import_state(current, committed_upload, carry_selection=False, carry_manual_edits=False)
+            try:
+                store.write(state)
+            except Exception:
+                destination.replace(target)
+                raise
+            return {"status": "ok", "upload": committed_upload, "carried_decisions_pending": 0}
+        if (_upload_signature(current) != _upload_signature(initial_state)
+                or bool(current.get("upload")) != has_current):
+            target.unlink(missing_ok=True)
+            raise HTTPException(status_code=409, detail="โครงการถูกเปลี่ยนระหว่างอัปโหลด · กรุณาเลือกไฟล์ใหม่")
+        _clear_pending_import()
+        edits = list(current.get("manual_edits") or [])
+        _PENDING_IMPORT = {
+            "token": token, "target": str(target), "upload": upload, "expires_at": time.time() + PENDING_IMPORT_TTL_SECONDS,
+            "base_upload": _upload_signature(current),
+            "base_edits": edits, "base_selection": dict(((current.get("selection") or {}).get("overrides")) or {}),
+            "carry_selection": bool(carry_selection), "identity": identity,
         }
-        store.write(state)
         return {
-            "status": "ok",
-            "upload": state["upload"],
-            "carried_decisions_pending": len(previous_overrides) if carry else 0,
+            "status": "pending", "pending_token": token,
+            "sha256": digest.hexdigest(), "expires_in_seconds": PENDING_IMPORT_TTL_SECONDS,
+            "source_file": (current.get("upload") or {}).get("original_name"),
+            "destination_file": original,
+            "manual_edit_count": len(edits),
+            "affected_levels": sorted({str(e.get("level_name") or e.get("level_key")) for e in edits}),
+            "identity": identity,
+            "carry_selection": bool(carry_selection),
+            "carry_manual_edits": False,
         }
+
+
+@app.post("/api/import/confirm")
+@state_transaction
+def confirm_import(request: ImportConfirmation) -> dict[str, Any]:
+    global _PENDING_IMPORT
+    pending = _PENDING_IMPORT
+    if pending is None or pending["token"] != request.pending_token:
+        raise HTTPException(status_code=409, detail="คำขอนำเข้านี้ไม่ใช่รายการล่าสุด หรือถูกยกเลิกแล้ว")
+    if time.time() > pending["expires_at"]:
+        _clear_pending_import()
+        raise HTTPException(status_code=410, detail="คำขอนำเข้าหมดอายุ · เลือกไฟล์ใหม่")
+    if request.expected_sha256 != pending["upload"]["sha256"]:
+        raise HTTPException(status_code=409, detail="ไฟล์ที่ยืนยันไม่ตรงกับไฟล์ที่อัปโหลด")
+    target = Path(pending["target"])
+    if not target.is_file() or target.stat().st_size != pending["upload"]["size_bytes"]:
+        raise HTTPException(status_code=409, detail="ไฟล์รอยืนยันสูญหายหรือขนาดไม่ตรง")
+    # The client-supplied digest is not proof of the file currently on disk:
+    # verify bytes again before committing (local file tampering / partial writes).
+    actual = hashlib.sha256()
+    try:
+        with target.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(4 * 1024 * 1024), b""):
+                actual.update(chunk)
+    except OSError:
+        raise HTTPException(status_code=409, detail="ไม่สามารถอ่านไฟล์รอยืนยันได้")
+    if actual.hexdigest() != pending["upload"]["sha256"]:
+        raise HTTPException(status_code=409, detail="เนื้อหาไฟล์รอยืนยันถูกเปลี่ยน · นำเข้าใหม่")
+    current = store.read()
+    if (_upload_signature(current) != tuple(pending["base_upload"])
+            or list(current.get("manual_edits") or []) != pending["base_edits"]
+            or dict(((current.get("selection") or {}).get("overrides")) or {}) != pending["base_selection"]):
+        raise HTTPException(status_code=409, detail="โครงการต้นทางเปลี่ยนระหว่างรอยืนยัน · ต้องตรวจการนำเข้าใหม่")
+    if request.carry_manual_edits and pending["base_edits"]:
+        status = pending["identity"]["status"]
+        if status == "mismatch":
+            raise HTTPException(status_code=409, detail="IFC Identity/พิกัดต่างกัน ไม่อนุญาตให้นำรูปทรงเดิมมาใช้")
+        if status != "verified" and not request.acknowledge_unverified:
+            raise HTTPException(status_code=409, detail="ข้อมูลพิกัดยังยืนยันไม่ได้ · ต้องยอมรับความเสี่ยงแยกต่างหาก")
+    destination, committed_upload = _promote_pending_upload(target, pending["upload"])
+    state = _commit_import_state(
+        current, committed_upload, carry_selection=pending["carry_selection"],
+        carry_manual_edits=request.carry_manual_edits,
+    )
+    try:
+        store.write(state)  # atomic; old project remains on failed confirmation
+    except Exception:
+        destination.replace(target)
+        raise
+    _PENDING_IMPORT = None
+    return {"status": "ok", "upload": state["upload"],
+            "carried_decisions_pending": len((state.get("selection") or {}).get("overrides") or {}),
+            "manual_edits_carried": len(state["manual_edits"])}
+
+
+@app.post("/api/import/cancel")
+@state_transaction
+def cancel_import(request: ImportConfirmation) -> dict[str, Any]:
+    pending = _PENDING_IMPORT
+    if pending is None or pending["token"] != request.pending_token:
+        raise HTTPException(status_code=409, detail="คำขอนำเข้านี้ไม่ใช่รายการล่าสุด")
+    _clear_pending_import()
+    return {"status": "cancelled"}
 
 
 @app.post("/api/analyze")
