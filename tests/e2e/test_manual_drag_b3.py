@@ -47,15 +47,22 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     assert edit["revision"] == 1
 
     patches = []
-    page.on("request", lambda request: patches.append(request.url)
-            if request.method == "PATCH" and "/api/edits/" in request.url else None)
+    # Record what the browser actually sent: a revision increment can occur
+    # even when the requested drag ended up near its original coordinates.
+    page.on("request", lambda request: patches.append({
+        "url": request.url, "body": request.post_data,
+    }) if request.method == "PATCH" and "/api/edits/" in request.url else None)
     _drag(page, 5, 4, 7, 5)
     _wait_revision(page, 2)
     moved = _edits(page, server)[0]
     assert moved["uid"] == edit["uid"]
     assert moved["level_key"] == edit["level_key"]
     assert moved["shape_type"] == edit["shape_type"]
-    assert moved["polygon"] == [[x + 2, y + 1] for x, y in before]
+    expected = [[x + 2, y + 1] for x, y in before]
+    assert moved["polygon"] == expected, (
+        f"B3 drag geometry: before={before}, after={moved['polygon']}, "
+        f"expected={expected}, requests={patches}"
+    )
     assert len(patches) == 1  # no requests during pointermove
     page.wait_for_function(
         "() => document.getElementById('selectedMapping').textContent.includes('Revision 2')",
