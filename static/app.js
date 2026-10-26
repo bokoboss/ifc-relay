@@ -220,7 +220,16 @@ async function api(url, options = {}) {
   // Any change on the server can make the pedestrian model stale or move the
   // workflow on: re-read the project state once things settle.
   if ((options.method || 'GET') !== 'GET' && !url.startsWith('/api/project')) scheduleWorkflowRefresh();
-  if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = payload.detail;
+    const message = typeof detail === 'string' ? detail
+      : (typeof detail?.message === 'string' ? detail.message : `HTTP ${response.status}`);
+    const error = new Error(message);
+    error.status = response.status;
+    error.detail = detail;
+    error.currentEdit = detail?.current_edit || null;
+    throw error;
+  }
   return payload;
 }
 
