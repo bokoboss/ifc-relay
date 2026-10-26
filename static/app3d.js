@@ -40,9 +40,9 @@ orthoCamera.up.set(0, 0, -1);              // IFC +y points up on screen
 const planControls = new OrbitControls(orthoCamera, renderer.domElement);
 planControls.enableRotate = false;
 planControls.screenSpacePanning = true;
-// In plan view LEFT drag on empty space pans, wheel zooms. B3 owns future
-// manual-object drag capture; do not repurpose LEFT to rotate.
-planControls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+// U1: left-drag pans only in Select mode; drawing mode keeps the pre-U1
+// pointer route so each vertex click reaches the drawing handler unchanged.
+// Middle dolly/right pan remain available while drawing. B3 owns drag capture.
 planControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
 planControls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 planControls.enabled = false;
@@ -1232,6 +1232,8 @@ window.IFCViewer = {
 
   setPlanTool(tool) {
     planTool = tool || 'select';
+    planControls.mouseButtons.LEFT = planTool === 'select'
+      ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
     lastPolygonClosure = null;
     recentPolygonClicks = [];
     planPoints = [];
