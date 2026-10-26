@@ -70,3 +70,36 @@ def test_c3_browser_cancel_decline_and_pending_details(page, server, tmp_path):
     assert page.request.get(server + "/api/project").json()["upload"]["original_name"] == "replacement.ifc"
     assert page.request.get(server + "/api/edits").json()["edits"] == []
     assert page.errors == []
+
+
+def test_c3_browser_explicit_manual_carry_requires_spatial_ack(page, server, tmp_path):
+    b = Building([0.0])
+    b.slab([(0, 0), (10, 0), (10, 7), (0, 7)], 0.0, b.storeys[0])
+    first = b.write(tmp_path / "revision_A.ifc")
+    _open(page, first)
+    page.click("#generateSemanticBtn")
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    result = page.request.post(server + "/api/edits", data={
+        "kind": "walkable", "level_key": 1,
+        "polygon": [[0, 0], [2, 0], [2, 2], [0, 2]],
+    })
+    assert result.ok, result.text()
+
+    # Same IFC project and XY. In absence of MapConversion, it is explicitly
+    # unverified, so the engineer must acknowledge the alignment risk.
+    second = b.write(tmp_path / "revision_B.ifc")
+    page.set_input_files("#fileInput", str(second))
+    page.wait_for_selector("#importConfirm[open]", timeout=120000)
+    assert "ยังตรวจยืนยันระบบพิกัดไม่ได้ครบ" in page.text_content("#importConfirmIdentity")
+    page.check("#importConfirmCarry")
+    assert page.is_disabled("#importConfirmGo")
+    page.check("#importConfirmRisk")
+    assert page.is_enabled("#importConfirmGo")
+    page.click("#importConfirmGo")
+    page.wait_for_selector("#importConfirm", state="hidden")
+    page.wait_for_function(
+        "() => document.getElementById('fileMeta').textContent.includes('revision_B.ifc')",
+        timeout=120000,
+    )
+    assert len(page.request.get(server + "/api/edits").json()["edits"]) == 1
+    assert page.errors == []

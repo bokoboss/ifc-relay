@@ -495,7 +495,8 @@ async def import_file(
             state = _commit_import_state(current, upload, carry_selection=False, carry_manual_edits=False)
             store.write(state)
             return {"status": "ok", "upload": upload, "carried_decisions_pending": 0}
-        if _upload_signature(current) != _upload_signature(initial_state):
+        if (_upload_signature(current) != _upload_signature(initial_state)
+                or bool(current.get("upload")) != has_current):
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail="โครงการถูกเปลี่ยนระหว่างอัปโหลด · กรุณาเลือกไฟล์ใหม่")
         _clear_pending_import()
@@ -534,6 +535,17 @@ def confirm_import(request: ImportConfirmation) -> dict[str, Any]:
     target = Path(pending["target"])
     if not target.is_file() or target.stat().st_size != pending["upload"]["size_bytes"]:
         raise HTTPException(status_code=409, detail="ไฟล์รอยืนยันสูญหายหรือขนาดไม่ตรง")
+    # The client-supplied digest is not proof of the file currently on disk:
+    # verify bytes again before committing (local file tampering / partial writes).
+    actual = hashlib.sha256()
+    try:
+        with target.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(4 * 1024 * 1024), b""):
+                actual.update(chunk)
+    except OSError:
+        raise HTTPException(status_code=409, detail="ไม่สามารถอ่านไฟล์รอยืนยันได้")
+    if actual.hexdigest() != pending["upload"]["sha256"]:
+        raise HTTPException(status_code=409, detail="เนื้อหาไฟล์รอยืนยันถูกเปลี่ยน · นำเข้าใหม่")
     current = store.read()
     if (_upload_signature(current) != tuple(pending["base_upload"])
             or list(current.get("manual_edits") or []) != pending["base_edits"]
