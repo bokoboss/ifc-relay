@@ -42,7 +42,7 @@ document.getElementById('planLevelSelect').addEventListener('change', event => {
 });
 
 const PLAN_HINTS = {
-  select: 'คลิกวัตถุเพื่อดูรายละเอียด · ลากพื้นที่ว่างเพื่อเลื่อนแปลน',
+  select: 'เลือก: คลิกวัตถุเพื่อดูรายละเอียด · ลากพื้นที่ว่างเพื่อเลื่อนแปลน',
   measure: 'คลิกจุดเริ่มต้น แล้วคลิกจุดปลายเพื่อวัดระยะ',
   walkable: 'พื้นที่เดิน', obstacle: 'สิ่งกีดขวาง',
   passage: 'ช่องเปิดในผนัง', exit: 'ทางออก/จุดเริ่มเดิน',

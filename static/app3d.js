@@ -877,11 +877,6 @@ function planClick(event) {
       return;
     }
   }
-  // Avoid the extra click delivered on double-click and repeated last vertex.
-  if (planPoints.length && Math.hypot(
-    p[0] - planPoints[planPoints.length - 1][0],
-    p[1] - planPoints[planPoints.length - 1][1],
-  ) < 0.001) return;
   planPoints.push(p);
   drawDraft(p);
 }
@@ -1004,6 +999,7 @@ function pointerSelect(event) {
 
 // Ignore drags (orbit/pan): select only on a click that did not move.
 let pointerDownAt = null;
+let previousPlanClick = null;
 renderer.domElement.addEventListener('pointerdown', event => {
   pointerDownAt = event.button === 0 ? [event.clientX, event.clientY] : null;
 });
@@ -1013,9 +1009,18 @@ renderer.domElement.addEventListener('pointerup', event => {
   pointerDownAt = null;
   if (Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
   if (planActive && planTool !== 'select') {
-    // On a polygon double-click only the first pointerup adds the last vertex;
-    // the doubleclick event below finishes it. Otherwise a ghost draft appears.
-    if (planShape === 'poly' && event.detail >= 2) return;
+    // PointerEvent.detail is not consistently a click count. Discard the
+    // second pointerup of a double-click using actual SCREEN distance/time,
+    // never the snapped model coordinate (which could merge valid vertices).
+    if (planShape === 'poly') {
+      const now = performance.now();
+      const duplicate = previousPlanClick
+        && now - previousPlanClick.time < 450
+        && Math.hypot(event.clientX - previousPlanClick.x,
+                      event.clientY - previousPlanClick.y) < 5;
+      previousPlanClick = { time: now, x: event.clientX, y: event.clientY };
+      if (duplicate) return;
+    }
     planClick(event);
     return;
   }
@@ -1208,6 +1213,7 @@ window.IFCViewer = {
 
   setPlanTool(tool) {
     planTool = tool || 'select';
+    previousPlanClick = null;
     planPoints = [];
     clearGroup(draftGroup);
     snapMarker.visible = false;
@@ -1216,6 +1222,7 @@ window.IFCViewer = {
 
   setPlanShape(shape) {
     planShape = shape === 'poly' ? 'poly' : 'rect';
+    previousPlanClick = null;
     planPoints = [];
     clearGroup(draftGroup);
   },
