@@ -252,6 +252,16 @@ async function refreshWorkflowState() {
   const ready = semantic.status === 'ready';
   const stale = ready && !!semantic.stale;
   const current = ready && !stale;
+  // The project on the server is authoritative. Local button state after an
+  // earlier generation or another browser tab must never override it.
+  // Do not interrupt an in-flight Validate/Build request or Prepare operation.
+  const preparingNow = generateSemanticBtn.getAttribute('aria-busy') === 'true';
+  const validatingNow = validateBtn.getAttribute('aria-busy') === 'true';
+  const buildingNow = buildViswalkBtn.getAttribute('aria-busy') === 'true';
+  if (!preparingNow && !validatingNow && !buildingNow) {
+    setExportReady(current);
+    if (!current) setBuildOutputReady(false);
+  }
   const steps = {
     file: state.upload ? 'done' : 'next',
     prepare: !state.upload ? 'idle' : stale ? 'stale' : current ? 'done' : 'next',
@@ -326,6 +336,7 @@ function setExportReady(ready) {
   downloadSemanticTopBtn.disabled = !ready;
   downloadEngineTopBtn.disabled = !ready;
   validateBtn.disabled = !ready;
+  exportEngineBtn.disabled = !ready;
   // Build is refused only when the Engine cannot build the model.
   buildViswalkBtn.disabled = !ready || !(currentGate && currentGate.passed);
   if (!ready) {

@@ -945,21 +945,26 @@ def generate_ifc_semantic() -> dict[str, Any]:
             "summary": summary,
             "warnings": warnings,
         }
-        state["build"] = {
+        state["build"] = ({
+            "status": "selection_changed",
+            "message": "Inputs changed during semantic generation. Regenerate before export or validate.",
+        } if changed_meanwhile else {
             "status": "semantic_ready",
-            "message": (
-                "Semantic model ready. Validate, then Build Viswalk through Vissim COM."
-            ),
-        }
+            "message": "Semantic model ready. Validate, then Build Viswalk through Vissim COM.",
+        })
         store.write(state)
         prune_semantic_generations(output_path)
 
     return {
-        "status": "ok",
+        # Return the committed truth; never imply that a preview is export-ready
+        # when inputs changed while the background geometry job was running.
+        "status": "stale" if changed_meanwhile else "ok",
+        "stale": changed_meanwhile,
+        "semantic_state": {"status": "ready", "stale": changed_meanwhile},
         "summary": summary,
         "warnings": warnings,
-        "download_url": "/api/ifc/semantic/download",
-        "engine_export_url": "/api/ifc/semantic/export-engine-input",
+        "download_url": None if changed_meanwhile else "/api/ifc/semantic/download",
+        "engine_export_url": None if changed_meanwhile else "/api/ifc/semantic/export-engine-input",
         "model": semantic,
     }
 
@@ -1487,9 +1492,16 @@ def build_readiness() -> dict[str, Any]:
     semantic = state.get("semantic") or {}
     overrides = (state.get("selection") or {}).get("overrides", {})
 
-    semantic_ready = semantic.get("status") == "ready" and not semantic.get("stale", False)
+    semantic_file = Path(semantic["path"]) if semantic.get("path") else None
+    semantic_ready = (
+        semantic.get("status") == "ready" and not semantic.get("stale", False)
+        and semantic_file is not None and semantic_file.is_file()
+    )
 
     return {
+        "semantic_status": semantic.get("status"),
+        "semantic_stale": bool(semantic.get("stale", False)),
+        "semantic_export_ready": semantic_ready,
         "current_input_kind": analysis.get("kind"),
         "ifc_audited": analysis.get("kind") == "ifc" and analysis.get("status") == "audited",
         "ifc_3d_loaded": geometry.get("status") == "loaded",
