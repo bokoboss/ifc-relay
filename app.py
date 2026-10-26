@@ -394,6 +394,42 @@ def reset_project() -> dict[str, Any]:
 # the current project. Expired files are removed on the next import/confirmation.
 _PENDING_IMPORT: dict[str, Any] | None = None
 PENDING_IMPORT_TTL_SECONDS = 30 * 60
+# Keep interrupted, long-running uploads safe from cleanup for at least a day;
+# on the next import a staged file with no live token can be garbage-collected.
+PENDING_IMPORT_ORPHAN_GRACE_SECONDS = 24 * 60 * 60
+
+
+def _staging_dir() -> Path:
+    directory = UPLOAD_DIR / ".pending"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _cleanup_orphan_staging_files() -> None:
+    """Recover disk space after a crash/restart without deleting current IFCs.
+
+    Committed uploads never live in .pending. Fresh uploads could still be in
+    progress, so cleanup is intentionally conservative (24h mtime grace).
+    """
+    active = str((_PENDING_IMPORT or {}).get("target") or "")
+    older_than = time.time() - PENDING_IMPORT_ORPHAN_GRACE_SECONDS
+    for staged in _staging_dir().iterdir():
+        if str(staged) == active or not staged.is_file():
+            continue
+        try:
+            if staged.stat().st_mtime < older_than:
+                staged.unlink(missing_ok=True)
+        except OSError:
+            pass  # Files still held open by Windows remain for a later cleanup.
+
+
+def _promote_pending_upload(source: Path, upload: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    """Move a verified IFC to the committed upload directory on the same volume."""
+    destination = UPLOAD_DIR / source.name
+    if destination.exists():
+        raise HTTPException(status_code=409, detail="ชื่อไฟล์ที่รอยืนยันซ้ำกับไฟล์โครงการที่มีอยู่")
+    source.replace(destination)
+    return destination, {**upload, "path": str(destination)}
 
 
 def _clear_pending_import() -> None:
@@ -445,7 +481,8 @@ async def import_file(
         raise HTTPException(status_code=400, detail="รองรับเฉพาะไฟล์ .ifc ในเวอร์ชันนี้")
 
     token = uuid.uuid4().hex
-    target = UPLOAD_DIR / f"{token[:12]}_{original}"
+    _cleanup_orphan_staging_files()
+    target = _staging_dir() / f"{token[:12]}_{original}"
     limit = int(float(os.environ.get("VBB_MAX_UPLOAD_MB", "2048")) * 1024 * 1024)
     size = 0
     digest = hashlib.sha256()
@@ -492,9 +529,14 @@ async def import_file(
         if not current.get("upload"):
             # First project is backward-compatible: no existing project to lose.
             _clear_pending_import()
-            state = _commit_import_state(current, upload, carry_selection=False, carry_manual_edits=False)
-            store.write(state)
-            return {"status": "ok", "upload": upload, "carried_decisions_pending": 0}
+            destination, committed_upload = _promote_pending_upload(target, upload)
+            state = _commit_import_state(current, committed_upload, carry_selection=False, carry_manual_edits=False)
+            try:
+                store.write(state)
+            except Exception:
+                destination.replace(target)
+                raise
+            return {"status": "ok", "upload": committed_upload, "carried_decisions_pending": 0}
         if (_upload_signature(current) != _upload_signature(initial_state)
                 or bool(current.get("upload")) != has_current):
             target.unlink(missing_ok=True)
@@ -557,11 +599,16 @@ def confirm_import(request: ImportConfirmation) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="IFC Identity/พิกัดต่างกัน ไม่อนุญาตให้นำรูปทรงเดิมมาใช้")
         if status != "verified" and not request.acknowledge_unverified:
             raise HTTPException(status_code=409, detail="ข้อมูลพิกัดยังยืนยันไม่ได้ · ต้องยอมรับความเสี่ยงแยกต่างหาก")
+    destination, committed_upload = _promote_pending_upload(target, pending["upload"])
     state = _commit_import_state(
-        current, pending["upload"], carry_selection=pending["carry_selection"],
+        current, committed_upload, carry_selection=pending["carry_selection"],
         carry_manual_edits=request.carry_manual_edits,
     )
-    store.write(state)  # atomic; no pre-commit mutation of the previous project
+    try:
+        store.write(state)  # atomic; old project remains on failed confirmation
+    except Exception:
+        destination.replace(target)
+        raise
     _PENDING_IMPORT = None
     return {"status": "ok", "upload": state["upload"],
             "carried_decisions_pending": len((state.get("selection") or {}).get("overrides") or {}),

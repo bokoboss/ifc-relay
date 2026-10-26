@@ -365,3 +365,83 @@ def test_c3_site_globalid_recreation_alone_does_not_count_as_coordinate_mismatch
     assert old_id["spatial_placements"] == new_id["spatial_placements"]
     comparison = compare_project_identity(old_id, new_id)
     assert comparison["status"] != "mismatch"
+
+
+def test_c3_staging_separated_and_promoted_only_after_confirmation(client, tmp_path):
+    """Keep pending bytes off committed upload paths; confirmation promotes once."""
+    from pathlib import Path
+    import app as app_module
+
+    a, b, *_ = _revisions(tmp_path)
+    first = _import(client, a)
+    old_path = Path(first["upload"]["path"])
+    assert old_path.is_file() and old_path.parent == app_module.UPLOAD_DIR
+
+    pending = _c3_pending(client, b)
+    staged = Path(app_module._PENDING_IMPORT["target"])
+    assert staged.is_file()
+    assert staged.parent == app_module.UPLOAD_DIR / ".pending"
+    assert Path(client.get("/api/project").json()["upload"]["path"]) == old_path
+
+    result = _c3_confirm(client, pending)
+    assert result.status_code == 200, result.text
+    committed = Path(result.json()["upload"]["path"])
+    assert committed.is_file() and committed.parent == app_module.UPLOAD_DIR
+    assert committed != old_path
+    assert staged.exists() is False
+    assert old_path.exists()  # prior revision is retained for selection diff
+
+
+def test_c3_staging_cancel_and_invalid_confirmation_do_not_promote(client, tmp_path):
+    from pathlib import Path
+    import app as app_module
+
+    a, b, *_ = _revisions(tmp_path)
+    _import(client, a)
+    original = client.get("/api/project").json()
+    pending = _c3_pending(client, b)
+    staged = Path(app_module._PENDING_IMPORT["target"])
+    target_committed = app_module.UPLOAD_DIR / staged.name
+    assert not target_committed.exists()
+
+    response = _c3_confirm(client, pending, expected_sha256="0" * 64)
+    assert response.status_code == 409
+    assert staged.exists() and not target_committed.exists()
+    assert client.get("/api/project").json() == original
+
+    response = client.post("/api/import/cancel", json={
+        "pending_token": pending["pending_token"],
+        "expected_sha256": pending["sha256"],
+    })
+    assert response.status_code == 200
+    assert not staged.exists() and not target_committed.exists()
+    assert client.get("/api/project").json() == original
+
+
+def test_c3_restarted_app_collects_only_old_staging_orphans(client, tmp_path, monkeypatch):
+    """Crash recovery does not delete young files or committed historical IFCs."""
+    import os
+    import time
+    import app as app_module
+
+    a, b, *_ = _revisions(tmp_path)
+    first = _import(client, a)
+    from pathlib import Path
+    committed_path = Path(first["upload"]["path"])
+    staging = app_module.UPLOAD_DIR / ".pending"
+    staging.mkdir(exist_ok=True)
+    old_orphan = staging / "orphan_crashed.ifc"
+    old_orphan.write_bytes(b"unused")
+    age = time.time() - app_module.PENDING_IMPORT_ORPHAN_GRACE_SECONDS - 120
+    os.utime(old_orphan, (age, age))
+    still_recent = staging / "in_progress.ifc"
+    still_recent.write_bytes(b"upload-in-progress")
+
+    # Simulate a process restart: no live token is recoverable from RAM.
+    monkeypatch.setattr(app_module, "_PENDING_IMPORT", None)
+    pending = _c3_pending(client, b)
+    assert not old_orphan.exists()
+    assert still_recent.exists()
+    assert committed_path.exists()
+    assert Path(app_module._PENDING_IMPORT["target"]).exists()
+    assert _c3_confirm(client, pending).status_code == 200
