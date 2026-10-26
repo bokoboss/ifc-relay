@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -129,7 +129,16 @@ class ManualEdit(BaseModel):
     kind: Literal["walkable", "obstacle", "passage", "exit"]
     level_key: int
     polygon: list[list[float]]
+    shape_type: Literal["rectangle", "polygon"] = "polygon"
     note: str = ""
+
+
+class ManualEditPatch(BaseModel):
+    expected_uid: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1, strict=True)
+    polygon: list[list[float]]
+    # Only an explicit rectangle -> polygon conversion may change shape type.
+    shape_type: Literal["rectangle", "polygon"] | None = None
 
 
 class SelectionUpdate(BaseModel):
@@ -926,27 +935,78 @@ def _mark_semantic_stale(state: dict[str, Any], message: str) -> None:
         state["build"] = {"status": "selection_changed", "message": message}
 
 
+def _edit_api_view(edit: dict[str, Any]) -> dict[str, Any]:
+    """Expose defaults for older state without rewriting its project file."""
+    from manual_edits import edit_revision, edit_shape_type
+
+    return {**edit, "revision": edit_revision(edit), "shape_type": edit_shape_type(edit)}
+
+
+def _check_edit_preconditions(
+    edit: dict[str, Any], expected_uid: str | None, expected_revision: int | None,
+) -> None:
+    """Called inside the state lock, just before a PATCH or DELETE write."""
+    from manual_edits import edit_revision
+
+    if ((expected_uid is not None and expected_uid != str(edit.get("uid") or ""))
+            or (expected_revision is not None and expected_revision != edit_revision(edit))):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "รายการแก้ไขถูกเปลี่ยนแล้ว · โหลดข้อมูลล่าสุดก่อนแก้ไขอีกครั้ง",
+                "current_edit": _edit_api_view(edit),
+            },
+        )
+
+
 def edits_with_review(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Plan edits, each with what the last pedestrian-model run did with it."""
-    from manual_edits import edit_review_state
+    """Per-edit status is bound to UID, geometry, and shape, not only reusable ID."""
+    from manual_edits import edit_review_state, edit_shape_type, polygon_fingerprint
 
     edits = state.get("manual_edits") or []
     semantic = state.get("semantic") or {}
     status: dict[str, Any] = {}
-    used: set[tuple[str, str]] = set()
+    snapshots: dict[str, dict[str, Any]] = {}
     if semantic.get("path") and Path(semantic["path"]).exists():
         try:
             info = json.loads(Path(semantic["path"]).read_text(encoding="utf-8")).get("ifc_semantic") or {}
             status = info.get("manual_edits_status") or {}
-            # id + uid: an id freed by a delete can be given to a new edit
-            used = {(str(e.get("id")), str(e.get("uid") or e.get("created_at"))) for e in info.get("manual_edits") or []}
-        except (OSError, ValueError):
+            # Old semantic JSON has the raw edit list, not the explicit snapshot.
+            entries = info.get("manual_edits_snapshot")
+            if entries is None:
+                entries = [
+                    {
+                        "id": e.get("id"),
+                        "uid": e.get("uid") or e.get("created_at"),
+                        "shape_type": edit_shape_type(e),
+                        "polygon_fingerprint": polygon_fingerprint(e.get("polygon")),
+                    }
+                    for e in info.get("manual_edits") or []
+                ]
+            snapshots = {str(e["id"]): e for e in entries if e.get("id") is not None}
+        except (OSError, ValueError, TypeError, KeyError):
             status = {}
+            snapshots = {}
     out = []
     for edit in edits:
         eid = str(edit.get("id"))
-        st = status.get(eid) if (eid, str(edit.get("uid") or edit.get("created_at"))) in used else None
-        out.append({**edit, "review": edit_review_state(edit, st)})
+        current = _edit_api_view(edit)
+        snapshot = snapshots.get(eid)
+        uid = str(edit.get("uid") or edit.get("created_at") or "")
+        same_identity = bool(uid and snapshot and uid == str(snapshot.get("uid") or ""))
+        same_geometry = bool(
+            same_identity
+            and snapshot.get("polygon_fingerprint") is not None
+            and snapshot["polygon_fingerprint"] == polygon_fingerprint(edit.get("polygon"))
+            and snapshot.get("shape_type", "polygon") == edit_shape_type(edit)
+        )
+        review = edit_review_state(edit, status.get(eid) if same_geometry else None)
+        if same_identity and not same_geometry:
+            review = {
+                "state": "pending",
+                "detail": 'รูปทรงหรือชนิดพื้นที่เปลี่ยนแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้ง',
+            }
+        out.append({**current, "review": review})
     return out
 
 
@@ -981,21 +1041,68 @@ def add_manual_edit(edit: ManualEdit) -> dict[str, Any]:
     data["id"] = f"E{next_no}"
     data["created_at"] = _dt.now().isoformat(timespec="seconds")
     data["uid"] = uuid.uuid4().hex     # ids are reused after a delete; uid is not
+    data["revision"] = 1
     edits.append(data)
     _mark_semantic_stale(state, "Plan edit added. Regenerate the pedestrian model.")
     store.write(state)
     return {"edit": data, "edits": edits_with_review(state)}
 
 
-@app.delete("/api/edits/{edit_id}")
+@app.patch("/api/edits/{edit_id}")
 @state_transaction
-def delete_manual_edit(edit_id: str) -> dict[str, Any]:
+def patch_manual_edit(edit_id: str, patch: ManualEditPatch) -> dict[str, Any]:
+    from datetime import datetime as _dt
+
+    from manual_edits import edit_revision, edit_shape_type, polygon_fingerprint, validate_edit
+
     state = store.read()
     edits = state.get("manual_edits") or []
-    kept = [e for e in edits if e.get("id") != edit_id]
-    if len(kept) == len(edits):
+    current = next((e for e in edits if e.get("id") == edit_id), None)
+    if current is None:
         raise HTTPException(status_code=404, detail="ไม่พบรายการแก้ไขนี้")
-    state["manual_edits"] = kept
+    _check_edit_preconditions(current, patch.expected_uid, patch.expected_revision)
+
+    old_shape = edit_shape_type(current)
+    if patch.shape_type is not None and not (old_shape == "rectangle" and patch.shape_type == "polygon"):
+        raise HTTPException(status_code=400, detail="เปลี่ยนชนิดรูปทรงได้เฉพาะ rectangle → polygon")
+    next_shape = patch.shape_type or old_shape
+    data = {**current, "polygon": patch.polygon, "shape_type": next_shape}
+    problem = validate_edit(data)
+    if problem:
+        raise HTTPException(status_code=400, detail=f"แก้ไขบนแปลนไม่ได้: {problem}")
+
+    changed = (polygon_fingerprint(current.get("polygon")) != polygon_fingerprint(patch.polygon)
+               or next_shape != old_shape)
+    if not changed:
+        # A different starting corner/winding is not a geometry edit. Preserve
+        # the original state, revision, applied review, and semantic readiness.
+        return {"edit": _edit_api_view(current), "edits": edits_with_review(state)}
+
+    updated = {
+        **current, "polygon": patch.polygon, "shape_type": next_shape,
+        "revision": edit_revision(current) + 1,
+        "updated_at": _dt.now().isoformat(timespec="seconds"),
+    }
+    state["manual_edits"] = [updated if e.get("id") == edit_id else e for e in edits]
+    _mark_semantic_stale(state, "Plan edit geometry changed. Regenerate the pedestrian model.")
+    store.write(state)
+    return {"edit": updated, "edits": edits_with_review(state)}
+
+
+@app.delete("/api/edits/{edit_id}")
+@state_transaction
+def delete_manual_edit(
+    edit_id: str,
+    expected_uid: str | None = Query(default=None, min_length=1),
+    expected_revision: int | None = Query(default=None, ge=1),
+) -> dict[str, Any]:
+    state = store.read()
+    edits = state.get("manual_edits") or []
+    current = next((e for e in edits if e.get("id") == edit_id), None)
+    if current is None:
+        raise HTTPException(status_code=404, detail="ไม่พบรายการแก้ไขนี้")
+    _check_edit_preconditions(current, expected_uid, expected_revision)
+    state["manual_edits"] = [e for e in edits if e.get("id") != edit_id]
     _mark_semantic_stale(state, "Plan edit removed. Regenerate the pedestrian model.")
     store.write(state)
     return {"edits": edits_with_review(state)}

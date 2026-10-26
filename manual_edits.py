@@ -13,6 +13,9 @@ every generated object carries ``manual_edit_id``.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from typing import Any
 
 from shapely.geometry import LineString, Polygon
@@ -22,6 +25,70 @@ from shapely.ops import unary_union
 # measures reachability from these marks instead of from the largest network.
 EDIT_KINDS = ("walkable", "obstacle", "passage", "exit")
 MANUAL_OBSTACLE_HEIGHT = 2.0
+
+# Fingerprints must retain the exact coordinates used by Shapely operations.
+# In particular, a sub-1e-5 movement can change whether a passage cuts a wall.
+# Canonicalize only the starting vertex, winding, and optional closing point.
+# Maximum absolute cosine of a corner's angle away from 90 degrees.
+RECTANGLE_RIGHT_ANGLE_TOLERANCE = 1e-4
+
+
+def edit_revision(edit: dict[str, Any]) -> int:
+    """Old project files without a revision are revision 1."""
+    return int(edit.get("revision", 1))
+
+
+def edit_shape_type(edit: dict[str, Any]) -> str:
+    """Old four-point polygons were not necessarily editable rectangles."""
+    return str(edit.get("shape_type", "polygon"))
+
+
+def polygon_fingerprint(points: list[list[float]] | None) -> str | None:
+    """Stable hash of a polygon ring, independent of start vertex and winding.
+
+    This is an audit/review identity, not a replacement for geometry validation.
+    Invalid legacy rings return None and therefore cannot accidentally match.
+    """
+    if not points:
+        return None
+    try:
+        ring = []
+        for point in points:
+            if len(point) != 2 or not all(math.isfinite(float(v)) for v in point):
+                return None
+            coords = tuple(float(v) for v in point)
+            ring.append(tuple(0.0 if v == 0 else v for v in coords))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if len(ring) > 1 and ring[0] == ring[-1]:
+        ring.pop()
+    if len(set(ring)) < 3:
+        return None
+    canonical = min(
+        tuple(sequence[index:] + sequence[:index])
+        for sequence in (ring, list(reversed(ring)))
+        for index in range(len(ring))
+    )
+    payload = json.dumps(canonical, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("ascii")).hexdigest()
+
+
+def _rectangle_orthogonal(points: list[list[float]]) -> bool:
+    corners = list(points)
+    if len(corners) == 5 and corners[0] == corners[-1]:
+        corners.pop()
+    if len(corners) != 4:
+        return False
+    for index in range(4):
+        before = corners[index - 1]
+        corner = corners[index]
+        after = corners[(index + 1) % 4]
+        a = (before[0] - corner[0], before[1] - corner[1])
+        b = (after[0] - corner[0], after[1] - corner[1])
+        scale = math.hypot(*a) * math.hypot(*b)
+        if scale == 0 or abs(a[0] * b[0] + a[1] * b[1]) > RECTANGLE_RIGHT_ANGLE_TOLERANCE * scale:
+            return False
+    return True
 
 
 def _poly(points: list[list[float]]) -> Polygon:
@@ -39,7 +106,6 @@ def validate_edit(edit: dict[str, Any]) -> str | None:
     pts = edit.get("polygon") or []
     if len(pts) < 3 or len(pts) > 200:
         return "polygon needs 3 to 200 points"
-    import math
     if not all(len(p) == 2 and all(isinstance(v, (int, float)) and math.isfinite(v) and abs(v) < 1e6 for v in p)
                for p in pts):
         return "polygon has invalid coordinates"
@@ -48,6 +114,11 @@ def validate_edit(edit: dict[str, Any]) -> str | None:
     p = _poly(pts)
     if p.is_empty or p.area < 0.01:
         return "polygon area is too small"
+    shape_type = edit_shape_type(edit)
+    if shape_type not in ("polygon", "rectangle"):
+        return "shape_type must be polygon or rectangle"
+    if shape_type == "rectangle" and not _rectangle_orthogonal(pts):
+        return "rectangle needs four orthogonal corners (normalized dot-product tolerance 1e-4)"
     return None
 
 
