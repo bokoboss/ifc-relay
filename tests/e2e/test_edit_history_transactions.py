@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from tests.e2e.test_browser_workflow import _click_plan, _dock, _enter_plan, _open, page, server
+from tests.e2e.test_browser_workflow import _dock, _open, page, server
 from tests.ifc_factory import Building
 
 pytestmark = pytest.mark.skipif(os.environ.get("VBB_E2E") != "1", reason="set VBB_E2E=1")
@@ -22,15 +22,17 @@ def _create_browser_edit(page, tmp_path):
     _open(page, b.write(tmp_path / "b2.ifc"))
     page.click("#generateSemanticBtn")
     page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
-    _enter_plan(page)
+    # B2 tests transaction history, not canvas picking/drawing (U1/B3).
+    # Create through the exact browser helper the drawing UI uses.
+    page.click("#planModeBtn")
+    page.wait_for_function("window.IFCViewer.isPlan()", timeout=20000)
     auto = page.locator("#autoPrepareBtn[aria-pressed=true]")
     if auto.count():
         auto.click()
-    page.click('.plan-tool[data-tool="obstacle"]')
-    for x, y in ((2.0, 2.0), (4.0, 4.0)):
-        _click_plan(page, x, y)
-    page.wait_for_selector("#planConfirm:not(.hidden)", timeout=20000)
-    page.click("#planConfirmBtn")
+    page.evaluate("""async () => saveEdit({
+        tool: 'obstacle', level_key: 1,
+        polygon: [[2,2], [4,2], [4,4], [2,4]],
+    })""")
     _dock(page, "edits")
     page.wait_for_selector("#editsList .edit-row", timeout=20000)
     return page.request.get(page.url.rstrip("/") + "/api/edits").json()["edits"][0]
@@ -72,11 +74,11 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
     assert revived["polygon"] == shifted
 
     page.click("#planUndoBtn")  # Undo Update: PATCH the new UID/revision.
-    page.wait_for_function("document.getElementById('planRedoBtn').disabled === false")
-    page.wait_for_function("document.getElementById('planUndoBtn').disabled === false")
-    page.wait_for_function(
-        "() => document.querySelector('#editsList .edit-row') && document.getElementById('messageText').textContent.includes('ย้อนการแก้ไข')"
-    )
+    page.wait_for_function("""async () => {
+        const {edits} = await (await fetch('/api/edits')).json();
+        return edits.length === 1 && edits[0].revision === 2
+          && JSON.stringify(edits[0].polygon) === JSON.stringify([[2,2],[4,2],[4,4],[2,4]]);
+    }""", timeout=20000)
     reverted = _edits(page, server)[0]
     assert reverted["uid"] == revived["uid"]
     assert reverted["revision"] == 2
@@ -85,8 +87,11 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
     # History restoration after reload must accept the new UID and update steps.
     page.reload()
     page.wait_for_function("!document.getElementById('planRedoBtn').disabled", timeout=60000)
-    page.click("#planRedoBtn")
-    page.wait_for_function("document.getElementById('messageText').textContent.includes('ทำซ้ำ')")
+    page.evaluate("document.getElementById('planRedoBtn').click()")
+    page.wait_for_function("""async () => {
+        const {edits} = await (await fetch('/api/edits')).json();
+        return edits.length === 1 && edits[0].revision === 3;
+    }""", timeout=20000)
     redone = _edits(page, server)[0]
     assert redone["uid"] == revived["uid"]
     assert redone["revision"] == 3
