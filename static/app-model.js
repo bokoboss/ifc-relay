@@ -1,6 +1,36 @@
 // IFC Relay UI - Pedestrian model: object inspector, model summary and connectivity note, preparing the model (manual and automatic).
 // Classic script loaded after app.js (shared globals; order set in index.html).
 
+// A manual plan edit is not an IFC source or generated pedestrian object.
+window.addEventListener('manual-edit-selected', event => {
+  const edit = event.detail?.edit;
+  if (!edit) return;
+  selectedElement = null;  // prevent IFC selection override controls changing an edit
+  document.getElementById('emptyInspector').classList.add('hidden');
+  document.getElementById('inspectorContent').classList.remove('hidden');
+  document.getElementById('selectedName').textContent =
+    `Manual Edit ${edit.id || ''}`;
+  document.getElementById('selectedType').textContent =
+    `วิศวกรเพิ่มเอง (Manual) · ${edit.kind || 'polygon'}`;
+  const level = (currentSemantic?.levels || []).find(l => Number(l.key) === Number(edit.level_key));
+  document.getElementById('selectedStorey').textContent = level?.name || `ระดับ ${edit.level_key}`;
+  document.getElementById('selectedGuid').textContent = 'ไม่มี IFC GlobalId (Manual)';
+  document.getElementById('selectedAuto').textContent = 'สร้างด้วยมือ';
+  document.getElementById('selectedMapping').textContent =
+    `UID ${edit.uid || '—'} · Revision ${edit.revision ?? 1}`;
+  document.getElementById('selectedRole').textContent =
+    `${edit.polygon?.length || 0} มุม · ${edit.shape_type || 'polygon'}`;
+  document.getElementById('effectiveStatus').textContent =
+    `สถานะการตรวจ: ${edit.review?.state || 'รอเตรียมโมเดลใหม่'}`;
+  document.getElementById('semanticNote').textContent =
+    'รูปทรงที่วิศวกรเพิ่มเอง · แก้ไข/ลบผ่านรายการ Manual Edits เท่านั้น · ไม่ใช่องค์ประกอบ IFC';
+  document.getElementById('semanticSourceBox').classList.add('hidden');
+  document.querySelectorAll('.status-btn').forEach(button => {
+    button.disabled = true;
+    button.classList.remove('active');
+  });
+});
+
 // A pedestrian-model object was clicked: show what Viswalk gets and where it came
 // from. Status buttons act on the source IFC element when there is exactly one.
 window.addEventListener('semantic-element-selected', event => {
@@ -12,7 +42,7 @@ window.addEventListener('semantic-element-selected', event => {
   document.getElementById('inspectorContent').classList.remove('hidden');
   document.getElementById('selectedName').textContent = src.name || SEMANTIC_KIND_TH[kind] || kind;
   document.getElementById('selectedType').textContent =
-    `${SEMANTIC_KIND_TH[kind] || kind}${single ? ` ← ${single.ifc_type}` : ''}`;
+    `Generated · ${SEMANTIC_KIND_TH[kind] || kind}${single ? ` ← ${single.ifc_type}` : ''}`;
   const level = (currentSemantic?.levels || []).find(l => Number(l.key) === Number(src.level_key ?? src.start_level));
   document.getElementById('selectedStorey').textContent = kind === 'vertical_connection' || kind === 'stair_direction'
     ? `ระดับ ${src.start_level} → ${src.end_level}`
@@ -66,7 +96,7 @@ function renderInspector(item) {
   document.getElementById('emptyInspector').classList.add('hidden');
   document.getElementById('inspectorContent').classList.remove('hidden');
   document.getElementById('selectedName').textContent = item.name || item.ifc_type;
-  document.getElementById('selectedType').textContent = item.ifc_type || '—';
+  document.getElementById('selectedType').textContent = `IFC Source · ${item.ifc_type || '—'}`;
   document.getElementById('selectedStorey').textContent = item.storey_name || 'ไม่ระบุชั้น';
   document.getElementById('selectedGuid').textContent = item.global_id || '—';
   document.getElementById('selectedAuto').textContent = item.recommendation || 'review';
