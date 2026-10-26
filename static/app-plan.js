@@ -110,7 +110,26 @@ function historyFits(saved, edits) {
   // Missing, reused or externally modified records invalidate old local history.
   const valid = step => step && ['add', 'delete', 'update'].includes(step.type)
     && step.edit?.uid && (step.type !== 'update' || (step.before?.polygon && step.after?.polygon));
-  if (![...saved.undo, ...saved.redo].every(valid)) return false;
+  const steps = [...saved.undo, ...saved.redo];
+  if (!steps.every(valid)) return false;
+
+  const liveByUid = new Map(edits.map(edit => [edit.uid, edit]));
+  const liveById = new Map(edits.map(edit => [String(edit.id), edit]));
+  for (const step of steps) {
+    const historical = step.edit;
+    const live = liveByUid.get(historical.uid);
+    if (live) {
+      // remapEdit synchronizes all active step pointers on every PATCH and
+      // recreated UID. A different revision/shape now means another tab wrote
+      // to the server: old Undo/Redo must be discarded on reload.
+      if (String(live.id) !== String(historical.id)
+          || Number(live.revision ?? 1) !== Number(historical.revision ?? 1)
+          || !sameEditShape(live, historical)) return false;
+    } else if (liveById.has(String(historical.id))) {
+      // Absent deleted UID + reused E1 ID must not resurrect stale history.
+      return false;
+    }
+  }
   const simulate = (stack, undo) => {
     const present = new Map(edits.map(edit => [edit.uid, edit]));
     for (const step of [...stack].reverse()) {
@@ -259,12 +278,17 @@ const asShape = edit => ({
 // Does NOT modify IFC / generated geometry and does not select/pick objects.
 async function updateEditGeometry(edit, polygon, { shapeType = null, record = true } = {}) {
   if (!edit?.uid) throw new Error('รายการนี้ไม่มี UID · โหลดข้อมูลล่าสุดก่อนแก้ไข');
+  if (shapeType != null && shapeType !== (edit.shape_type || 'polygon')) {
+    // The B1 API has only one-way rectangle -> polygon conversion.
+    // Exposing it in B2 history would make Undo require an unsupported reverse
+    // PATCH (or a non-atomic DELETE+POST). B5 will own reversible conversion.
+    throw new Error('การเปลี่ยนชนิด Rectangle/Polygon พร้อม Undo ต้องใช้ขั้นตอน B5');
+  }
   const body = {
     expected_uid: edit.uid,
     expected_revision: edit.revision ?? 1,
     polygon,
   };
-  if (shapeType != null && shapeType !== (edit.shape_type || 'polygon')) body.shape_type = shapeType;
   const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
