@@ -21,9 +21,11 @@ def _edits(page, server):
 
 def _drag(page, sx, sy, ex, ey):
     start = _plan_point(page, sx, sy)
-    end = _plan_point(page, ex, ey)
     page.mouse.move(start["x"], start["y"])
     page.mouse.down(button="left")
+    # Selecting a manual shape reveals Inspector and may resize the canvas.
+    # Resolve the destination in the *new* layout, after the down event.
+    end = _plan_point(page, ex, ey)
     page.mouse.move(end["x"], end["y"], steps=8)
     page.mouse.up(button="left")
 
