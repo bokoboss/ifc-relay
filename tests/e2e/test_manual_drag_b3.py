@@ -192,13 +192,22 @@ def test_b3_concurrent_external_patch_rolls_back_preview_and_reports_409(
     page, server, tmp_path
 ):
     _ready(page, tmp_path)
+    # Isolate the concurrent PATCH race. Test Auto Prepare separately; its
+    # timer must not be allowed to reset the plan camera mid-gesture here.
+    auto = page.locator('#autoPrepareBtn[aria-pressed="true"]')
+    if auto.count():
+        auto.click()
     edit = _add_manual(page)
     start = _plan_point(page, 5, 4)
-    end = _plan_point(page, 7, 5)
     page.mouse.move(start["x"], start["y"])
     page.mouse.down(button="left")
+    # Resolve destination after pointerdown, as in the successful move test.
+    # This also prevents a viewport change from producing a false miss.
+    end = _plan_point(page, 7, 5)
     page.mouse.move(end["x"], end["y"], steps=8)
-    assert page.evaluate("!!document.querySelector('#viewerCanvasHost canvas.manual-dragging')")
+    assert page.evaluate("!!document.querySelector('#viewerCanvasHost canvas.manual-dragging')"), (
+        "Manual drag was not armed before the external PATCH"
+    )
 
     different = [[2, 3], [4, 3], [4, 5], [2, 5]]
     patch = page.request.patch(server + "/api/edits/" + edit["id"], data={
@@ -249,4 +258,27 @@ def test_b3_near_polygon_border_is_empty_space_pan_not_move(page, server, tmp_pa
     assert stored["uid"] == edit["uid"]
     assert stored["revision"] == 1
     assert stored["polygon"] == edit["polygon"]
+    assert page.errors == []
+
+
+def test_b3_auto_prepare_does_not_interrupt_manual_drag(page, server, tmp_path):
+    """While pointer is held, the Auto Prepare callback must defer its run."""
+    _ready(page, tmp_path)
+    edit = _add_manual(page)
+    start = _plan_point(page, 5, 4)
+    page.mouse.move(start["x"], start["y"])
+    page.mouse.down(button="left")
+    end = _plan_point(page, 6, 4)
+    page.mouse.move(end["x"], end["y"], steps=6)
+    assert page.evaluate("window.IFCViewer.planHasActiveDrag()")
+    assert page.evaluate("!!document.querySelector('#viewerCanvasHost canvas.manual-dragging')")
+    # Simulate the auto-prepare timer firing while the mouse is still held.
+    page.evaluate("runAutoPrepare()")
+    assert page.evaluate("window.IFCViewer.planHasActiveDrag()")
+    assert page.evaluate(
+        "document.getElementById('generateSemanticBtn').getAttribute('aria-busy') !== 'true'"
+    )
+    page.mouse.up(button="left")
+    _wait_revision(page, 2)
+    assert _edits(page, server)[0]["uid"] == edit["uid"]
     assert page.errors == []
