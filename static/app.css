@@ -289,7 +289,17 @@ a.link-btn {display:inline-flex;align-items:center;}
   position:absolute;left:0;bottom:calc(100% + 6px);display:flex;align-items:center;gap:6px;white-space:nowrap;
   padding:6px 8px;background:var(--warning-soft);border:1px solid #e8cf9c;border-radius:var(--r-md);box-shadow:0 4px 12px rgba(17,37,44,.12);
 }
-.plan-hint {font-size:12px;color:var(--ink-700);}
+/* U1: live drawing hints must never change the viewer canvas size while the
+   pointer moves; otherwise the click lands outside its precomputed location. */
+.plan-hint {
+  flex:1 1 0;min-width:0;display:block;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:12px;color:var(--ink-700);
+}
+.viewer-footer #viewerStatus {
+  flex:0 1 auto;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 .viewer-panel:has(#planToolbar.hidden) #planHint {display:none;}
 .viewer-panel:has(#planToolbar:not(.hidden)) #previewNote {display:none;}
 
@@ -665,3 +675,21 @@ button[aria-busy="true"]::after {
 .tree-dot.review {background:var(--warning);}
 .tree-dot.exclude {background:var(--danger);}
 @media (prefers-reduced-motion: reduce) {.tree-node > summary::before {transition:none;}}
+
+
+/* U1: distinguish intent from drawing shape and highlight selected manual item. */
+.plan-shape-group {
+  padding-inline: 5px;
+  border-inline: 1px solid var(--divider-strong);
+}
+.edit-row[role="button"] { cursor: pointer; }
+.edit-row.selected {
+  outline: 2px solid var(--accent, #187b8f);
+  outline-offset: -2px;
+  background: var(--surface-secondary, #eaf6f8);
+}
+.edit-row[role="button"]:focus-visible { outline: 2px solid #187b8f; }
+@media (max-width: 1100px) {
+  .plan-toolbar { max-width: calc(100% - 16px); gap: 5px; }
+  .plan-toolbar .plan-tools { flex-wrap: wrap; }
+}
