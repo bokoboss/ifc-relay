@@ -1389,7 +1389,10 @@ window.IFCViewer = {
     return true;
   },
   planHasFirstPoint() {
-    return planPoints.length > 0;
+    // Existing Auto Prepare gate checks this while editing the plan.
+    // An active Manual Move is also an unfinished plan interaction; do not
+    // regenerate the semantic overlay or reset the plan while dragging.
+    return planPoints.length > 0 || !!manualDrag || manualMovePending;
   },
   // QA helper, analogous to planScreenPoint: inspect pending draft vertices.
   planDraftPoints() {
@@ -1410,6 +1413,10 @@ window.IFCViewer = {
     }
     drawEdits();
     rebuildSnapTargets();
+  },
+
+  planHasActiveDrag() {
+    return !!manualDrag || manualMovePending;
   },
 
   completeManualMove() {
