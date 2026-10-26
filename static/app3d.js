@@ -1270,6 +1270,10 @@ window.IFCViewer = {
   planHasFirstPoint() {
     return planPoints.length > 0;
   },
+  // QA helper, analogous to planScreenPoint: inspect pending draft vertices.
+  planDraftPoints() {
+    return planPoints.map(p => [...p]);
+  },
 
   // UX-02 test hook: wall pieces the drawn passages would still cut in the model on screen.
   pendingPassageCuts() {
