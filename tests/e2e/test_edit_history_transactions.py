@@ -107,7 +107,9 @@ def test_b2_update_delete_undo_delete_undo_update_redo_with_new_uid(page, server
     assert redone["polygon"] == shifted
     assert not page.is_disabled("#planRedoBtn")  # Next redo is DELETE.
 
-    page.click("#planRedoBtn")
+    # Reload returns to 3D: the plan toolbar is hidden, but the restored
+    # history command remains callable (as in the existing reload E2E test).
+    page.evaluate("document.getElementById('planRedoBtn').click()")
     page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
     assert _edits(page, server) == []
     assert page.errors == []
