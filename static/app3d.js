@@ -972,9 +972,11 @@ function manualEditAtPointer(event) {
   activeCam().updateMatrixWorld();
   raycaster.setFromCamera(pointer, activeCam());
   for (const hit of raycaster.intersectObjects(editsGroup.children, true)) {
-    let owner = hit.object;
-    while (owner && !owner.userData?.edit) owner = owner.parent;
-    const edit = owner?.userData?.edit;
+    // THREE.Line has a default one-world-unit raycast threshold. It is far too
+    // generous for drag start and would turn empty-space pans into PATCHes.
+    // Only the filled top-level manual polygon is a draggable hit target.
+    if (!hit.object.isMesh || hit.object.geometry?.type !== 'ShapeGeometry') continue;
+    const edit = hit.object.parent?.userData?.edit;
     if (edit?.uid && Number(edit.level_key) === planLevelKey) return edit;
   }
   return null;

@@ -57,6 +57,10 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     assert moved["shape_type"] == edit["shape_type"]
     assert moved["polygon"] == [[x + 2, y + 1] for x, y in before]
     assert len(patches) == 1  # no requests during pointermove
+    page.wait_for_function(
+        "() => document.getElementById('selectedMapping').textContent.includes('Revision 2')",
+        timeout=10000,
+    )
 
     page.click("#planUndoBtn")
     _wait_revision(page, 3)
@@ -137,4 +141,21 @@ def test_b3_generated_area_not_draggable(page, server, tmp_path):
     assert _edits(page, server) == []
     after = page.evaluate("window.IFCViewer.planScreenPoint(2, 2)")
     assert abs(after["x"] - before["x"]) > 10 or abs(after["y"] - before["y"]) > 10
+    assert page.errors == []
+
+
+def test_b3_near_polygon_border_is_empty_space_pan_not_move(page, server, tmp_path):
+    _ready(page, tmp_path)
+    edit = _add_manual(page)
+    # x=3.35 is 0.65 m outside the shape (left edge x=4). The historic
+    # THREE.Line default 1m ray threshold used to accidentally arm a drag.
+    start = _plan_point(page, 3.35, 4)
+    page.mouse.move(start["x"], start["y"])
+    page.mouse.down(button="left")
+    page.mouse.move(start["x"] - 70, start["y"], steps=7)
+    page.mouse.up(button="left")
+    stored = _edits(page, server)[0]
+    assert stored["uid"] == edit["uid"]
+    assert stored["revision"] == 1
+    assert stored["polygon"] == edit["polygon"]
     assert page.errors == []
