@@ -195,3 +195,105 @@ def report_messages(report: dict[str, Any]) -> list[str]:
             + (" ..." if d["changed"] > 5 else "")
         )
     return lines
+
+
+# C3 — IFC identity guard for manual edits stored in IFC-local XY coordinates.
+# These checks do not claim geometric registration when georeferencing is absent.
+def inspect_project_identity(path: Path) -> dict[str, Any]:
+    """Read project identity and spatial settings without tessellating geometry."""
+    model, _, _, scale = _open(path)
+
+    def entities(name: str) -> list[Any]:
+        try:
+            return list(model.by_type(name))
+        except (RuntimeError, ValueError):
+            return []  # e.g. IFC2X3 does not declare IfcMapConversion
+
+    def attrs(obj: Any, names: tuple[str, ...]) -> dict[str, Any]:
+        result = {}
+        for name in names:
+            value = getattr(obj, name, None)
+            if value is None:
+                result[name] = None
+            elif isinstance(value, (int, float, str, bool)):
+                result[name] = value
+            elif hasattr(value, "wrappedValue"):
+                result[name] = str(value.wrappedValue)
+            else:
+                result[name] = str(value)
+        return result
+
+    project = entities("IfcProject")
+    guid = str(getattr(project[0], "GlobalId", "") or "") if len(project) == 1 else None
+
+    conversions = [
+        attrs(entry, ("Eastings", "Northings", "OrthogonalHeight", "XAxisAbscissa",
+                      "XAxisOrdinate", "Scale", "FactorX", "FactorY", "FactorZ"))
+        for entry in entities("IfcMapConversion")
+    ]
+    projected = [
+        attrs(entry, ("Name", "GeodeticDatum", "VerticalDatum",
+                      "MapProjection", "MapZone"))
+        for entry in entities("IfcProjectedCRS")
+    ]
+    contexts = []
+    for entry in entities("IfcGeometricRepresentationContext"):
+        wcs = getattr(entry, "WorldCoordinateSystem", None)
+        north = getattr(entry, "TrueNorth", None)
+        contexts.append({
+            "ContextType": getattr(entry, "ContextType", None),
+            "CoordinateSpaceDimension": getattr(entry, "CoordinateSpaceDimension", None),
+            "Precision": getattr(entry, "Precision", None),
+            "wcs_location": list(getattr(getattr(wcs, "Location", None), "Coordinates", []) or []),
+            "wcs_axis": list(getattr(getattr(wcs, "Axis", None), "DirectionRatios", []) or []),
+            "wcs_ref": list(getattr(getattr(wcs, "RefDirection", None), "DirectionRatios", []) or []),
+            "true_north": list(getattr(north, "DirectionRatios", []) or []),
+        })
+    sites = []
+    for entry in entities("IfcSite"):
+        sites.append({
+            "GlobalId": getattr(entry, "GlobalId", None),
+            "RefLatitude": list(getattr(entry, "RefLatitude", []) or []),
+            "RefLongitude": list(getattr(entry, "RefLongitude", []) or []),
+            "RefElevation": getattr(entry, "RefElevation", None),
+        })
+    return {
+        "project_guid": guid,
+        "unit_scale_to_m": scale,
+        "schema": str(model.schema),
+        "map_conversion": conversions,
+        "projected_crs": projected,
+        "contexts": contexts,
+        "sites": sites,
+    }
+
+
+def compare_project_identity(previous: dict[str, Any] | None,
+                             incoming: dict[str, Any]) -> dict[str, Any]:
+    """Return verified/mismatch/unverified. Never infer equivalence from GUID alone."""
+    if previous is None:
+        return {"status": "unverified", "reasons": ["ไม่มี IFC ต้นทางสำหรับเปรียบเทียบ"],
+                "previous": None, "incoming": incoming}
+    reasons: list[str] = []
+    mismatches: list[str] = []
+    a, b = previous, incoming
+    if not a.get("project_guid") or not b.get("project_guid"):
+        reasons.append("ไม่มี IfcProject.GlobalId ที่ตรวจสอบได้")
+    elif a["project_guid"] != b["project_guid"]:
+        mismatches.append("IfcProject.GlobalId ต่างกัน")
+    if a.get("unit_scale_to_m") is None or b.get("unit_scale_to_m") is None:
+        reasons.append("ไม่สามารถตรวจหน่วย IFC ได้ครบ")
+    elif a["unit_scale_to_m"] != b["unit_scale_to_m"]:
+        mismatches.append("หน่วยหรือมาตราส่วน IFC ต่างกัน")
+    for field in ("map_conversion", "projected_crs", "contexts", "sites"):
+        if a.get(field) != b.get(field):
+            mismatches.append(f"ข้อมูลพิกัด/Georeference ต่างกัน: {field}")
+    if not a.get("map_conversion") or not b.get("map_conversion"):
+        reasons.append("ไม่มี Map Conversion ที่รับรองการอ้างอิงพิกัดของทั้งสอง IFC")
+    if not a.get("projected_crs") or not b.get("projected_crs"):
+        reasons.append("ไม่มี Projected CRS ที่ตรวจสอบได้ครบ")
+    if not a.get("contexts") or not b.get("contexts"):
+        reasons.append("ไม่มี Representation Context ที่ตรวจสอบได้ครบ")
+    status = "mismatch" if mismatches else "unverified" if reasons else "verified"
+    return {"status": status, "reasons": mismatches or reasons,
+            "previous": a, "incoming": b}
