@@ -873,6 +873,7 @@ function planClick(event) {
   if (planPoints.length >= 3) {
     const first = planPoints[0];
     if (Math.hypot(p[0] - first[0], p[1] - first[1]) <= SNAP_PX * metresPerPixel()) {
+      lastPolygonClosure = { time: performance.now(), x: event.clientX, y: event.clientY };
       finishShape([...planPoints]);
       return;
     }
@@ -999,7 +1000,7 @@ function pointerSelect(event) {
 
 // Ignore drags (orbit/pan): select only on a click that did not move.
 let pointerDownAt = null;
-let previousPlanClick = null;
+let lastPolygonClosure = null;
 renderer.domElement.addEventListener('pointerdown', event => {
   pointerDownAt = event.button === 0 ? [event.clientX, event.clientY] : null;
 });
@@ -1009,18 +1010,12 @@ renderer.domElement.addEventListener('pointerup', event => {
   pointerDownAt = null;
   if (Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
   if (planActive && planTool !== 'select') {
-    // PointerEvent.detail is not consistently a click count. Discard the
-    // second pointerup of a double-click using actual SCREEN distance/time,
-    // never the snapped model coordinate (which could merge valid vertices).
-    if (planShape === 'poly') {
-      const now = performance.now();
-      const duplicate = previousPlanClick
-        && now - previousPlanClick.time < 450
-        && Math.hypot(event.clientX - previousPlanClick.x,
-                      event.clientY - previousPlanClick.y) < 5;
-      previousPlanClick = { time: now, x: event.clientX, y: event.clientY };
-      if (duplicate) return;
-    }
+    if (planShape === 'poly' && lastPolygonClosure
+        && performance.now() - lastPolygonClosure.time < 450
+        && Math.hypot(event.clientX - lastPolygonClosure.x,
+                      event.clientY - lastPolygonClosure.y) < 5) return;
+    lastPolygonClosure = null;
+    // Do not suppress normal vertices based on click timing or model-space snap.
     planClick(event);
     return;
   }
@@ -1036,7 +1031,15 @@ renderer.domElement.addEventListener('pointermove', event => {
 renderer.domElement.addEventListener('dblclick', event => {
   if (!planActive || planTool === 'select' || planShape !== 'poly') return;
   event.preventDefault();
-  if (planPoints.length >= 3) finishShape([...planPoints]);
+  if (planPoints.length < 3) return;
+  const vertices = [...planPoints];
+  // A native doubleclick can append its final vertex on both pointerups.
+  // Remove only the duplicate final point when ending the polygon.
+  if (vertices.length > 3) {
+    const a = vertices[vertices.length - 1], b = vertices[vertices.length - 2];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.001) vertices.pop();
+  }
+  finishShape(vertices);
 });
 window.addEventListener('resize', resize);
 
@@ -1213,7 +1216,7 @@ window.IFCViewer = {
 
   setPlanTool(tool) {
     planTool = tool || 'select';
-    previousPlanClick = null;
+    lastPolygonClosure = null;
     planPoints = [];
     clearGroup(draftGroup);
     snapMarker.visible = false;
@@ -1222,7 +1225,7 @@ window.IFCViewer = {
 
   setPlanShape(shape) {
     planShape = shape === 'poly' ? 'poly' : 'rect';
-    previousPlanClick = null;
+    lastPolygonClosure = null;
     planPoints = [];
     clearGroup(draftGroup);
   },
