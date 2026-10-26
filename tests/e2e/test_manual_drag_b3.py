@@ -46,6 +46,44 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     before = [list(p) for p in edit["polygon"]]
     assert edit["revision"] == 1
 
+    # Diagnostic: record the actual browser fetch payload, response, move
+    # event, and pointer sequence together. Playwright's page.on(request) can
+    # be delivered asynchronously, so absence there is not conclusive.
+    pre_drag = _edits(page, server)[0]
+    page.evaluate("""() => {
+      const record = {fetches: [], moves: [], pointers: []};
+      window.__b3Debug = record;
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const url = String(args[0]?.url || args[0]);
+        const options = args[1] || {};
+        const method = String(options.method || args[0]?.method || 'GET').toUpperCase();
+        const entry = {url, method, body: options.body || null};
+        if (url.includes('/api/edits') && method !== 'GET') {
+          record.fetches.push(entry);
+          try {
+            const response = await originalFetch(...args);
+            entry.status = response.status;
+            entry.response = await response.clone().json().catch(() => null);
+            return response;
+          } catch (error) {
+            entry.error = String(error);
+            throw error;
+          }
+        }
+        return originalFetch(...args);
+      };
+      window.addEventListener('manual-edit-move', e =>
+        record.moves.push({uid: e.detail?.edit?.uid,
+          oldPolygon: e.detail?.edit?.polygon, polygon: e.detail?.polygon}), true);
+      const canvas = document.querySelector('#viewerCanvasHost canvas');
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel']) {
+        canvas.addEventListener(type, e => record.pointers.push({
+          type, button: e.button, pointerId: e.pointerId,
+          x: e.clientX, y: e.clientY,
+        }), true);
+      }
+    }""")
     patches = []
     # Record what the browser actually sent: a revision increment can occur
     # even when the requested drag ended up near its original coordinates.
@@ -59,9 +97,10 @@ def test_b3_manual_drag_one_patch_and_undo_redo(page, server, tmp_path):
     assert moved["level_key"] == edit["level_key"]
     assert moved["shape_type"] == edit["shape_type"]
     expected = [[x + 2, y + 1] for x, y in before]
+    debug = page.evaluate("window.__b3Debug")
     assert moved["polygon"] == expected, (
-        f"B3 drag geometry: before={before}, after={moved['polygon']}, "
-        f"expected={expected}, requests={patches}"
+        f"B3 trace: pre_drag={pre_drag}, after={moved}, expected={expected}, "
+        f"playwright_requests={patches}, browser_trace={debug}"
     )
     assert len(patches) == 1  # no requests during pointermove
     page.wait_for_function(
