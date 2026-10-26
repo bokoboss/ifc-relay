@@ -355,6 +355,9 @@ window.addEventListener('manual-edit-move', async event => {
   try {
     const result = await updateEditGeometry(edit, polygon);
     selectedManualEditUid = result.uid;
+    window.dispatchEvent(new CustomEvent('manual-edit-selected', {
+      detail: { edit: result, origin: 'manual', level_key: result.level_key },
+    }));
     setMessage(`ย้าย ${result.id} แล้ว · Undo/Redo ได้ · ต้องเตรียมโมเดลคนเดินอีกครั้ง`);
   } catch (error) {
     setMessage(editFailureMessage(error, 'ย้ายรูปทรง'));
