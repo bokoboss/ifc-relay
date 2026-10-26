@@ -485,24 +485,89 @@ geometryLoadMode?.addEventListener('change', updateLargeLoadControlState);
 // Choosing a file opens it straight away (import -> audit -> 3D), like a BIM viewer.
 fileInput.addEventListener('change', () => {
   selectedFile = fileInput.files?.[0] || null;
-  document.getElementById('fileMeta').textContent = selectedFile
-    ? `${selectedFile.name} · ${formatBytes(selectedFile.size)}`
-    : 'ยังไม่ได้เลือกไฟล์';
+  // Do not replace the current project banner until import is confirmed.
   if (selectedFile) openSelectedFile();
 });
 
 uploadBtn.addEventListener('click', () => openSelectedFile());
 
+async function decidePendingImport(pending) {
+  const dialog = document.getElementById('importConfirm');
+  const oldFile = pending.source_file || 'ไม่ทราบชื่อ';
+  document.getElementById('importConfirmFiles').textContent =
+    `จาก: ${oldFile} → ไฟล์ใหม่: ${pending.destination_file}`;
+  document.getElementById('importConfirmEdits').textContent =
+    `รูปทรงที่แก้ไขเอง ${pending.manual_edit_count} รายการ · ระดับ: ${pending.affected_levels.join(', ') || 'ไม่มี'}`;
+
+  const identity = pending.identity || { status: 'unverified', reasons: [] };
+  const labels = { verified: 'ตรวจยืนยันว่าโครงการและระบบพิกัดตรงกัน',
+                   mismatch: 'ข้อมูลโครงการ/หน่วย/ระบบพิกัดต่างกัน',
+                   unverified: 'ยังตรวจยืนยันระบบพิกัดไม่ได้ครบ' };
+  document.getElementById('importConfirmIdentity').textContent =
+    `การเปรียบเทียบ IFC: ${labels[identity.status] || identity.status}`;
+  document.getElementById('importConfirmSpatial').textContent =
+    `${(identity.reasons || []).join(' · ') || 'ตรวจหน่วยและระบบพิกัดเท่าที่ IFC ระบุ'} · ` +
+    'ระบบจะไม่ย้ายหรือแปลงพิกัดรูปทรงให้อัตโนมัติ';
+
+  const carry = document.getElementById('importConfirmCarry');
+  const risk = document.getElementById('importConfirmRisk');
+  const riskRow = document.getElementById('importConfirmRiskRow');
+  const go = document.getElementById('importConfirmGo');
+  carry.checked = false;
+  carry.disabled = !pending.manual_edit_count || identity.status === 'mismatch';
+  risk.checked = false;
+  riskRow.classList.toggle('hidden', identity.status !== 'unverified');
+  const update = () => {
+    go.disabled = carry.checked && identity.status === 'unverified' && !risk.checked;
+  };
+  carry.onchange = update;
+  risk.onchange = update;
+  update();
+
+  const choice = await new Promise(resolve => {
+    const finish = action => {
+      dialog.removeEventListener('cancel', onEscape);
+      dialog.close();
+      resolve({ action, carry: carry.checked, risk: risk.checked });
+    };
+    const onEscape = event => { event.preventDefault(); finish('cancel'); };
+    dialog.addEventListener('cancel', onEscape);
+    document.getElementById('importConfirmCancel').onclick = () => finish('cancel');
+    go.onclick = () => finish('confirm');
+    dialog.showModal();
+  });
+  const data = {
+    pending_token: pending.pending_token, expected_sha256: pending.sha256,
+    carry_manual_edits: choice.carry, acknowledge_unverified: choice.risk,
+  };
+  if (choice.action === 'cancel') {
+    await api('/api/import/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    });
+    return null;
+  }
+  return api('/api/import/confirm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+}
+
 async function openSelectedFile() {
   if (!selectedFile) return;
-  geometryLoadSeq += 1;          // any background load of the previous file is now stale
   uploadBtn.disabled = true;
-  setMessage('กำลังนำเข้าไฟล์ต้นฉบับ...');
+  setMessage('กำลังอัปโหลด IFC เพื่อเตรียมการยืนยัน...');
   try {
     const form = new FormData();
     form.append('file', selectedFile);
     form.append('carry_selection', document.getElementById('carrySelectionCheck')?.checked ? 'true' : 'false');
-    const result = await api('/api/import', { method: 'POST', body: form });
+    let result = await api('/api/import', { method: 'POST', body: form });
+    if (result.status === 'pending') {
+      result = await decidePendingImport(result);
+      if (!result) {
+        setMessage('ยกเลิกการเปิดไฟล์ใหม่ · โครงการเดิมยังอยู่');
+        return;
+      }
+    }
+    geometryLoadSeq += 1; // Only invalidate the existing viewer after confirmation.
     document.getElementById('fileMeta').textContent =
       `${result.upload.original_name} · ${formatBytes(result.upload.size_bytes)} · นำเข้าแล้ว`;
     analyzeBtn.disabled = false;
@@ -513,9 +578,7 @@ async function openSelectedFile() {
     currentSemantic = null;
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
-    setMessage('นำเข้าไฟล์แล้ว · กำลังตรวจ IFC...');
-    // Open the model like a BIM viewer: audit, then load the recommended
-    // 3D subset (whole model, or the first storey with geometry on large IFCs).
+    setMessage('ยืนยันการนำเข้าแล้ว · กำลังตรวจ IFC...');
     if (result.upload?.extension === '.ifc') {
       const audit = await runAnalyze();
       if (audit) {
@@ -534,7 +597,6 @@ async function openSelectedFile() {
     setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`);
   } finally {
     uploadBtn.disabled = false;
-    // Allow choosing the same file again (e.g. after editing it in Revit).
     fileInput.value = '';
   }
 }
