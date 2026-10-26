@@ -153,3 +153,64 @@ def test_b2_api_exposes_conflict_status_and_current_edit(page, server, tmp_path)
     assert result["currentRevision"] == 1
     assert result["message"] != "[object Object]"
     assert page.errors == []
+
+
+def test_b2_reload_drops_stale_history_after_external_patch(page, server, tmp_path):
+    first = _create_browser_edit(page, tmp_path)
+    assert not page.is_disabled("#planUndoBtn")
+    edited = page.request.patch(server + "/api/edits/" + first["id"], data={
+        "expected_uid": first["uid"],
+        "expected_revision": first["revision"],
+        "polygon": [[2,2], [5,2], [5,4], [2,4]],
+    })
+    assert edited.status == 200
+    page.reload()
+    page.wait_for_function("document.querySelector('#editsList .edit-row') !== null", timeout=60000)
+    assert page.is_disabled("#planUndoBtn")
+    assert page.is_disabled("#planRedoBtn")
+    assert _edits(page, server)[0]["revision"] == 2
+    assert page.errors == []
+
+
+def test_b2_reload_drops_delete_history_after_e1_id_reuse(page, server, tmp_path):
+    first = _create_browser_edit(page, tmp_path)
+    page.locator("#editsList .edit-row button", has_text="ลบ").click()
+    page.wait_for_function("document.querySelectorAll('#editsList .edit-row').length === 0")
+    created = page.request.post(server + "/api/edits", data={
+        "kind": "obstacle", "level_key": 1,
+        "polygon": [[3,3], [5,3], [5,5], [3,5]],
+    })
+    assert created.status == 200
+    assert created.json()["edit"]["id"] == first["id"]
+    assert created.json()["edit"]["uid"] != first["uid"]
+    page.reload()
+    page.wait_for_function("document.querySelector('#editsList .edit-row') !== null", timeout=60000)
+    assert page.is_disabled("#planUndoBtn")
+    assert page.is_disabled("#planRedoBtn")
+    assert _edits(page, server)[0]["uid"] == created.json()["edit"]["uid"]
+
+
+def test_b2_one_way_rectangle_conversion_not_added_to_history(page, server, tmp_path):
+    _create_browser_edit(page, tmp_path)
+    rectangle = page.evaluate("""async () => saveEdit({
+        tool: 'obstacle', level_key: 1, shape_type: 'rectangle',
+        polygon: [[6,2], [8,2], [8,4], [6,4]],
+    })""")
+    assert rectangle["shape_type"] == "rectangle"
+    result = page.evaluate(
+        """async ({uid}) => {
+            const edit = (await api('/api/edits')).edits.find(e => e.uid === uid);
+            try {
+                await updateEditGeometry(edit, edit.polygon, {shapeType: 'polygon'});
+                return {accepted: true};
+            } catch (err) {
+                return {accepted: false, message: err.message};
+            }
+        }""",
+        {"uid": rectangle["uid"]},
+    )
+    assert result["accepted"] is False
+    assert "B5" in result["message"]
+    persisted = next(e for e in _edits(page, server) if e["uid"] == rectangle["uid"])
+    assert persisted["shape_type"] == "rectangle"
+    assert persisted["revision"] == 1
