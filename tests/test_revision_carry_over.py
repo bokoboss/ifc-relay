@@ -320,3 +320,48 @@ def test_c3_pending_file_bytes_tampered_same_size_rejected(client, tmp_path):
     result = _c3_confirm(client, pending)
     assert result.status_code == 409
     assert client.get("/api/project").json() == old
+
+
+def test_c3_spatial_container_placement_change_blocks_manual_carry(tmp_path):
+    import ifcopenshell
+    import ifcopenshell.api
+    import numpy as np
+
+    first, second, *_ = _revisions(tmp_path)
+    model = ifcopenshell.open(str(second))
+    site = model.by_type("IfcSite")[0]
+    matrix = np.eye(4)
+    matrix[0, 3] = 8.0
+    ifcopenshell.api.run("geometry.edit_object_placement", model, product=site, matrix=matrix)
+    changed = tmp_path / "site_translated.ifc"
+    model.write(str(changed))
+
+    from revision_service import inspect_project_identity, compare_project_identity
+    old_id = inspect_project_identity(first)
+    new_id = inspect_project_identity(changed)
+    assert old_id["project_guid"] == new_id["project_guid"]
+    assert old_id["sites"] == new_id["sites"]
+    comparison = compare_project_identity(old_id, new_id)
+    assert comparison["status"] == "mismatch"
+    assert "spatial_placements" in " ".join(comparison["reasons"])
+
+
+def test_c3_site_globalid_recreation_alone_does_not_count_as_coordinate_mismatch(tmp_path):
+    import ifcopenshell
+    import ifcopenshell.guid
+
+    first, second, *_ = _revisions(tmp_path)
+    model = ifcopenshell.open(str(second))
+    site = model.by_type("IfcSite")[0]
+    site.GlobalId = ifcopenshell.guid.new()
+    changed = tmp_path / "site_guid_changed.ifc"
+    model.write(str(changed))
+
+    from revision_service import inspect_project_identity, compare_project_identity
+    old_id = inspect_project_identity(first)
+    new_id = inspect_project_identity(changed)
+    assert old_id["project_guid"] == new_id["project_guid"]
+    assert old_id["sites"] == new_id["sites"]
+    assert old_id["spatial_placements"] == new_id["spatial_placements"]
+    comparison = compare_project_identity(old_id, new_id)
+    assert comparison["status"] != "mismatch"
