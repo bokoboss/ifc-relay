@@ -574,6 +574,11 @@ planOverlay.add(focusGroup);
 const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, exit: 0xb86c4d, measure: 0xd35400 };
 let manualEdits = [];
 let selectedManualUid = null;
+// B3: preview is transient. The authoritative edit list and IFC geometry are
+// unchanged until a single revision-guarded PATCH succeeds on pointer release.
+let manualDrag = null;
+let manualDragPreview = null;
+let manualMovePending = false;
 function markManualSelection(edit, emit = true) {
   selectedManualUid = edit?.uid || null;
   drawEdits();
@@ -675,7 +680,9 @@ function drawEdits() {
   clearGroup(editsGroup);
   for (const edit of manualEdits) {
     if (planActive && planLevelKey != null && Number(edit.level_key) !== planLevelKey) continue;
-    const g = outline(edit.polygon, levelZ(edit.level_key) + 0.06,
+    const polygon = manualDragPreview?.uid === edit.uid
+      ? manualDragPreview.polygon : edit.polygon;
+    const g = outline(polygon, levelZ(edit.level_key) + 0.06,
       selectedManualUid === edit.uid ? 0xf49b31 : (EDIT_COLORS[edit.kind] || 0x888888),
       selectedManualUid === edit.uid ? 0.48 : 0.28);
     g.userData.edit = edit;
@@ -957,27 +964,29 @@ function resize() {
   orthoCamera.updateProjectionMatrix();
 }
 
+function manualEditAtPointer(event) {
+  if (!planActive || planTool !== 'select' || !editsGroup.visible) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  activeCam().updateMatrixWorld();
+  raycaster.setFromCamera(pointer, activeCam());
+  for (const hit of raycaster.intersectObjects(editsGroup.children, true)) {
+    let owner = hit.object;
+    while (owner && !owner.userData?.edit) owner = owner.parent;
+    const edit = owner?.userData?.edit;
+    if (edit?.uid && Number(edit.level_key) === planLevelKey) return edit;
+  }
+  return null;
+}
+
 function pointerSelect(event) {
+  const manual = manualEditAtPointer(event);
+  if (manual) { markManualSelection(manual); return; }
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, activeCam());
-
-  // U1 selection: manual edits take precedence at the active plan level.
-  // Raycast their filled footprint and border; never turn a source IFC or
-  // generated semantic mesh into an editable manual item.
-  if (planActive && editsGroup.visible) {
-    const hits = raycaster.intersectObjects(editsGroup.children, true);
-    for (const hit of hits) {
-      let candidate = hit.object;
-      while (candidate && !candidate.userData?.edit) candidate = candidate.parent;
-      const edit = candidate?.userData?.edit;
-      if (edit && Number(edit.level_key) === planLevelKey) {
-        markManualSelection(edit);
-        return;
-      }
-    }
-  }
 
   if (semanticGroup.visible) {
     const targets = semanticGroup.children.filter(child => child.visible
@@ -991,12 +1000,98 @@ function pointerSelect(event) {
     if (object) { selectSemantic(object); return; }
   }
 
-  // Overlay mode also permits inspecting a visible IFC source-only object.
   if (!modelGroup.visible) return;
   const visibleMeshes = Array.from(meshes.values()).filter(mesh => mesh.visible);
   const hit = raycaster.intersectObjects(visibleMeshes, false)[0];
   if (hit?.object?.userData?.item?.global_id) selectGuid(hit.object.userData.item.global_id, true);
 }
+
+// B3 move gesture is captured BEFORE OrbitControls on the canvas. Empty-space
+// drags still pan, whereas a manual shape drags without moving the camera.
+function cancelManualDrag({ clearPending = false } = {}) {
+  if (manualDrag?.pointerId != null && renderer.domElement.hasPointerCapture?.(manualDrag.pointerId)) {
+    try { renderer.domElement.releasePointerCapture(manualDrag.pointerId); } catch { /* cancelled */ }
+  }
+  manualDrag = null;
+  if (clearPending) manualMovePending = false;
+  manualDragPreview = null;
+  renderer.domElement.classList.remove('manual-dragging');
+  if (planActive && planTool === 'select') planControls.enabled = true;
+  drawEdits();
+}
+
+renderer.domElement.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || !planActive || planTool !== 'select'
+      || manualMovePending || manualDrag) return;
+  const edit = manualEditAtPointer(event);
+  if (!edit) return;  // preserve pan/semantic/IFC picking
+  const origin = groundPoint(event);
+  if (!origin) return;
+  manualDrag = { edit, origin, x: event.clientX, y: event.clientY,
+    pointerId: event.pointerId, moved: false };
+  planControls.enabled = false;
+  markManualSelection(edit);
+  try { renderer.domElement.setPointerCapture(event.pointerId); } catch { /* optional */ }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, true);
+
+renderer.domElement.addEventListener('pointermove', event => {
+  const drag = manualDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) {
+    event.stopImmediatePropagation();
+    return;
+  }
+  drag.moved = true;
+  const point = groundPoint(event);
+  if (point) {
+    const dx = point[0] - drag.origin[0], dy = point[1] - drag.origin[1];
+    manualDragPreview = {
+      uid: drag.edit.uid,
+      polygon: drag.edit.polygon.map(p => [
+        Number((Number(p[0]) + dx).toFixed(6)),
+        Number((Number(p[1]) + dy).toFixed(6)),
+      ]),
+    };
+    renderer.domElement.classList.add('manual-dragging');
+    drawEdits();
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, true);
+
+renderer.domElement.addEventListener('pointerup', event => {
+  const drag = manualDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const moved = drag.moved;
+  const preview = manualDragPreview;
+  manualDrag = null;
+  if (renderer.domElement.hasPointerCapture?.(drag.pointerId)) {
+    try { renderer.domElement.releasePointerCapture(drag.pointerId); } catch { /* ignored */ }
+  }
+  planControls.enabled = planActive && planTool === 'select';
+  renderer.domElement.classList.remove('manual-dragging');
+  if (moved && preview && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)) {
+    manualMovePending = true;
+    window.dispatchEvent(new CustomEvent('manual-edit-move', {
+      detail: { edit: drag.edit, polygon: preview.polygon },
+    }));
+  } else {
+    manualDragPreview = null;
+    drawEdits();
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, true);
+
+renderer.domElement.addEventListener('pointercancel', event => {
+  if (manualDrag?.pointerId === event.pointerId) {
+    cancelManualDrag();
+    event.stopImmediatePropagation();
+  }
+}, true);
+window.addEventListener('blur', () => { if (manualDrag) cancelManualDrag(); });
 
 // Ignore drags (orbit/pan): select only on a click that did not move.
 let pointerDownAt = null;
@@ -1190,6 +1285,7 @@ window.IFCViewer = {
 
   // ---- 2D plan -------------------------------------------------------------
   enterPlan(levelKey) {
+    cancelManualDrag();
     requestRender();
     if (!semanticLoaded) return false;
     planActive = true;
@@ -1206,6 +1302,7 @@ window.IFCViewer = {
   },
 
   exitPlan() {
+    cancelManualDrag();
     requestRender();
     planActive = false;
     planPoints = [];
@@ -1219,6 +1316,7 @@ window.IFCViewer = {
   },
 
   setPlanLevel(levelKey) {
+    cancelManualDrag();
     requestRender();
     planLevelKey = Number(levelKey);
     planPoints = [];
@@ -1231,6 +1329,7 @@ window.IFCViewer = {
   },
 
   setPlanTool(tool) {
+    cancelManualDrag();
     planTool = tool || 'select';
     planControls.mouseButtons.LEFT = planTool === 'select'
       ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
@@ -1252,6 +1351,7 @@ window.IFCViewer = {
 
   // Keyboard helpers for drawing.
   planCancel() {
+    cancelManualDrag();
     planPoints = [];
     clearGroup(draftGroup);
   },
@@ -1287,11 +1387,17 @@ window.IFCViewer = {
 
   setManualEdits(edits) {
     manualEdits = Array.isArray(edits) ? edits : [];
+    if (manualDrag && !manualEdits.some(e => e.uid === manualDrag.edit.uid
+      && e.revision === manualDrag.edit.revision)) cancelManualDrag();
     if (selectedManualUid && !manualEdits.some(e => e.uid === selectedManualUid)) {
       selectedManualUid = null;
     }
     drawEdits();
     rebuildSnapTargets();
+  },
+
+  completeManualMove() {
+    cancelManualDrag({ clearPending: true });
   },
 
   selectManualEdit(uid, focus = false) {
