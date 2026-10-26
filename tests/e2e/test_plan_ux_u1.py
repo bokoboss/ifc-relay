@@ -6,6 +6,8 @@ import os
 import pytest
 from tests.e2e.test_browser_workflow import _dock, _open, _plan_point, page, server
 from tests.ifc_factory import Building
+from tests.test_connectivity import _two_storeys
+from tests.e2e.test_browser_workflow import _enter_plan, _click_plan
 
 pytestmark = pytest.mark.skipif(os.environ.get("VBB_E2E") != "1", reason="set VBB_E2E=1")
 
@@ -94,3 +96,26 @@ def test_u1_polygon_doubleclick_finishes_without_ghost_vertex(page, server, tmp_
     assert len({tuple(p) for p in edit["polygon"]}) == 3
     assert page.evaluate("!window.IFCViewer.planHasFirstPoint()")
     assert page.errors == []
+
+
+def test_u1_four_distinct_polygon_clicks_preserve_every_vertex(page, tmp_path):
+    b, _ = _two_storeys(with_stair=False)
+    _open(page, b.write(tmp_path / "four_vertices.ifc"))
+    page.click("#generateSemanticBtn")
+    page.wait_for_function("!document.getElementById('validateBtn').disabled", timeout=120000)
+    _enter_plan(page)
+    page.click(".plan-tool[data-tool=obstacle]")
+    page.click(".plan-shape[data-shape=poly]")
+    expected = ((0.03,0.02), (4,0), (4,3), (2,4.5))
+    for i, (x,y) in enumerate(expected, 1):
+        _click_plan(page, x, y)
+        state = page.evaluate("""() => ({
+            points: window.IFCViewer.planDraftPoints(),
+            pending: pendingShape ? {polygon:pendingShape.polygon} : null,
+            tool: planTool,
+            shape: planShapeKind,
+            hint: document.getElementById('planHint').textContent,
+        })""")
+        assert len(state["points"]) == i and state["pending"] is None, (
+            f"After click {i} at {(x,y)} expected {i} points: {state}"
+        )
