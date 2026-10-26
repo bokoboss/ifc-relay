@@ -94,27 +94,47 @@ function saveHistory() {
   } catch { /* storage blocked: history stays in memory */ }
 }
 
+function editShape(edit) {
+  return {
+    polygon: (edit.polygon || []).map(point => [...point]),
+    shape_type: edit.shape_type || 'polygon',
+  };
+}
+
+function sameEditShape(a, b) {
+  return JSON.stringify(editShape(a)) === JSON.stringify(editShape(b));
+}
+
 function historyFits(saved, edits) {
-  const uidOf = step => step?.edit?.uid;
-  if (![...saved.undo, ...saved.redo].every(step => uidOf(step) && ['add', 'delete'].includes(step.type))) return false;
-  let present = new Set(edits.map(e => e.uid));
-  for (const step of [...saved.undo].reverse()) {          // undoing walks back in time
-    const has = present.has(uidOf(step));
-    if (step.type === 'add' ? !has : has) return false;
-    if (step.type === 'add') present.delete(uidOf(step)); else present.add(uidOf(step));
-  }
-  present = new Set(edits.map(e => e.uid));
-  for (const step of [...saved.redo].reverse()) {          // redoing walks forward again
-    const has = present.has(uidOf(step));
-    if (step.type === 'add' ? has : !has) return false;
-    if (step.type === 'add') present.add(uidOf(step)); else present.delete(uidOf(step));
-  }
-  return true;
+  // Replay each history stack in reverse to verify both presence and geometry.
+  // Missing, reused or externally modified records invalidate old local history.
+  const valid = step => step && ['add', 'delete', 'update'].includes(step.type)
+    && step.edit?.uid && (step.type !== 'update' || (step.before?.polygon && step.after?.polygon));
+  if (![...saved.undo, ...saved.redo].every(valid)) return false;
+  const simulate = (stack, undo) => {
+    const present = new Map(edits.map(edit => [edit.uid, edit]));
+    for (const step of [...stack].reverse()) {
+      const id = step.edit.uid;
+      const current = present.get(id);
+      if (step.type === 'add') {
+        if (undo ? !current : !!current) return false;
+        if (undo) present.delete(id); else present.set(id, step.edit);
+      } else if (step.type === 'delete') {
+        if (undo ? !!current : !current) return false;
+        if (undo) present.set(id, step.edit); else present.delete(id);
+      } else {
+        if (!current || !sameEditShape(current, undo ? step.after : step.before)) return false;
+        present.set(id, { ...current, ...editShape(undo ? step.before : step.after) });
+      }
+    }
+    return true;
+  };
+  return simulate(saved.undo, true) && simulate(saved.redo, false);
 }
 
 let historyRestored = false;
 function restoreHistory(edits) {
-  if (historyRestored) return;          // once per page load; afterwards memory is the truth
+  if (historyRestored) return;
   historyRestored = true;
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null'); } catch { saved = null; }
@@ -124,12 +144,25 @@ function restoreHistory(edits) {
   updateUndoButtons();
 }
 
-// Re-adding an edit (undo of a delete, redo of an add) gives it a new id and uid:
-// point every other step at the new record so older steps still find it.
+// A recreated edit gets a new ID/UID and a geometry update gets a new revision.
+// Keep every history reference in sync without rewriting each step's before/after
+// polygon snapshots, which are necessary to replay older updates correctly.
 function remapEdit(oldEdit, newEdit) {
   for (const step of [...editHistory.undo, ...editHistory.redo]) {
     if (step.edit?.uid === oldEdit.uid) step.edit = newEdit;
   }
+}
+
+let editTransactionBusy = false;
+
+function editFailureMessage(error, action) {
+  const status = Number(error?.status || 0);
+  if (status === 409) {
+    return `${action}ไม่สำเร็จ: ข้อมูลถูกแก้ไขจากที่อื่นหรือ UID/Revision เปลี่ยน · โหลดรายการใหม่ก่อนแก้ไข (409)`;
+  }
+  if (status === 404) return `${action}ไม่สำเร็จ: ไม่พบรายการแก้ไขแล้ว (404)`;
+  if (status === 400 || status === 422) return `${action}ไม่สำเร็จ: รูปทรงหรือข้อมูลไม่ถูกต้อง · ${error.message} (${status})`;
+  return `${action}ไม่สำเร็จ: ${error.message}`;
 }
 
 function segmentHitsPolygon(a, b, poly) {
@@ -183,7 +216,10 @@ async function saveEdit(shape, { record = true } = {}) {
   const result = await api('/api/edits', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind: shape.tool, level_key: shape.level_key, polygon: shape.polygon }),
+    body: JSON.stringify({
+      kind: shape.tool, level_key: shape.level_key, polygon: shape.polygon,
+      ...(shape.shape_type ? { shape_type: shape.shape_type } : {}),
+    }),
   });
   renderEdits(result.edits);
   markSemanticStale();
@@ -197,7 +233,12 @@ async function saveEdit(shape, { record = true } = {}) {
 }
 
 async function removeEdit(edit, { record = true } = {}) {
-  const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, { method: 'DELETE' });
+  if (!edit.uid) throw new Error('รายการนี้ไม่มี UID · โหลดข้อมูลล่าสุดก่อนลบ');
+  const params = new URLSearchParams({
+    expected_uid: edit.uid,
+    expected_revision: String(edit.revision ?? 1),
+  });
+  const result = await api(`/api/edits/${encodeURIComponent(edit.id)}?${params}`, { method: 'DELETE' });
   renderEdits(result.edits);
   markSemanticStale();
   scheduleAutoPrepare();
@@ -208,44 +249,104 @@ async function removeEdit(edit, { record = true } = {}) {
   updateUndoButtons();
 }
 
-const asShape = edit => ({ tool: edit.kind, level_key: edit.level_key, polygon: edit.polygon });
+const asShape = edit => ({
+  tool: edit.kind, level_key: edit.level_key,
+  polygon: edit.polygon, shape_type: edit.shape_type || 'polygon',
+});
+
+// Public internal helper for future B3/B4/B5 plan manipulation: one PATCH per
+// committed geometry operation, exactly one undo transaction on real changes.
+// Does NOT modify IFC / generated geometry and does not select/pick objects.
+async function updateEditGeometry(edit, polygon, { shapeType = null, record = true } = {}) {
+  if (!edit?.uid) throw new Error('รายการนี้ไม่มี UID · โหลดข้อมูลล่าสุดก่อนแก้ไข');
+  const body = {
+    expected_uid: edit.uid,
+    expected_revision: edit.revision ?? 1,
+    polygon,
+  };
+  if (shapeType != null && shapeType !== (edit.shape_type || 'polygon')) body.shape_type = shapeType;
+  const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const changed = !sameEditShape(edit, result.edit);
+  remapEdit(edit, result.edit);
+  renderEdits(result.edits);
+  if (changed) {
+    markSemanticStale();
+    scheduleAutoPrepare();
+    if (record) {
+      editHistory.undo.push({
+        type: 'update', edit: result.edit,
+        before: editShape(edit), after: editShape(result.edit),
+      });
+      editHistory.redo = [];
+    }
+  }
+  updateUndoButtons();
+  return result.edit;
+}
 
 async function undoEdit() {
+  if (editTransactionBusy) return;
   const step = editHistory.undo.pop();
   if (!step) return;
+  editTransactionBusy = true;
   try {
     if (step.type === 'add') {
       await removeEdit(step.edit, { record: false });
       editHistory.redo.push(step);
-    } else {
+    } else if (step.type === 'delete') {
       const again = await saveEdit(asShape(step.edit), { record: false });
       remapEdit(step.edit, again);
       editHistory.redo.push({ type: 'delete', edit: again });
+    } else if (step.type === 'update') {
+      const again = await updateEditGeometry(step.edit, step.before.polygon, {
+        shapeType: step.before.shape_type, record: false,
+      });
+      editHistory.redo.push({ ...step, edit: again });
+    } else {
+      throw new Error('ไม่รู้จักชนิดขั้นตอน Undo');
     }
     setMessage('ย้อนการแก้ไขแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
   } catch (error) {
-    setMessage(`ย้อนไม่สำเร็จ: ${error.message}`);
+    editHistory.undo.push(step); // Failed transactions never consume history.
+    setMessage(editFailureMessage(error, 'ย้อนการแก้ไข'));
+  } finally {
+    editTransactionBusy = false;
+    updateUndoButtons();
   }
-  updateUndoButtons();
 }
 
 async function redoEdit() {
+  if (editTransactionBusy) return;
   const step = editHistory.redo.pop();
   if (!step) return;
+  editTransactionBusy = true;
   try {
     if (step.type === 'add') {
       const again = await saveEdit(asShape(step.edit), { record: false });
       remapEdit(step.edit, again);
       editHistory.undo.push({ type: 'add', edit: again });
-    } else {
+    } else if (step.type === 'delete') {
       await removeEdit(step.edit, { record: false });
       editHistory.undo.push({ type: 'delete', edit: step.edit });
+    } else if (step.type === 'update') {
+      const again = await updateEditGeometry(step.edit, step.after.polygon, {
+        shapeType: step.after.shape_type, record: false,
+      });
+      editHistory.undo.push({ ...step, edit: again });
+    } else {
+      throw new Error('ไม่รู้จักชนิดขั้นตอน Redo');
     }
     setMessage('ทำซ้ำแล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล');
   } catch (error) {
-    setMessage(`ทำซ้ำไม่สำเร็จ: ${error.message}`);
+    editHistory.redo.push(step);
+    setMessage(editFailureMessage(error, 'ทำซ้ำ'));
+  } finally {
+    editTransactionBusy = false;
+    updateUndoButtons();
   }
-  updateUndoButtons();
 }
 
 function showConfirm(shape) {
@@ -355,11 +456,17 @@ function renderEdits(edits) {
     del.type = 'button';
     del.textContent = 'ลบ';
     del.addEventListener('click', async () => {
+      if (editTransactionBusy) return;
+      editTransactionBusy = true;
+      del.disabled = true;
       try {
         await removeEdit(edit);
         setMessage(`ลบ ${edit.id} แล้ว · กด "เตรียมโมเดลคนเดิน" อีกครั้งเพื่อใช้ผล (ย้อนได้)`);
       } catch (error) {
-        setMessage(`ลบไม่สำเร็จ: ${error.message}`);
+        setMessage(editFailureMessage(error, 'ลบ'));
+      } finally {
+        editTransactionBusy = false;
+        del.disabled = false;
       }
     });
     row.appendChild(del);
