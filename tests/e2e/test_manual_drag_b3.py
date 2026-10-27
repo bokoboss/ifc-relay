@@ -261,6 +261,87 @@ def test_b3_near_polygon_border_is_empty_space_pan_not_move(page, server, tmp_pa
     assert page.errors == []
 
 
+def _hold_fit_frames(page, action):
+    """Delay real viewer callbacks across focus/pointer events, without sleeps."""
+    page.evaluate("""action => {
+      const raf = window.requestAnimationFrame;
+      window.b3FitFrames = [];
+      window.requestAnimationFrame = cb => { window.b3FitFrames.push(cb); return 0; };
+      const v = window.IFCViewer;
+      try {
+        if (action === 'enter') v.enterPlan(1);
+        if (action === 'mode') v.setMode('simulation');
+        if (action === 'semantic') v.loadSemantic(currentSemantic);
+        if (action === 'load') v.load({}, {}, {append: true});
+        if (action === 'exit') { v.exitPlan(); v.enterPlan(1); }
+      } finally { window.requestAnimationFrame = raf; }
+    }""", action)
+
+
+def _release_fit_frames(page):
+    page.evaluate("window.b3FitFrames.splice(0).forEach(cb => cb(performance.now()))")
+
+
+@pytest.mark.parametrize('action', ['enter', 'mode', 'semantic', 'load', 'exit'])
+def test_b3_delayed_fit_preserves_focus_and_empty_space_pan(page, server, tmp_path, action):
+    _ready(page, tmp_path)
+    if page.locator('#autoPrepareBtn[aria-pressed="true"]').count():
+        page.click('#autoPrepareBtn')
+    edit = _add_manual(page)
+    patches = []
+    page.on('request', lambda req: patches.append(req.url) if req.method == 'PATCH' else None)
+    _hold_fit_frames(page, action)
+    page.evaluate('window.IFCViewer.focusPlanPoint(5, 4, 1.5, 8)')
+    start = _plan_point(page, 3.35, 4)
+    _release_fit_frames(page)
+    page.mouse.move(start['x'], start['y'])
+    page.mouse.down()
+    page.mouse.move(start['x'] - 70, start['y'], steps=7)
+    page.mouse.up()
+    stored = _edits(page, server)[0]
+    assert stored['revision'] == 1
+    assert stored['polygon'] == edit['polygon']
+    assert patches == []
+    after = _plan_point(page, 3.35, 4)
+    assert after['x'] == pytest.approx(start['x'] - 70, abs=1e-5)
+    assert after['y'] == pytest.approx(start['y'], abs=1e-5)
+    assert page.errors == []
+
+
+@pytest.mark.parametrize('x,revision', [(3.35, 1), (5, 2)], ids=['pan', 'manual'])
+def test_b3_auto_fit_cannot_interrupt_or_outlive_gesture(page, server, tmp_path, x, revision):
+    _ready(page, tmp_path)
+    if page.locator('#autoPrepareBtn[aria-pressed="true"]').count():
+        page.click('#autoPrepareBtn')
+    _add_manual(page)
+    patches = []
+    page.on('request', lambda req: patches.append(req.url) if req.method == 'PATCH' else None)
+    page.evaluate('window.IFCViewer.focusPlanPoint(5, 4, 1.5, 8)')
+    start = _plan_point(page, x, 4)
+    centre = _plan_point(page, 5, 4)
+    _hold_fit_frames(page, 'mode')
+    page.mouse.move(start['x'], start['y'])
+    page.mouse.down()
+    _release_fit_frames(page)
+    during = page.evaluate('window.IFCViewer.planScreenPoint(5, 4)')
+    assert during['x'] == pytest.approx(centre['x'], abs=1e-5)
+    assert during['y'] == pytest.approx(centre['y'], abs=1e-5)
+    # A fit requested during a held gesture must also be discarded if its
+    # callback runs only after release, so it cannot undo the user's pan.
+    _hold_fit_frames(page, 'mode')
+    page.mouse.move(start['x'] - 70, start['y'], steps=7)
+    page.mouse.up()
+    _wait_revision(page, revision)
+    before_release = _plan_point(page, 5, 4)
+    _release_fit_frames(page)
+    after_release = _plan_point(page, 5, 4)
+    assert after_release['x'] == pytest.approx(before_release['x'], abs=1e-5)
+    assert after_release['y'] == pytest.approx(before_release['y'], abs=1e-5)
+    assert _edits(page, server)[0]['revision'] == revision
+    assert len(patches) == revision - 1
+    assert page.errors == []
+
+
 def test_b3_auto_prepare_does_not_interrupt_manual_drag(page, server, tmp_path):
     """While pointer is held, the Auto Prepare callback must defer its run."""
     _ready(page, tmp_path)
