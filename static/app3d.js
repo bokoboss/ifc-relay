@@ -494,8 +494,10 @@ function fitBox(box, padding = 1.25) {
 }
 
 function fitModel() {
+  ++planFitEpoch;
   requestRender();
   if (planActive) {
+    if (manualDrag || planNavigationActive) return;
     fitPlan();
     return;
   }
@@ -917,10 +919,22 @@ function planClick(event) {
 // pointer gesture. Otherwise test/user coordinates can be projected against
 // one camera while the drag scale was captured from another.
 let planFitEpoch = 0;
-function scheduleFitPlan() {
+let planNavigationActive = false;
+planControls.addEventListener('start', () => {
+  planNavigationActive = true;
+  ++planFitEpoch;
+});
+planControls.addEventListener('end', () => { planNavigationActive = false; });
+window.addEventListener('blur', () => { planNavigationActive = false; });
+
+function scheduleFitModel() {
   const epoch = ++planFitEpoch;
+  const wasPlan = planActive;
+  const canFit = !planActive || (!manualDrag && !planNavigationActive);
   requestAnimationFrame(() => {
-    if (epoch === planFitEpoch && planActive) fitPlan();
+    resize();
+    // Drop fits requested during a gesture even if release precedes this frame.
+    if (canFit && epoch === planFitEpoch && wasPlan === planActive) fitModel();
   });
 }
 function fitPlan() {
@@ -1409,11 +1423,7 @@ window.IFCViewer = {
     if (empty) empty.classList.add('hidden');
 
     resize();
-    requestAnimationFrame(() => {
-      resize();
-      fitModel();
-      requestAnimationFrame(resize);
-    });
+    scheduleFitModel();
   },
 
   setMode(nextMode) {
@@ -1425,7 +1435,7 @@ window.IFCViewer = {
     applyVisibility();
     if (selectionHelper) selectionHelper.visible = !useSemantic && !!meshes.get(selectedGuid)?.visible;
     if (semanticHelper) semanticHelper.visible = useSemantic;
-    requestAnimationFrame(() => { resize(); fitModel(); });
+    scheduleFitModel();
   },
 
   loadSemantic(model) {
@@ -1437,7 +1447,7 @@ window.IFCViewer = {
       modelGroup.visible = mode === 'overlay';
       semanticGroup.visible = semanticLoaded;
       applyVisibility();
-      requestAnimationFrame(() => { resize(); fitModel(); });
+      scheduleFitModel();
     }
     return semanticMeshes.length;
   },
@@ -1471,7 +1481,7 @@ window.IFCViewer = {
     applyVisibility();
     drawEdits();
     rebuildSnapTargets();
-    scheduleFitPlan();
+    scheduleFitModel();
     return true;
   },
 
@@ -1487,7 +1497,7 @@ window.IFCViewer = {
     controls.enabled = true;
     applyVisibility();
     drawEdits();
-    requestAnimationFrame(() => { resize(); fitModel(); });
+    scheduleFitModel();
   },
 
   setPlanLevel(levelKey) {
@@ -1500,7 +1510,7 @@ window.IFCViewer = {
     applyVisibility();
     drawEdits();
     rebuildSnapTargets();
-    scheduleFitPlan();
+    scheduleFitModel();
   },
 
   setPlanTool(tool) {
