@@ -43,14 +43,25 @@ document.getElementById('planLevelSelect').addEventListener('change', event => {
 
 const PLAN_HINTS = {
   select: 'เลือก: คลิกวัตถุเพื่อดูรายละเอียด · ลากพื้นที่ว่างเพื่อเลื่อนแปลน',
+  vertex: 'แก้จุดยอด Manual Polygon',
   measure: 'คลิกจุดเริ่มต้น แล้วคลิกจุดปลายเพื่อวัดระยะ',
   walkable: 'พื้นที่เดิน', obstacle: 'สิ่งกีดขวาง',
   passage: 'ช่องเปิดในผนัง', exit: 'ทางออก/จุดเริ่มเดิน',
 };
 let planShapeKind = 'rect';
 let planDraftVertices = 0;
+let vertexHint = '';
+
+function vertexHelp(edit, index = null) {
+  if (!edit) return 'คลิก Manual Polygon เพื่อเลือก · ลากพื้นที่ว่างเพื่อเลื่อนแปลน';
+  if ((edit.shape_type || 'polygon') !== 'polygon')
+    return 'Rectangle ยังแก้มุมไม่ได้ · การแปลงชนิดรูปทรงอยู่ใน B5';
+  const selected = index == null ? 'คลิกจุดสีน้ำเงินเพื่อเลือก/ลาก' : `จุดที่ ${index + 1} เลือกอยู่`;
+  return `${selected} · Alt+คลิกบนขอบเพื่อเพิ่มจุด · Delete/Backspace ลบจุด (เหลืออย่างน้อย 3)`;
+}
 
 function planHintText(extra = '') {
+  if (planTool === 'vertex') return `${PLAN_HINTS.vertex}: ${vertexHint || vertexHelp(null)}`;
   if (planTool === 'select' || planTool === 'measure') return PLAN_HINTS[planTool];
   const label = PLAN_HINTS[planTool] || planTool;
   const guidance = planShapeKind === 'poly'
@@ -73,6 +84,10 @@ function setPlanToolAndHint(next, { cancelPending = true } = {}) {
   document.querySelectorAll('.plan-tool[data-tool]').forEach(b =>
     b.classList.toggle('active', b.dataset.tool === planTool));
   viewer()?.setPlanTool(planTool);
+  if (planTool === 'vertex') {
+    const state = viewer()?.vertexEditingState?.();
+    vertexHint = vertexHelp(lastEdits.find(e => e.uid === state?.uid) || null);
+  } else vertexHint = '';
   refreshPlanHint();
 }
 document.querySelectorAll('.plan-tool[data-tool]').forEach(button => {
@@ -339,7 +354,8 @@ async function updateEditGeometry(edit, polygon, { shapeType = null, record = tr
 // B3 receives only a completed manual drag. Preview lives entirely in app3d;
 // each successful release produces one optimistic PATCH and one B2 history step.
 window.addEventListener('manual-edit-move', async event => {
-  const { edit, polygon } = event.detail || {};
+  const { edit, polygon, operation = 'translate' } = event.detail || {};
+  const action = operation === 'translate' ? 'ย้ายรูปทรง' : 'แก้จุดยอด';
   if (!edit?.uid || !Array.isArray(polygon) || editTransactionBusy) {
     viewer()?.completeManualMove();
     return;
@@ -358,9 +374,9 @@ window.addEventListener('manual-edit-move', async event => {
     window.dispatchEvent(new CustomEvent('manual-edit-selected', {
       detail: { edit: result, origin: 'manual', level_key: result.level_key },
     }));
-    setMessage(`ย้าย ${result.id} แล้ว · Undo/Redo ได้ · ต้องเตรียมโมเดลคนเดินอีกครั้ง`);
+    setMessage(`${action} ${result.id} แล้ว · Undo/Redo ได้ · ต้องเตรียมโมเดลคนเดินอีกครั้ง`);
   } catch (error) {
-    setMessage(editFailureMessage(error, 'ย้ายรูปทรง'));
+    setMessage(editFailureMessage(error, action));
     // External writers can change the edit while dragging. Revert the
     // optimistic preview, reload authoritative data and discard stale history.
     if ([404, 409].includes(Number(error?.status))) {
@@ -522,6 +538,12 @@ window.addEventListener('keydown', event => {
   const key = event.key.toLowerCase();
   if ((event.ctrlKey || event.metaKey) && key === 'z') { event.preventDefault(); event.shiftKey ? redoEdit() : undoEdit(); return; }
   if ((event.ctrlKey || event.metaKey) && key === 'y') { event.preventDefault(); redoEdit(); return; }
+  if (planTool === 'vertex' && ['Delete', 'Backspace'].includes(event.key)) {
+    event.preventDefault();
+    const result = v.removeSelectedVertex?.();
+    if (result && !result.ok) setMessage(result.reason);
+    return;
+  }
   if (event.key === 'Escape') {
     event.preventDefault();
     v.planCancel();
@@ -563,6 +585,17 @@ window.addEventListener('manual-edit-selected', event => {
   selectedManualEditUid = edit.uid;
   document.querySelectorAll('#editsList .edit-row').forEach(row =>
     row.classList.toggle('selected', row.dataset.uid === edit.uid));
+  if (planTool === 'vertex') {
+    const state = viewer()?.vertexEditingState?.();
+    vertexHint = vertexHelp(edit, state?.selectedVertexIndex);
+    refreshPlanHint();
+  }
+});
+window.addEventListener('plan-vertex-selection', event => {
+  if (planTool !== 'vertex') return;
+  const edit = event.detail?.edit;
+  vertexHint = vertexHelp(edit, event.detail?.index);
+  refreshPlanHint();
 });
 function renderEdits(edits) {
   const list = Array.isArray(edits) ? edits : [];
