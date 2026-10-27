@@ -913,6 +913,16 @@ function planClick(event) {
   drawDraft(p);
 }
 
+// A queued auto-fit must never override a more recent explicit focus or a
+// pointer gesture. Otherwise test/user coordinates can be projected against
+// one camera while the drag scale was captured from another.
+let planFitEpoch = 0;
+function scheduleFitPlan() {
+  const epoch = ++planFitEpoch;
+  requestAnimationFrame(() => {
+    if (epoch === planFitEpoch && planActive) fitPlan();
+  });
+}
 function fitPlan() {
   requestRender();
   const box = new THREE.Box3();
@@ -1150,6 +1160,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
     if (!edit) return; // preserve empty-space pan, semantic and IFC picking
   }
   const bounds = renderer.domElement.getBoundingClientRect();
+  ++planFitEpoch; // never re-fit the camera during a captured geometry gesture
   manualDrag = {
     edit, operation, vertexIndex, insertion, origin: point,
     x: event.clientX, y: event.clientY,
@@ -1460,11 +1471,12 @@ window.IFCViewer = {
     applyVisibility();
     drawEdits();
     rebuildSnapTargets();
-    requestAnimationFrame(() => fitPlan());
+    scheduleFitPlan();
     return true;
   },
 
   exitPlan() {
+    ++planFitEpoch;
     cancelManualDrag();
     requestRender();
     planActive = false;
@@ -1488,7 +1500,7 @@ window.IFCViewer = {
     applyVisibility();
     drawEdits();
     rebuildSnapTargets();
-    requestAnimationFrame(() => fitPlan());
+    scheduleFitPlan();
   },
 
   setPlanTool(tool) {
@@ -1632,6 +1644,7 @@ window.IFCViewer = {
 
   // Centre the plan on (x, y) of the current plan level and ring it (review queue).
   focusPlanPoint(x, y, radius = 1.5, halfHeight = 9) {
+    ++planFitEpoch; // explicit user focus wins over pending enter/level auto-fit
     requestRender();
     if (!planActive) return false;
     clearGroup(focusGroup);
