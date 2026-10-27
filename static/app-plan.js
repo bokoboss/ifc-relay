@@ -336,6 +336,46 @@ async function updateEditGeometry(edit, polygon, { shapeType = null, record = tr
   return result.edit;
 }
 
+// B3 receives only a completed manual drag. Preview lives entirely in app3d;
+// each successful release produces one optimistic PATCH and one B2 history step.
+window.addEventListener('manual-edit-move', async event => {
+  const { edit, polygon } = event.detail || {};
+  if (!edit?.uid || !Array.isArray(polygon) || editTransactionBusy) {
+    viewer()?.completeManualMove();
+    return;
+  }
+  const active = lastEdits.find(record => record.uid === edit.uid);
+  if (!active || active.revision !== edit.revision
+      || active.id !== edit.id || active.level_key !== edit.level_key) {
+    viewer()?.completeManualMove();
+    setMessage('ย้ายไม่สำเร็จ: รายการที่เลือกเปลี่ยนไปแล้ว · โหลดรายการล่าสุด');
+    return;
+  }
+  editTransactionBusy = true;
+  try {
+    const result = await updateEditGeometry(edit, polygon);
+    selectedManualEditUid = result.uid;
+    window.dispatchEvent(new CustomEvent('manual-edit-selected', {
+      detail: { edit: result, origin: 'manual', level_key: result.level_key },
+    }));
+    setMessage(`ย้าย ${result.id} แล้ว · Undo/Redo ได้ · ต้องเตรียมโมเดลคนเดินอีกครั้ง`);
+  } catch (error) {
+    setMessage(editFailureMessage(error, 'ย้ายรูปทรง'));
+    // External writers can change the edit while dragging. Revert the
+    // optimistic preview, reload authoritative data and discard stale history.
+    if ([404, 409].includes(Number(error?.status))) {
+      editHistory.undo = [];
+      editHistory.redo = [];
+      updateUndoButtons();
+    }
+    await refreshEdits();
+  } finally {
+    editTransactionBusy = false;
+    viewer()?.completeManualMove();
+    updateUndoButtons();
+  }
+});
+
 async function undoEdit() {
   if (editTransactionBusy) return;
   const step = editHistory.undo.pop();
