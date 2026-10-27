@@ -698,8 +698,7 @@ function drawEdits() {
       }
     }
     editsGroup.add(g);
-    if (planActive && planTool === 'vertex' && selectedManualUid === edit.uid
-        && (edit.shape_type || 'polygon') === 'polygon') {
+    if (planActive && planTool === 'vertex' && selectedManualUid === edit.uid) {
       // Fixed-size visual handles in plan coordinates, without raycasting
       // these meshes as authoritative geometry.
       const handleRadius = Math.max(0.035, Math.min(0.35, metresPerPixel() * 7));
@@ -1084,11 +1083,46 @@ function pointerSelect(event) {
 
 // B4 — Vertex-only hit testing and insertion in plan coordinates.
 // Editing is explicit: SELECT still owns whole-object moves from B3.
-function editableVertexPolygon() {
+function editableVertexShape() {
   if (!planActive || planTool !== 'vertex') return null;
   return manualEdits.find(edit => edit.uid === selectedManualUid
-    && Number(edit.level_key) === planLevelKey
-    && (edit.shape_type || 'polygon') === 'polygon') || null;
+    && Number(edit.level_key) === planLevelKey) || null;
+}
+
+function editableVertexPolygon() {
+  const edit = editableVertexShape();
+  return edit && (edit.shape_type || 'polygon') === 'polygon' ? edit : null;
+}
+
+// B5: changing one corner must not skew a four-corner rectangle.
+// Project the desired diagonal onto its two ORIGINAL orthogonal side axes,
+// keeping the opposite corner fixed. Reject inverted dimensions by clamping
+// at 0.1 m; the backend remains authoritative for area/angle validation.
+function resizeRectangleCorner(points, index, delta) {
+  if (!Array.isArray(points) || points.length !== 4
+      || index == null || index < 0 || index >= 4) return null;
+  const opposite = (index + 2) % 4;
+  const anchor = points[opposite].map(Number);
+  const next = points[(index + 1) % 4].map(Number);
+  const prev = points[(index + 3) % 4].map(Number);
+  const axis = p => [p[0] - anchor[0], p[1] - anchor[1]];
+  const side1 = axis(next), side2 = axis(prev);
+  const l1 = Math.hypot(...side1), l2 = Math.hypot(...side2);
+  if (l1 < 0.001 || l2 < 0.001) return null;
+  const u = side1.map(x => x / l1);
+  const w = side2.map(x => x / l2);
+  const desired = [Number(points[index][0]) + delta[0] - anchor[0],
+    Number(points[index][1]) + delta[1] - anchor[1]];
+  const a = Math.max(0.1, desired[0] * u[0] + desired[1] * u[1]);
+  const b = Math.max(0.1, desired[0] * w[0] + desired[1] * w[1]);
+  const round = p => p.map(x => Number(x.toFixed(6)));
+  const polygon = points.map(p => p.map(Number));
+  polygon[opposite] = [...anchor];
+  polygon[(index + 1) % 4] = round([anchor[0] + a * u[0], anchor[1] + a * u[1]]);
+  polygon[(index + 3) % 4] = round([anchor[0] + b * w[0], anchor[1] + b * w[1]]);
+  polygon[index] = round([anchor[0] + a * u[0] + b * w[0],
+    anchor[1] + a * u[1] + b * w[1]]);
+  return polygon;
 }
 
 function nearestVertexInEdit(point, edit) {
@@ -1157,9 +1191,11 @@ renderer.domElement.addEventListener('pointerdown', event => {
   let edit = null, operation = 'translate', vertexIndex = null, insertion = null;
   if (inVertexMode) {
     // The user must select a Manual Polygon first (not IFC/Generated/Rectangle).
-    edit = editableVertexPolygon();
+    edit = editableVertexShape();
     if (!edit) return;
+    const rectangle = (edit.shape_type || 'polygon') === 'rectangle';
     if (event.altKey) {
+      if (rectangle) return; // never insert a fifth vertex in a rectangle
       insertion = nearestEdgeForInsert(point, edit);
       if (!insertion) return;
       operation = 'insert';
@@ -1167,7 +1203,7 @@ renderer.domElement.addEventListener('pointerdown', event => {
     } else {
       vertexIndex = nearestVertexInEdit(point, edit);
       if (vertexIndex == null) return; // click inside a polygon selects it below
-      operation = 'vertex';
+      operation = rectangle ? 'resize-rectangle' : 'vertex';
     }
   } else {
     edit = manualEditAtPointer(event);
@@ -1218,7 +1254,11 @@ renderer.domElement.addEventListener('pointermove', event => {
   const dx = (event.clientX - drag.x) * drag.metresPerPixelX;
   const dy = (drag.y - event.clientY) * drag.metresPerPixelY;
   const polygon = drag.edit.polygon.map(p => [...p]);
-  if (drag.operation === 'vertex') {
+  if (drag.operation === 'resize-rectangle') {
+    const resized = resizeRectangleCorner(drag.edit.polygon, drag.vertexIndex, [dx, dy]);
+    if (!resized) return;
+    polygon.splice(0, polygon.length, ...resized);
+  } else if (drag.operation === 'vertex') {
     const [x, y] = polygon[drag.vertexIndex];
     polygon[drag.vertexIndex] = [
       Number((Number(x) + dx).toFixed(6)),
@@ -1252,7 +1292,7 @@ renderer.domElement.addEventListener('pointerup', event => {
   renderer.domElement.classList.remove('manual-dragging');
   // Commit selection/Inspector only after the pointer gesture completed.
   markManualSelection(drag.edit);
-  if (drag.operation === 'vertex' || drag.operation === 'insert')
+  if (['vertex', 'insert', 'resize-rectangle'].includes(drag.operation))
     vertexEditFeedback(drag.edit, drag.operation);
   const commit = preview
     && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)
@@ -1603,7 +1643,7 @@ window.IFCViewer = {
 
   removeSelectedVertex() {
     const edit = editableVertexPolygon();
-    if (!edit) return { ok: false, reason: 'เลือก Manual Polygon ก่อน · Rectangle เปลี่ยนเป็น Polygon ได้ใน B5' };
+    if (!edit) return { ok: false, reason: 'การลบจุดทำได้เฉพาะ Polygon · Rectangle ใช้ลากมุมเพื่อปรับขนาด' };
     if (manualMovePending || manualDrag) return { ok: false, reason: 'รอการบันทึกหรือยกเลิกการลากก่อน' };
     if (selectedVertexIndex == null) return { ok: false, reason: 'คลิกจุดยอดที่ต้องการลบก่อน' };
     if (edit.polygon.length <= 3) return { ok: false, reason: 'Polygon ต้องเหลืออย่างน้อย 3 จุด' };
