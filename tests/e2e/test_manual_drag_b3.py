@@ -244,12 +244,25 @@ def test_b3_generated_area_not_draggable(page, server, tmp_path):
     assert page.errors == []
 
 
-def test_b3_near_polygon_border_is_empty_space_pan_not_move(page, server, tmp_path):
+@pytest.mark.parametrize("refresh_before_press", [False, True], ids=["normal", "auto-prepare"])
+def test_b3_near_polygon_border_is_empty_space_pan_not_move(
+    page, server, tmp_path, refresh_before_press
+):
     _ready(page, tmp_path)
+    if refresh_before_press and page.locator('#autoPrepareBtn[aria-pressed="true"]').count():
+        page.click('#autoPrepareBtn')  # control exactly when the background result arrives
     edit = _add_manual(page)
+    patches = []
+    page.on('request', lambda req: patches.append(req.url) if req.method == 'PATCH' else None)
     # x=3.35 is 0.65 m outside the shape (left edge x=4). The historic
     # THREE.Line default 1m ray threshold used to accidentally arm a drag.
     start = _plan_point(page, 3.35, 4)
+    if refresh_before_press:
+        # Reproduce a background result arriving after the pointer coordinates
+        # were resolved. Rebuilding the same level must preserve the plan view.
+        page.evaluate("async () => { await prepareModel({auto: true}); }")
+        refreshed = _plan_point(page, 3.35, 4)  # flush the real queued camera callbacks
+        assert refreshed == pytest.approx(start, abs=1e-5)
     page.mouse.move(start["x"], start["y"])
     page.mouse.down(button="left")
     page.mouse.move(start["x"] - 70, start["y"], steps=7)
@@ -258,6 +271,10 @@ def test_b3_near_polygon_border_is_empty_space_pan_not_move(page, server, tmp_pa
     assert stored["uid"] == edit["uid"]
     assert stored["revision"] == 1
     assert stored["polygon"] == edit["polygon"]
+    assert patches == []
+    after = _plan_point(page, 3.35, 4)
+    assert after['x'] == pytest.approx(start['x'] - 70, abs=1e-5)
+    assert after['y'] == pytest.approx(start['y'], abs=1e-5)
     assert page.errors == []
 
 

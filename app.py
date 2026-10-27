@@ -145,8 +145,10 @@ class ManualEditPatch(BaseModel):
     expected_uid: str = Field(min_length=1)
     expected_revision: int = Field(ge=1, strict=True)
     polygon: list[list[float]]
-    # Only an explicit rectangle -> polygon conversion may change shape type.
+    # Geometry updates preserve the type. B5 permits an explicit, guarded
+    # reverse conversion for Undo; never reinterpret polygons implicitly.
     shape_type: Literal["rectangle", "polygon"] | None = None
+    restore_rectangle: bool = False
 
 
 class SelectionUpdate(BaseModel):
@@ -1229,8 +1231,13 @@ def patch_manual_edit(edit_id: str, patch: ManualEditPatch) -> dict[str, Any]:
     _check_edit_preconditions(current, patch.expected_uid, patch.expected_revision)
 
     old_shape = edit_shape_type(current)
-    if patch.shape_type is not None and not (old_shape == "rectangle" and patch.shape_type == "polygon"):
-        raise HTTPException(status_code=400, detail="เปลี่ยนชนิดรูปทรงได้เฉพาะ rectangle → polygon")
+    forward = old_shape == "rectangle" and patch.shape_type == "polygon"
+    restore = (old_shape == "polygon" and patch.shape_type == "rectangle"
+               and patch.restore_rectangle)
+    if patch.restore_rectangle and not restore:
+        raise HTTPException(status_code=400, detail="restore_rectangle ใช้ได้เฉพาะ Undo Polygon → Rectangle")
+    if patch.shape_type is not None and not (forward or restore):
+        raise HTTPException(status_code=400, detail="เปลี่ยนชนิดรูปทรงได้เฉพาะ Rectangle → Polygon หรือ Undo แบบ restore_rectangle")
     next_shape = patch.shape_type or old_shape
     data = {**current, "polygon": patch.polygon, "shape_type": next_shape}
     problem = validate_edit(data)

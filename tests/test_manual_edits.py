@@ -499,3 +499,93 @@ def test_b1_micro_shift_passage_must_invalidate_semantic_and_cut_wall(client, tm
         assert result["passage"] == 1
         assert status["E1"]["walls_cut"] == expected_cut
         assert len(walls) == (1 if not expected_cut else 2)
+
+
+# B5: explicit rectangle-to-polygon conversion and atomic Undo/Redo.
+def _b5_shape_patch(client, edit, polygon, target, restore=False):
+    return client.patch(f"/api/edits/{edit['id']}", json={
+        "expected_uid": edit["uid"], "expected_revision": edit["revision"],
+        "polygon": polygon, "shape_type": target,
+        "restore_rectangle": restore,
+    })
+
+
+def test_b5_shape_conversion_roundtrip_preserves_uid_and_revision(client, tmp_path):
+    original = _b1_record(shape_type="rectangle")
+    _b1_seed(client, tmp_path, [original], use_explicit_snapshot=True)
+    forward = _b5_shape_patch(client, original, original["polygon"], "polygon")
+    assert forward.status_code == 200, forward.text
+    converted = forward.json()["edit"]
+    assert converted["shape_type"] == "polygon"
+    assert converted["revision"] == 2
+    assert converted["uid"] == original["uid"]
+    assert converted["id"] == original["id"]
+    assert converted["kind"] == original["kind"]
+    assert converted["level_key"] == original["level_key"]
+    assert forward.json()["edits"][0]["review"]["state"] == "pending"
+
+    backward = _b5_shape_patch(client, converted, converted["polygon"], "rectangle", restore=True)
+    assert backward.status_code == 200, backward.text
+    restored = backward.json()["edit"]
+    assert restored["uid"] == original["uid"]
+    assert restored["revision"] == 3
+    assert restored["shape_type"] == "rectangle"
+    assert restored["polygon"] == original["polygon"]
+
+    redo = _b5_shape_patch(client, restored, restored["polygon"], "polygon")
+    assert redo.status_code == 200, redo.text
+    assert redo.json()["edit"]["revision"] == 4
+    assert redo.json()["edit"]["shape_type"] == "polygon"
+
+
+def test_b5_restore_requires_explicit_guard_and_valid_rectangle(client, tmp_path):
+    original = _b1_record(shape_type="rectangle")
+    _b1_seed(client, tmp_path, [original])
+    points = original["polygon"]
+    assert _b5_shape_patch(client, original, points, "polygon", restore=True).status_code == 400
+
+    created = _b5_shape_patch(client, original, points, "polygon")
+    assert created.status_code == 200
+    polygon = created.json()["edit"]
+
+    # Preserve B1's one-way default and block restoring skewed polygons.
+    assert _b5_shape_patch(client, polygon, points, "rectangle").status_code == 400
+    skew = [[0, 0], [2.5, 0], [2.2, 2], [0, 2]]
+    assert _b5_shape_patch(client, polygon, skew, "rectangle", restore=True).status_code == 400
+    assert _b5_shape_patch(client, polygon, points, "polygon", restore=True).status_code == 400
+
+    stale = client.patch(f"/api/edits/{polygon['id']}", json={
+        "expected_uid": polygon["uid"], "expected_revision": 1,
+        "polygon": points, "shape_type": "rectangle", "restore_rectangle": True,
+    })
+    assert stale.status_code == 409
+    stored = client.get("/api/edits").json()["edits"][0]
+    assert stored["revision"] == 2
+    assert stored["shape_type"] == "polygon"
+    assert stored["polygon"] == points
+
+
+def test_b5_rotated_rectangle_resize_keeps_orthogonality(client, tmp_path):
+    from math import sqrt
+    root2 = sqrt(2)
+    original_pts = [[0, 0], [root2, root2], [0, 2*root2], [-root2, root2]]
+    original = _b1_record(shape_type="rectangle", polygon=original_pts)
+    _b1_seed(client, tmp_path, [original])
+    anchor = original_pts[2]
+    u = [original_pts[1][k] - anchor[k] for k in (0, 1)]
+    v = [original_pts[3][k] - anchor[k] for k in (0, 1)]
+    resized = [
+        [anchor[k] + 1.4*u[k] + 0.7*v[k] for k in (0, 1)],
+        [anchor[k] + 1.4*u[k] for k in (0, 1)],
+        anchor,
+        [anchor[k] + 0.7*v[k] for k in (0, 1)],
+    ]
+    reply = _b1_patch(client, original, resized)
+    assert reply.status_code == 200, reply.text
+    updated = reply.json()["edit"]
+    assert updated["revision"] == 2
+    assert updated["shape_type"] == "rectangle"
+    assert updated["uid"] == original["uid"]
+    assert updated["polygon"][2] == anchor
+    skew = [[0, 0], [2, 0], [2.1, 2], [0, 2]]
+    assert _b1_patch(client, updated, skew).status_code == 400

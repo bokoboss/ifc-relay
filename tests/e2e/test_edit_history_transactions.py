@@ -201,27 +201,57 @@ def test_b2_reload_drops_delete_history_after_e1_id_reuse(page, server, tmp_path
     assert _edits(page, server)[0]["uid"] == created.json()["edit"]["uid"]
 
 
-def test_b2_one_way_rectangle_conversion_not_added_to_history(page, server, tmp_path):
+def test_b2_reversible_rectangle_conversion_history_survives_reload(page, server, tmp_path):
     _create_browser_edit(page, tmp_path)
     rectangle = page.evaluate("""async () => saveEdit({
         tool: 'obstacle', level_key: 1, shape_type: 'rectangle',
         polygon: [[6,2], [8,2], [8,4], [6,4]],
     })""")
     assert rectangle["shape_type"] == "rectangle"
-    result = page.evaluate(
+    writes = []
+    page.on('request', lambda req: writes.append(req) if '/api/edits' in req.url
+            and req.method in ('PATCH', 'POST', 'DELETE') else None)
+    converted = page.evaluate(
         """async ({uid}) => {
             const edit = (await api('/api/edits')).edits.find(e => e.uid === uid);
-            try {
-                await updateEditGeometry(edit, edit.polygon, {shapeType: 'polygon'});
-                return {accepted: true};
-            } catch (err) {
-                return {accepted: false, message: err.message};
-            }
+            return updateEditGeometry(edit, edit.polygon, {shapeType: 'polygon'});
         }""",
         {"uid": rectangle["uid"]},
     )
-    assert result["accepted"] is False
-    assert "B5" in result["message"]
+    assert converted["uid"] == rectangle["uid"]
+    assert converted["shape_type"] == "polygon"
+    assert converted["revision"] == 2
+    assert converted["polygon"] == rectangle["polygon"]
+    history = page.evaluate("editHistory")
+    assert len(history["undo"]) == 3  # two adds and exactly one reversible conversion
+    assert history["redo"] == []
+    assert history["undo"][-1]["before"] == {
+        "polygon": rectangle["polygon"], "shape_type": "rectangle",
+    }
+    assert history["undo"][-1]["after"] == {
+        "polygon": rectangle["polygon"], "shape_type": "polygon",
+    }
+
+    # B2 forbade conversion while the API was one-way. B5 makes it reversible;
+    # the saved transaction must now restore both geometry and type after reload.
+    page.reload()
+    page.wait_for_function("historyRestored && !document.getElementById('planUndoBtn').disabled")
+    page.evaluate("document.getElementById('planUndoBtn').click()")
+    page.wait_for_function("!editTransactionBusy && editHistory.redo.length === 1")
     persisted = next(e for e in _edits(page, server) if e["uid"] == rectangle["uid"])
     assert persisted["shape_type"] == "rectangle"
-    assert persisted["revision"] == 1
+    assert persisted["revision"] == 3
+    assert persisted["polygon"] == rectangle["polygon"]
+    page.evaluate("document.getElementById('planRedoBtn').click()")
+    page.wait_for_function("!editTransactionBusy && editHistory.redo.length === 0")
+    persisted = next(e for e in _edits(page, server) if e["uid"] == rectangle["uid"])
+    assert persisted["shape_type"] == "polygon"
+    assert persisted["revision"] == 4
+    assert persisted["polygon"] == rectangle["polygon"]
+    assert len(writes) == 3
+    assert all(req.method == 'PATCH' for req in writes)
+    for revision, req in enumerate(writes, 1):
+        assert req.post_data_json["expected_uid"] == rectangle["uid"]
+        assert req.post_data_json["expected_revision"] == revision
+    assert writes[1].post_data_json["restore_rectangle"] is True
+    assert page.errors == []
