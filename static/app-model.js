@@ -496,8 +496,8 @@ async function prepareModel({ auto = false } = {}) {
         previewMeshes = Number(v.loadSemantic(result.model) || 0);
       }
       if (previewMeshes > 0 && v.isPlan?.()) {
-        // Regenerated while drawing on the plan: stay on the same level.
-        v.setPlanLevel(Number(document.getElementById('planLevelSelect').value));
+        // loadSemantic refreshes the current plan level and snapping in place.
+        // Re-entering that level would cancel a gesture and queue a camera fit.
         document.getElementById('stepPreview').classList.add('done');
       } else if (previewMeshes > 0) {
         v.setMode('simulation');

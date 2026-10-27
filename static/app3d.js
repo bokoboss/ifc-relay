@@ -1487,7 +1487,8 @@ window.IFCViewer = {
       modelGroup.visible = mode === 'overlay';
       semanticGroup.visible = semanticLoaded;
       applyVisibility();
-      scheduleFitModel();
+      // A same-level refresh must not move a plan point under the pointer.
+      if (!planActive) scheduleFitModel();
     }
     return semanticMeshes.length;
   },
