@@ -574,12 +574,14 @@ planOverlay.add(focusGroup);
 const EDIT_COLORS = { walkable: 0x2e9e5b, obstacle: 0x34495e, passage: 0x0e9fb6, exit: 0xb86c4d, measure: 0xd35400 };
 let manualEdits = [];
 let selectedManualUid = null;
+let selectedVertexIndex = null;
 // B3: preview is transient. The authoritative edit list and IFC geometry are
 // unchanged until a single revision-guarded PATCH succeeds on pointer release.
 let manualDrag = null;
 let manualDragPreview = null;
 let manualMovePending = false;
 function markManualSelection(edit, emit = true) {
+  if (selectedManualUid !== (edit?.uid || null)) selectedVertexIndex = null;
   selectedManualUid = edit?.uid || null;
   drawEdits();
   if (edit && emit) window.dispatchEvent(new CustomEvent('manual-edit-selected', {
@@ -694,6 +696,25 @@ function drawEdits() {
       }
     }
     editsGroup.add(g);
+    if (planActive && planTool === 'vertex' && selectedManualUid === edit.uid
+        && (edit.shape_type || 'polygon') === 'polygon') {
+      // Fixed-size visual handles in plan coordinates, without raycasting
+      // these meshes as authoritative geometry.
+      const handleRadius = Math.max(0.035, Math.min(0.35, metresPerPixel() * 7));
+      polygon.forEach((point, index) => {
+        const handle = new THREE.Mesh(
+          new THREE.CircleGeometry(handleRadius, 20),
+          new THREE.MeshBasicMaterial({
+            color: selectedVertexIndex === index ? 0xff9b36 : 0x155fb8,
+            depthTest: false, side: THREE.DoubleSide,
+          }),
+        );
+        handle.position.set(Number(point[0]), Number(point[1]), levelZ(edit.level_key) + 0.13);
+        handle.renderOrder = 45;
+        handle.userData.vertexIndex = index;
+        g.add(handle);
+      });
+    }
   }
 }
 
@@ -996,7 +1017,7 @@ function isPointInManualPolygon(point, polygon) {
 }
 
 function manualEditAtPointer(event) {
-  if (!planActive || planTool !== 'select' || !editsGroup.visible) return null;
+  if (!planActive || !['select', 'vertex'].includes(planTool) || !editsGroup.visible) return null;
   const point = groundPoint(event);
   if (!point) return null;
   // Last drawn edit is visually topmost; it wins when manual shapes overlap.
@@ -1011,6 +1032,9 @@ function manualEditAtPointer(event) {
 function pointerSelect(event) {
   const manual = manualEditAtPointer(event);
   if (manual) { markManualSelection(manual); return; }
+  // Vertex tool can inspect/manual-pick only. IFC and generated geometry are
+  // not selectable or editable while changing a manual polygon vertex.
+  if (planActive && planTool === 'vertex') return;
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1034,6 +1058,58 @@ function pointerSelect(event) {
   if (hit?.object?.userData?.item?.global_id) selectGuid(hit.object.userData.item.global_id, true);
 }
 
+// B4 — Vertex-only hit testing and insertion in plan coordinates.
+// Editing is explicit: SELECT still owns whole-object moves from B3.
+function editableVertexPolygon() {
+  if (!planActive || planTool !== 'vertex') return null;
+  return manualEdits.find(edit => edit.uid === selectedManualUid
+    && Number(edit.level_key) === planLevelKey
+    && (edit.shape_type || 'polygon') === 'polygon') || null;
+}
+
+function nearestVertexInEdit(point, edit) {
+  if (!edit || !point) return null;
+  const radius = Math.max(0.001, metresPerPixel() * 12);
+  let index = null, nearest = radius;
+  for (let i = 0; i < edit.polygon.length; i++) {
+    const vertex = edit.polygon[i].map(Number);
+    const d = Math.hypot(vertex[0] - point[0], vertex[1] - point[1]);
+    if (d <= nearest) { index = i; nearest = d; }
+  }
+  return index;
+}
+
+function nearestEdgeForInsert(point, edit) {
+  if (!edit || !point || edit.polygon.length >= 200) return null;
+  const radius = metresPerPixel() * 10;
+  const vertexClearance = metresPerPixel() * 12;
+  let best = null, bestDistance = radius;
+  for (let i = 0; i < edit.polygon.length; i++) {
+    const start = edit.polygon[i].map(Number);
+    const end = edit.polygon[(i + 1) % edit.polygon.length].map(Number);
+    const dx = end[0] - start[0], dy = end[1] - start[1];
+    const lengthSq = dx * dx + dy * dy;
+    if (lengthSq < 1e-8) continue;
+    const t = Math.max(0, Math.min(1,
+      ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSq));
+    const foot = [start[0] + t * dx, start[1] + t * dy];
+    const gap = Math.hypot(point[0] - foot[0], point[1] - foot[1]);
+    if (gap < bestDistance
+        && Math.hypot(foot[0] - start[0], foot[1] - start[1]) > vertexClearance
+        && Math.hypot(foot[0] - end[0], foot[1] - end[1]) > vertexClearance) {
+      best = { edgeIndex: i, point: foot.map(x => Number(x.toFixed(6))) };
+      bestDistance = gap;
+    }
+  }
+  return best;
+}
+
+function vertexEditFeedback(edit, operation = 'selected') {
+  window.dispatchEvent(new CustomEvent('plan-vertex-selection', {
+    detail: { edit, operation, index: selectedVertexIndex },
+  }));
+}
+
 // B3 move gesture is captured BEFORE OrbitControls on the canvas. Empty-space
 // drags still pan, whereas a manual shape drags without moving the camera.
 function cancelManualDrag({ clearPending = false } = {}) {
@@ -1044,20 +1120,39 @@ function cancelManualDrag({ clearPending = false } = {}) {
   if (clearPending) manualMovePending = false;
   manualDragPreview = null;
   renderer.domElement.classList.remove('manual-dragging');
-  if (planActive && planTool === 'select') planControls.enabled = true;
+  if (planActive && ['select', 'vertex'].includes(planTool)) planControls.enabled = true;
   drawEdits();
 }
 
 renderer.domElement.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || !planActive || planTool !== 'select'
+  if (event.button !== 0 || !planActive || !['select', 'vertex'].includes(planTool)
       || manualMovePending || manualDrag) return;
-  const edit = manualEditAtPointer(event);
-  if (!edit) return;  // preserve pan/semantic/IFC picking
-  const origin = groundPoint(event);
-  if (!origin) return;
+  const inVertexMode = planTool === 'vertex';
+  const point = groundPoint(event);
+  if (!point) return;
+  let edit = null, operation = 'translate', vertexIndex = null, insertion = null;
+  if (inVertexMode) {
+    // The user must select a Manual Polygon first (not IFC/Generated/Rectangle).
+    edit = editableVertexPolygon();
+    if (!edit) return;
+    if (event.altKey) {
+      insertion = nearestEdgeForInsert(point, edit);
+      if (!insertion) return;
+      operation = 'insert';
+      vertexIndex = insertion.edgeIndex + 1;
+    } else {
+      vertexIndex = nearestVertexInEdit(point, edit);
+      if (vertexIndex == null) return; // click inside a polygon selects it below
+      operation = 'vertex';
+    }
+  } else {
+    edit = manualEditAtPointer(event);
+    if (!edit) return; // preserve empty-space pan, semantic and IFC picking
+  }
   const bounds = renderer.domElement.getBoundingClientRect();
   manualDrag = {
-    edit, origin, x: event.clientX, y: event.clientY,
+    edit, operation, vertexIndex, insertion, origin: point,
+    x: event.clientX, y: event.clientY,
     pointerId: event.pointerId, moved: false,
     metresPerPixelX: (orthoCamera.right - orthoCamera.left)
       / Math.max(bounds.width * orthoCamera.zoom, 1),
@@ -1065,9 +1160,14 @@ renderer.domElement.addEventListener('pointerdown', event => {
       / Math.max(bounds.height * orthoCamera.zoom, 1),
   };
   planControls.enabled = false;
-  // Highlight in WebGL only. Opening the DOM inspector here can resize the
-  // canvas DURING the gesture, corrupting the pixel-to-world mapping.
+  // Do not open the DOM inspector until release: it can resize the viewport.
   selectedManualUid = edit.uid;
+  if (inVertexMode) selectedVertexIndex = vertexIndex;
+  if (insertion) {
+    const polygon = edit.polygon.map(p => [...p]);
+    polygon.splice(vertexIndex, 0, insertion.point);
+    manualDragPreview = { uid: edit.uid, polygon, delta: [0, 0] };
+  }
   drawEdits();
   try { renderer.domElement.setPointerCapture(event.pointerId); } catch { /* optional */ }
   event.preventDefault();
@@ -1082,17 +1182,32 @@ renderer.domElement.addEventListener('pointermove', event => {
     return;
   }
   drag.moved = true;
-  // Freeze the orthographic pixel scale at pointerdown. Moving the pointer
-  // never depends on a live raycaster/camera or a relayout during Inspector.
+  if (drag.operation === 'insert') {
+    // Alt+Click is an insertion command; moving after the press cancels it.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
+  // Freeze the orthographic pixel scale at pointerdown (B3): layout changes
+  // and delayed render frames must not change the move distance.
   const dx = (event.clientX - drag.x) * drag.metresPerPixelX;
   const dy = (drag.y - event.clientY) * drag.metresPerPixelY;
-  manualDragPreview = {
-    uid: drag.edit.uid, delta: [dx, dy],
-    polygon: drag.edit.polygon.map(p => [
-      Number((Number(p[0]) + dx).toFixed(6)),
-      Number((Number(p[1]) + dy).toFixed(6)),
-    ]),
-  };
+  const polygon = drag.edit.polygon.map(p => [...p]);
+  if (drag.operation === 'vertex') {
+    const [x, y] = polygon[drag.vertexIndex];
+    polygon[drag.vertexIndex] = [
+      Number((Number(x) + dx).toFixed(6)),
+      Number((Number(y) + dy).toFixed(6)),
+    ];
+  } else {
+    polygon.forEach((p, index) => {
+      polygon[index] = [
+        Number((Number(p[0]) + dx).toFixed(6)),
+        Number((Number(p[1]) + dy).toFixed(6)),
+      ];
+    });
+  }
+  manualDragPreview = { uid: drag.edit.uid, delta: [dx, dy], polygon };
   renderer.domElement.classList.add('manual-dragging');
   drawEdits();
   event.preventDefault();
@@ -1108,16 +1223,22 @@ renderer.domElement.addEventListener('pointerup', event => {
   if (renderer.domElement.hasPointerCapture?.(drag.pointerId)) {
     try { renderer.domElement.releasePointerCapture(drag.pointerId); } catch { /* ignored */ }
   }
-  planControls.enabled = planActive && planTool === 'select';
+  planControls.enabled = planActive && ['select', 'vertex'].includes(planTool);
   renderer.domElement.classList.remove('manual-dragging');
-  // Commit selection/Inspector after the pointer gesture has completed.
+  // Commit selection/Inspector only after the pointer gesture completed.
   markManualSelection(drag.edit);
-  if (moved && preview
-      && Math.hypot(...(preview.delta || [0, 0])) >= 0.001
-      && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)) {
+  if (drag.operation === 'vertex' || drag.operation === 'insert')
+    vertexEditFeedback(drag.edit, drag.operation);
+  const commit = preview
+    && JSON.stringify(preview.polygon) !== JSON.stringify(drag.edit.polygon)
+    && (drag.operation === 'insert'
+      ? !moved
+      : moved && Math.hypot(...(preview.delta || [0, 0])) >= 0.001);
+  if (commit) {
     manualMovePending = true;
     window.dispatchEvent(new CustomEvent('manual-edit-move', {
-      detail: { edit: drag.edit, polygon: preview.polygon },
+      detail: { edit: drag.edit, polygon: preview.polygon,
+        operation: drag.operation },
     }));
   } else {
     manualDragPreview = null;
@@ -1150,7 +1271,7 @@ renderer.domElement.addEventListener('pointerup', event => {
   // Keep the original click fallback if pointerdown was not observed; only
   // suppress actual gestures measured from a known down coordinate.
   if (down && Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) return;
-  if (planActive && planTool !== 'select') {
+  if (planActive && !['select', 'vertex'].includes(planTool)) {
     if (planShape === 'poly') {
       recentPolygonClicks.push({ x: event.clientX, y: event.clientY, time: performance.now() });
       if (recentPolygonClicks.length > 2) recentPolygonClicks.shift();
@@ -1168,13 +1289,13 @@ renderer.domElement.addEventListener('pointerup', event => {
 });
 renderer.domElement.addEventListener('pointercancel', () => { pointerDownAt = null; });
 renderer.domElement.addEventListener('pointermove', event => {
-  if (!planActive || planTool === 'select') return;
+  if (!planActive || ['select', 'vertex'].includes(planTool)) return;
   const { point, kind } = snapPoint(groundPoint(event), event);
   planCursor = point;
   drawDraft(point, kind);
 });
 renderer.domElement.addEventListener('dblclick', event => {
-  if (!planActive || planTool === 'select' || planShape !== 'poly') return;
+  if (!planActive || ['select', 'vertex'].includes(planTool) || planShape !== 'poly') return;
   // A fast run of DIFFERENT clicks on one canvas may still emit dblclick in
   // Chromium. Require the last two pointerup events to occupy the SAME
   // screen position, otherwise this is an ordinary continued polygon.
@@ -1373,7 +1494,9 @@ window.IFCViewer = {
   setPlanTool(tool) {
     cancelManualDrag();
     planTool = tool || 'select';
-    planControls.mouseButtons.LEFT = planTool === 'select'
+    selectedVertexIndex = null;
+    renderer.domElement.classList.toggle('plan-vertex-tool', planTool === 'vertex');
+    planControls.mouseButtons.LEFT = ['select', 'vertex'].includes(planTool)
       ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
     lastPolygonClosure = null;
     recentPolygonClicks = [];
@@ -1381,6 +1504,7 @@ window.IFCViewer = {
     clearGroup(draftGroup);
     snapMarker.visible = false;
     rebuildSnapTargets();
+    drawEdits(); // entering/leaving B4 immediately shows/hides vertex handles
   },
 
   setPlanShape(shape) {
@@ -1434,11 +1558,41 @@ window.IFCViewer = {
     manualEdits = Array.isArray(edits) ? edits : [];
     if (manualDrag && !manualEdits.some(e => e.uid === manualDrag.edit.uid
       && e.revision === manualDrag.edit.revision)) cancelManualDrag();
-    if (selectedManualUid && !manualEdits.some(e => e.uid === selectedManualUid)) {
-      selectedManualUid = null;
+    const selected = manualEdits.find(e => e.uid === selectedManualUid);
+    if (!selected || (selected.shape_type || 'polygon') !== 'polygon') {
+      selectedVertexIndex = null;
+      if (!selected) selectedManualUid = null;
+    } else if (selectedVertexIndex != null && selectedVertexIndex >= selected.polygon.length) {
+      selectedVertexIndex = null;
     }
     drawEdits();
     rebuildSnapTargets();
+  },
+
+  vertexEditingState() {
+    const edit = manualEdits.find(e => e.uid === selectedManualUid) || null;
+    return {
+      tool: planTool, uid: selectedManualUid,
+      shapeType: edit?.shape_type || null,
+      selectedVertexIndex, vertexCount: edit?.polygon?.length || 0,
+      pending: !!manualDrag || manualMovePending,
+    };
+  },
+
+  removeSelectedVertex() {
+    const edit = editableVertexPolygon();
+    if (!edit) return { ok: false, reason: 'เลือก Manual Polygon ก่อน · Rectangle เปลี่ยนเป็น Polygon ได้ใน B5' };
+    if (manualMovePending || manualDrag) return { ok: false, reason: 'รอการบันทึกหรือยกเลิกการลากก่อน' };
+    if (selectedVertexIndex == null) return { ok: false, reason: 'คลิกจุดยอดที่ต้องการลบก่อน' };
+    if (edit.polygon.length <= 3) return { ok: false, reason: 'Polygon ต้องเหลืออย่างน้อย 3 จุด' };
+    const polygon = edit.polygon.map(p => [...p]);
+    polygon.splice(selectedVertexIndex, 1);
+    selectedVertexIndex = Math.min(selectedVertexIndex, polygon.length - 1);
+    manualMovePending = true;
+    window.dispatchEvent(new CustomEvent('manual-edit-move', {
+      detail: { edit, polygon, operation: 'remove-vertex' },
+    }));
+    return { ok: true };
   },
 
   planHasActiveDrag() {
