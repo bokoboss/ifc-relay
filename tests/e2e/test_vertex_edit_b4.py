@@ -124,7 +124,7 @@ def test_b4_delete_vertex_keeps_min_three_and_is_reversible(page, server, tmp_pa
     assert page.errors == []
 
 
-def test_b4_rectangle_cannot_be_mutated_or_converted_implicitly(page, server, tmp_path):
+def test_b4_rectangle_is_not_converted_implicitly_by_selection(page, server, tmp_path):
     _ready(page, tmp_path)
     if page.locator('#autoPrepareBtn[aria-pressed="true"]').count():
         page.click('#autoPrepareBtn')
@@ -132,12 +132,9 @@ def test_b4_rectangle_cannot_be_mutated_or_converted_implicitly(page, server, tm
     page.click('.plan-tool[data-tool="vertex"]')
     p = _plan_point(page, 5, 4)
     page.mouse.click(p["x"], p["y"])
-    page.wait_for_function("() => document.getElementById('planHint').textContent.includes('B5')")
-    v = _plan_point(page, 4, 3)
-    page.mouse.move(v["x"], v["y"])
-    page.mouse.down()
-    page.mouse.move(v["x"] - 25, v["y"] - 20, steps=5)
-    page.mouse.up()
+    page.wait_for_function("() => document.getElementById('planHint').textContent.includes('Rectangle')")
+    # B5 adds explicit corner-resize handles, but selecting the interior or
+    # pressing Delete without a selected polygon vertex does not convert it.
     page.keyboard.press("Delete")
     current = _edits(page, server)[0]
     assert current["revision"] == 1
