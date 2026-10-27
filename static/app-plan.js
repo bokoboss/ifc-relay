@@ -43,7 +43,7 @@ document.getElementById('planLevelSelect').addEventListener('change', event => {
 
 const PLAN_HINTS = {
   select: 'เลือก: คลิกวัตถุเพื่อดูรายละเอียด · ลากพื้นที่ว่างเพื่อเลื่อนแปลน',
-  vertex: 'แก้จุดยอด Manual Polygon',
+  vertex: 'แก้จุด/ปรับ Rectangle ของ Manual Edit',
   measure: 'คลิกจุดเริ่มต้น แล้วคลิกจุดปลายเพื่อวัดระยะ',
   walkable: 'พื้นที่เดิน', obstacle: 'สิ่งกีดขวาง',
   passage: 'ช่องเปิดในผนัง', exit: 'ทางออก/จุดเริ่มเดิน',
@@ -53,10 +53,10 @@ let planDraftVertices = 0;
 let vertexHint = '';
 
 function vertexHelp(edit, index = null) {
-  if (!edit) return 'คลิก Manual Polygon เพื่อเลือก · ลากพื้นที่ว่างเพื่อเลื่อนแปลน';
-  if ((edit.shape_type || 'polygon') !== 'polygon')
-    return 'Rectangle ยังแก้มุมไม่ได้ · การแปลงชนิดรูปทรงอยู่ใน B5';
+  if (!edit) return 'คลิก Manual Edit เพื่อเลือก · ลากพื้นที่ว่างเพื่อเลื่อนแปลน';
   const selected = index == null ? 'คลิกจุดสีน้ำเงินเพื่อเลือก/ลาก' : `จุดที่ ${index + 1} เลือกอยู่`;
+  if ((edit.shape_type || 'polygon') === 'rectangle')
+    return `${selected}เพื่อปรับขนาด Rectangle โดยยึดมุมตรงข้าม · หากต้องการเพิ่มมุม ให้แปลงเป็น Polygon ในรายการแก้ไข`;
   return `${selected} · Alt+คลิกบนขอบเพื่อเพิ่มจุด · Delete/Backspace ลบจุด (เหลืออย่างน้อย 3)`;
 }
 
@@ -316,18 +316,25 @@ const asShape = edit => ({
 // Public internal helper for future B3/B4/B5 plan manipulation: one PATCH per
 // committed geometry operation, exactly one undo transaction on real changes.
 // Does NOT modify IFC / generated geometry and does not select/pick objects.
-async function updateEditGeometry(edit, polygon, { shapeType = null, record = true } = {}) {
+async function updateEditGeometry(edit, polygon, {
+  shapeType = null, restoreRectangle = false, record = true,
+} = {}) {
   if (!edit?.uid) throw new Error('รายการนี้ไม่มี UID · โหลดข้อมูลล่าสุดก่อนแก้ไข');
-  if (shapeType != null && shapeType !== (edit.shape_type || 'polygon')) {
-    // The B1 API has only one-way rectangle -> polygon conversion.
-    // Exposing it in B2 history would make Undo require an unsupported reverse
-    // PATCH (or a non-atomic DELETE+POST). B5 will own reversible conversion.
-    throw new Error('การเปลี่ยนชนิด Rectangle/Polygon พร้อม Undo ต้องใช้ขั้นตอน B5');
+  const previousType = edit.shape_type || 'polygon';
+  if (shapeType != null) {
+    const forward = previousType === 'rectangle' && shapeType === 'polygon';
+    const reverse = previousType === 'polygon' && shapeType === 'rectangle' && restoreRectangle;
+    if (!forward && !reverse)
+      throw new Error('เปลี่ยนชนิดรูปทรงได้เฉพาะการแปลง Rectangle → Polygon หรือ Undo กลับเป็น Rectangle');
+  } else if (restoreRectangle) {
+    throw new Error('การคืน Rectangle ต้องระบุ shapeType');
   }
   const body = {
     expected_uid: edit.uid,
     expected_revision: edit.revision ?? 1,
     polygon,
+    ...(shapeType != null ? { shape_type: shapeType } : {}),
+    ...(restoreRectangle ? { restore_rectangle: true } : {}),
   };
   const result = await api(`/api/edits/${encodeURIComponent(edit.id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -355,7 +362,8 @@ async function updateEditGeometry(edit, polygon, { shapeType = null, record = tr
 // each successful release produces one optimistic PATCH and one B2 history step.
 window.addEventListener('manual-edit-move', async event => {
   const { edit, polygon, operation = 'translate' } = event.detail || {};
-  const action = operation === 'translate' ? 'ย้ายรูปทรง' : 'แก้จุดยอด';
+  const action = operation === 'translate' ? 'ย้ายรูปทรง'
+    : operation === 'resize-rectangle' ? 'ปรับขนาด Rectangle' : 'แก้จุดยอด';
   if (!edit?.uid || !Array.isArray(polygon) || editTransactionBusy) {
     viewer()?.completeManualMove();
     return;
@@ -407,7 +415,10 @@ async function undoEdit() {
       editHistory.redo.push({ type: 'delete', edit: again });
     } else if (step.type === 'update') {
       const again = await updateEditGeometry(step.edit, step.before.polygon, {
-        shapeType: step.before.shape_type, record: false,
+        shapeType: step.before.shape_type !== (step.edit.shape_type || 'polygon')
+          ? step.before.shape_type : null,
+        restoreRectangle: step.before.shape_type === 'rectangle'
+          && step.after.shape_type === 'polygon', record: false,
       });
       editHistory.redo.push({ ...step, edit: again });
     } else {
@@ -438,7 +449,9 @@ async function redoEdit() {
       editHistory.undo.push({ type: 'delete', edit: step.edit });
     } else if (step.type === 'update') {
       const again = await updateEditGeometry(step.edit, step.after.polygon, {
-        shapeType: step.after.shape_type, record: false,
+        shapeType: step.after.shape_type !== (step.edit.shape_type || 'polygon')
+          ? step.after.shape_type : null,
+        record: false,
       });
       editHistory.undo.push({ ...step, edit: again });
     } else {
@@ -654,6 +667,75 @@ function renderEdits(edits) {
       }
     });
     row.appendChild(del);
+    if ((edit.shape_type || 'polygon') === 'rectangle') {
+      row.classList.add('has-convert');
+      // B5 conversion is a deliberate two-click action, not a side-effect of
+      // selecting or resizing a rectangle. No IFC data or UID is recreated.
+      const convert = document.createElement('button');
+      convert.type = 'button';
+      convert.className = 'edit-convert-btn';
+      convert.textContent = 'แปลง Polygon';
+      convert.title = 'แปลง Rectangle เป็น Polygon เพื่อแก้มุมอิสระ · Undo คืน Rectangle ได้';
+      row.insertBefore(convert, del);
+      convert.addEventListener('click', () => {
+        if (editTransactionBusy || row.querySelector('.edit-convert-confirm')) return;
+        const actions = document.createElement('span');
+        actions.className = 'edit-convert-confirm';
+        actions.textContent = 'ยืนยันแปลง?';
+        const yes = document.createElement('button');
+        yes.type = 'button';
+        yes.className = 'edit-confirm-convert';
+        yes.textContent = 'ยืนยัน';
+        const no = document.createElement('button');
+        no.type = 'button';
+        no.className = 'edit-cancel-convert';
+        no.textContent = 'ยกเลิก';
+        actions.append(yes, no);
+        row.insertBefore(actions, del);
+        convert.disabled = true;
+        no.addEventListener('click', () => {
+          actions.remove();
+          convert.disabled = false;
+        });
+        yes.addEventListener('click', async () => {
+          if (editTransactionBusy) return;
+          const live = lastEdits.find(e => e.uid === edit.uid);
+          if (!live || live.id !== edit.id || live.revision !== edit.revision
+              || (live.shape_type || 'polygon') !== 'rectangle') {
+            actions.remove();
+            convert.disabled = false;
+            setMessage('แปลงรูปทรงไม่ได้: ข้อมูลเปลี่ยนไปแล้ว · โหลดรายการล่าสุด');
+            return;
+          }
+          editTransactionBusy = true;
+          yes.disabled = true;
+          no.disabled = true;
+          try {
+            const result = await updateEditGeometry(edit, edit.polygon, { shapeType: 'polygon' });
+            selectedManualEditUid = result.uid;
+            viewer()?.selectManualEdit(result.uid);
+            setMessage(`แปลง ${result.id} เป็น Polygon แล้ว · Undo คืนเป็น Rectangle ได้ · ต้องเตรียมโมเดลคนเดินอีกครั้ง`);
+            if (planTool === 'vertex') {
+              vertexHint = vertexHelp(result);
+              refreshPlanHint();
+            }
+          } catch (error) {
+            setMessage(editFailureMessage(error, 'แปลงรูปทรง'));
+            if ([404, 409].includes(Number(error?.status))) {
+              editHistory.undo = [];
+              editHistory.redo = [];
+              updateUndoButtons();
+              await refreshEdits();
+            }
+            actions.remove();
+            convert.disabled = false;
+          } finally {
+            editTransactionBusy = false;
+            updateUndoButtons();
+          }
+        });
+      });
+    }
     if (review.detail && review.state !== 'applied') {
       const why = document.createElement('div');
       why.className = 'edit-review-detail';
