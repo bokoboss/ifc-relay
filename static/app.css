@@ -699,3 +699,9 @@ button[aria-busy="true"]::after {
   cursor: grabbing !important;
   touch-action: none;
 }
+
+
+/* B4 — The explicit vertex tool never turns source IFC into editable geometry. */
+#viewerCanvasHost canvas.plan-vertex-tool { cursor: crosshair; }
+#viewerCanvasHost canvas.plan-vertex-tool.manual-dragging { cursor: grabbing !important; }
+.plan-tool[data-tool="vertex"].active { background:var(--primary-deep); }
