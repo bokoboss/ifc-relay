@@ -27,7 +27,7 @@ from connectivity_service import _footprint
 # the obstacle is treated as standing where that level has no floor.
 NO_FLOOR_SHARE = 0.9
 
-POLICY_VERSION = "2026-10-22.1"
+POLICY_VERSION = "2026-10-28.1"
 
 def fingerprint(item_id: str, identities: list[str]) -> str:
     payload = json.dumps([POLICY_VERSION, item_id, sorted(identities)], ensure_ascii=False)
@@ -58,13 +58,29 @@ def _zone_id(z: dict[str, Any]) -> str:
     return f"L{z.get('level_key')}@{float(c[0]):.1f},{float(c[1]):.1f}~{round(float(z.get('area_m2', 0)) * 2) / 2}"
 
 
-def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> list[dict[str, Any]]:
+def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None,
+               stair_overview: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     info = semantic.get("ifc_semantic", {})
     warnings = info.get("warnings", [])
     con = info.get("connectivity")
     vcs = semantic.get("vertical_connections", [])
     vc_by_key = {int(v["key"]): v for v in vcs if "key" in v}
     items: list[dict[str, Any]] = []
+
+    pending = [str(u["global_id"]) for u in (stair_overview or {}).get("units", [])
+               if u.get("state") == "review" and u.get("global_id")]
+    if pending:
+        items.append(_item("stair_review_pending", "check", pending, "บันได/ทางลาดที่ยังรอตรวจสอบ",
+                           "นับเป็นชุด (Units) ไม่ซ้ำ flight ลูก · ยังไม่ได้ตัดสินใจนำเข้าหรือไม่ใช้ · "
+                           "ตรวจรายการบันได/ทางลาด แล้วเตรียมโมเดลใหม่ · การสร้างไฟล์ไม่ใช่การรับรองทางวิศวกรรม"))
+    area_levels = {a.get("level_key") for a in semantic.get("areas", []) if a.get("polygon")}
+    active_levels = {str(lv["key"]) for lv in semantic.get("levels", [])
+                     if not lv.get("generated") and lv.get("key") in area_levels}
+    if len(active_levels) > 1 and not vcs:
+        items.append(_item("missing_vertical_connection", "check", [f"L{k}" for k in active_levels],
+                           "หลายชั้นแต่ไม่มีบันได/ทางลาดในโมเดลคนเดิน",
+                           "มีพื้นที่เดินมากกว่า 1 ชั้น แต่ยังไม่มี Vertical Connection ที่แปลงสำเร็จ · "
+                           "ตรวจการคัดเลือกและการแปลงบันได/ทางลาด หรือเพิ่มทางเชื่อมใน Viswalk"))
 
     if validation is None:          # the build validates again right before Vissim runs
         issues: list[dict[str, Any]] = []
@@ -212,8 +228,9 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None) -> l
     return items
 
 
-def evaluate_gate(semantic: dict[str, Any], validation: dict[str, Any] | None) -> dict[str, Any]:
-    items = gate_items(semantic, validation)
+def evaluate_gate(semantic: dict[str, Any], validation: dict[str, Any] | None,
+                  stair_overview: dict[str, Any] | None = None) -> dict[str, Any]:
+    items = gate_items(semantic, validation, stair_overview)
     blocked = [i["id"] for i in items if i["policy"] == "block"]
     to_check = [i["id"] for i in items if i["policy"] == "check"]
     return {

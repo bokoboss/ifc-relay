@@ -39,7 +39,7 @@ def test_non_straight_footprint_needs_review():
 
 # --- bulk include through the API -------------------------------------------
 
-def _model(tmp_path) -> tuple[Path, dict[str, str]]:
+def _model(tmp_path, *, with_ramp=False) -> tuple[Path, dict[str, str]]:
     b = Building([0.0, H])
     b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 0.0, b.storeys[0])
     b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], H, b.storeys[1])
@@ -48,8 +48,16 @@ def _model(tmp_path) -> tuple[Path, dict[str, str]]:
     f2 = b.flight(6.0, 2.0, 2.4, 3.6, H / 2, H, parent=u)
     b.slab([(6, 1), (7.5, 1), (7.5, 3.6), (6, 3.6)], H / 2, None, predefined="LANDING", parent=u)
     loose = b.flight(12.0, 18.0, 5.0, 6.2, 0.0, H, storey=b.storeys[0])
+    ids = {"parent": u.GlobalId, "f1": f1.GlobalId, "f2": f2.GlobalId, "loose": loose.GlobalId}
+    if with_ramp:
+        ramp = b._run("root.create_entity", ifc_class="IfcRamp", name="Review ramp")
+        b._run("spatial.assign_container", relating_structure=b.storeys[0], products=[ramp])
+        b.mesh_element("IfcRampFlight",
+                       [(12, 7, 0), (18, 7, 0), (18, 7, H), (12, 8.2, 0), (18, 8.2, 0), (18, 8.2, H)],
+                       [(0, 1, 2), (3, 5, 4), (0, 3, 4, 1), (1, 4, 5, 2), (0, 2, 5, 3)], parent=ramp)
+        ids["ramp"] = ramp.GlobalId
     path = b.write(tmp_path / "stairs.ifc")
-    return path, {"parent": u.GlobalId, "f1": f1.GlobalId, "f2": f2.GlobalId, "loose": loose.GlobalId}
+    return path, ids
 
 
 @pytest.fixture()
@@ -69,7 +77,13 @@ def client(tmp_path, monkeypatch):
 
 def _open(client, path):
     with open(path, "rb") as fh:
-        assert client.post("/api/import", files={"file": (path.name, fh)}).status_code == 200
+        response = client.post("/api/import", files={"file": (path.name, fh)}, data={"carry_selection": "false"})
+        assert response.status_code == 200, response.text
+    pending = response.json()
+    if pending["status"] == "pending":
+        confirmed = client.post("/api/import/confirm", json={"pending_token": pending["pending_token"],
+                                "expected_sha256": pending["sha256"], "carry_manual_edits": False})
+        assert confirmed.status_code == 200, confirmed.text
     assert client.post("/api/analyze").status_code == 200
     assert client.post("/api/ifc/geometry", json={"mode": "simulation_relevant", "storey_ids": []}).status_code == 200
 
@@ -115,6 +129,89 @@ def test_bulk_auto_returns_stairs_to_review(client, tmp_path):
     res = client.post("/api/stairs/bulk", json={"status": "auto"}).json()
     assert res["selection"]["overrides"] == {}
     assert res["overview"]["counts"]["review"] == 2
+
+
+def _prepare_gate(client):
+    response = client.post("/api/ifc/semantic")
+    assert response.status_code == 200, response.text
+    gate = client.get("/api/gate")
+    assert gate.status_code == 200, gate.text
+    return response.json()["model"], gate.json()
+
+
+def test_c4_three_review_units_then_partial_include_then_all_decided(client, tmp_path):
+    path, ids = _model(tmp_path, with_ramp=True)
+    _open(client, path)
+    overview = client.get("/api/stairs").json()
+    assert overview["counts"] == {"units": 3, "flights": 4, "include": 0, "review": 3, "exclude": 0}
+    _, gate = _prepare_gate(client)
+    items = {i["id"]: i for i in gate["items"]}
+    pending = items["stair_review_pending"]
+    assert pending["count"] == 3
+    assert set(pending["identities"]) == {ids["parent"], ids["loose"], ids["ramp"]}
+    assert "missing_vertical_connection" in gate["to_check"] and gate["passed"]
+
+    assert client.post("/api/selection", json={"global_id": ids["loose"], "status": "include"}).status_code == 200
+    assert client.get("/api/gate").status_code == 400  # old generation is never presented as current
+    sem, partial = _prepare_gate(client)
+    assert [v["ifc_global_id"] for v in sem["vertical_connections"]] == [ids["loose"]]
+    item = next(i for i in partial["items"] if i["id"] == "stair_review_pending")
+    assert item["count"] == 2 and set(item["identities"]) == {ids["parent"], ids["ramp"]}
+    assert item["fingerprint"] != pending["fingerprint"]
+    assert "missing_vertical_connection" not in partial["to_check"] and partial["passed"]
+
+    for guid in (ids["parent"], ids["ramp"]):
+        assert client.post("/api/selection", json={"global_id": guid, "status": "exclude"}).status_code == 200
+    _, decided = _prepare_gate(client)
+    assert "stair_review_pending" not in decided["to_check"]
+    assert "missing_vertical_connection" not in decided["to_check"] and decided["passed"]
+
+
+def test_c4_overview_cache_follows_selection_and_ifc_revision(client, tmp_path, monkeypatch):
+    import app as module
+
+    calls = []
+    run = module.model_jobs.run
+
+    def tracked(label, *args, **kwargs):
+        if label == "stairs":
+            calls.append(label)
+        return run(label, *args, **kwargs)
+
+    monkeypatch.setattr(module.model_jobs, "run", tracked)
+    path, ids = _model(tmp_path, with_ramp=True)
+    _open(client, path)
+    overview = client.get("/api/stairs").json()
+    _, gate = _prepare_gate(client)
+    for _ in range(3):
+        assert client.get("/api/gate").json() == gate
+        assert client.get("/api/stairs").json() == overview
+    assert len(calls) == 1  # Gate and Overview share the same parsed summary
+
+    client.post("/api/selection", json={"global_id": ids["parent"], "status": "exclude"})
+    _, updated = _prepare_gate(client)
+    assert next(i for i in updated["items"] if i["id"] == "stair_review_pending")["count"] == 2
+    assert len(calls) == 2
+
+    revised_path, new_ids = _model(tmp_path, with_ramp=True)
+    _open(client, revised_path)
+    assert client.get("/api/gate").status_code == 404  # confirmed import clears the old semantic model
+    _, revised = _prepare_gate(client)
+    new_item = next(i for i in revised["items"] if i["id"] == "stair_review_pending")
+    assert new_item["count"] == 3
+    assert set(new_item["identities"]) == {new_ids["parent"], new_ids["loose"], new_ids["ramp"]}
+    assert set(new_item["identities"]).isdisjoint(ids.values())
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("elevations", [[0.0], [0.0, H]])
+def test_c4_single_used_storey_does_not_warn_about_missing_connection(client, tmp_path, elevations):
+    b = Building(elevations)  # an unused storey record is not an active floor
+    b.slab([(0, 0), (20, 0), (20, 10), (0, 10)], 0.0, b.storeys[0])
+    _open(client, b.write(tmp_path / "one_floor.ifc"))
+    _, gate = _prepare_gate(client)
+    assert "missing_vertical_connection" not in gate["to_check"]
+    assert "stair_review_pending" not in gate["to_check"] and gate["passed"]
 
 
 # --- UI contract ----------------------------------------------------------------

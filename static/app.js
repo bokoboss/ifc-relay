@@ -596,6 +596,9 @@ async function openSelectedFile() {
     currentAudit = null;
     currentGeometry = null;
     currentSemantic = null;
+    currentValidation = null;
+    currentBuild = null;
+    setExportReady(false);
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
     setMessage('ยืนยันการนำเข้าแล้ว · กำลังตรวจ IFC...');

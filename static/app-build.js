@@ -63,7 +63,15 @@ const jobPanel = (() => {
 })();
 
 buildViswalkBtn.addEventListener('click', async () => {
-  const checks = (currentGate?.items || []).filter(i => i.policy === 'check');
+  if (buildBusy || document.getElementById('buildConfirm').open) return;
+  buildViswalkBtn.disabled = true;
+  const gate = await refreshGate();
+  if (!gate?.passed) {
+    dock.select('checks');
+    setMessage('ยังสร้างไฟล์ไม่ได้ · เตรียมโมเดลคนเดินและตรวจ Geometry ให้ตรงกับการเลือกล่าสุด');
+    return;
+  }
+  const checks = gate.items.filter(i => i.policy === 'check');
   if (checks.length && !(await confirmBuild(checks))) {
     dock.select('checks');
     return;
