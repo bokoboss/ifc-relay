@@ -9,6 +9,7 @@ import sys
 import time
 import threading
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -830,10 +831,18 @@ class StairBulkUpdate(BaseModel):
 
 def _stair_overview_for(path: Path, overrides: dict[str, str]) -> dict[str, Any]:
     try:
-        return model_jobs.run("stairs", "ifc_vertical_service:stair_overview_for_file", path, overrides,
-                              files=[path], kind="open")
+        return _cached_stair_overview(str(path), upload_sha256(path), tuple(sorted(overrides.items())))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=job_error_detail(exc, "Stair overview failed"))
+
+
+@lru_cache(maxsize=8)
+def _cached_stair_overview(path: str, source_sha256: str,
+                           overrides: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    # Keep only small summaries; a changed IFC or selection cannot reuse an old decision.
+    source = Path(path)
+    return model_jobs.run("stairs", "ifc_vertical_service:stair_overview_for_file", source, dict(overrides),
+                          files=[source], kind="open")
 
 
 @app.get("/api/stairs")
@@ -1345,7 +1354,12 @@ def _current_gate(state: dict[str, Any], validation: dict[str, Any] | None = Non
     if validation is None:
         build = state.get("build") or {}
         validation = build.get("validation") if build.get("status") in ("validated", "success") else None
-    return evaluate_gate(semantic_model, validation)
+    upload = state.get("upload") or {}
+    overrides = (semantic_model.get("ifc_semantic") or {}).get("selection_overrides")
+    if overrides is None:
+        overrides = (state.get("selection") or {}).get("overrides", {})
+    overview = _stair_overview_for(Path(upload["path"]), overrides) if upload.get("path") else None
+    return evaluate_gate(semantic_model, validation, overview)
 
 
 @app.get("/api/gate")

@@ -75,6 +75,15 @@ function focusIdentity(target) {
   }
 }
 
+function showStairReview() {
+  dock.select('checks');
+  const row = document.querySelector('#gateList [data-item="stair_review_pending"]');
+  if (!row) return;
+  row.open = true;
+  row.scrollIntoView({ block: 'nearest' });
+  row.querySelector('summary').focus();
+}
+
 function renderGate(gate) {
   const section = document.getElementById('gateSection');
   const root = document.getElementById('gateList');
@@ -98,12 +107,20 @@ function renderGate(gate) {
     title.textContent = item.title;
     const count = document.createElement('span');
     count.className = 'gate-count';
-    count.textContent = item.count;
+    count.textContent = item.id === 'stair_review_pending' ? `${item.count} ชุด` : item.count;
     head.append(chip, title, count);
     const detail = document.createElement('small');
     detail.className = 'gate-detail';
     detail.textContent = item.detail;
     row.append(head, detail);
+    if (item.id === 'stair_review_pending') {
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'gate-locate';
+      go.textContent = 'ดูรายการบันได/ทางลาดที่รอตรวจ';
+      go.addEventListener('click', showStairReview);
+      row.appendChild(go);
+    }
     // The object list is built on first open: big models have thousands.
     row.addEventListener('toggle', () => {
       if (!row.open || row.querySelector('.gate-items')) return;
@@ -288,13 +305,23 @@ function confirmBuild(checks) {
     `Geometry Engine สร้างไฟล์ได้ · มี ${checks.length} เรื่องที่ต้องตรวจหรือแก้ใน Viswalk หลังสร้างไฟล์`;
   const list = document.getElementById('buildConfirmList');
   list.innerHTML = '';
-  const shown = checks.slice(0, 6);
+  // Keep unresolved unit decisions visible even when other checks fill the dialog.
+  const stairChecks = new Set(['stair_review_pending', 'missing_vertical_connection']);
+  const shown = [...checks.filter(i => stairChecks.has(i.id)),
+    ...checks.filter(i => !stairChecks.has(i.id))].slice(0, 6);
   for (const item of shown) {
     const li = document.createElement('li');
-    const title = document.createElement('span');
+    const pending = item.id === 'stair_review_pending';
+    const title = document.createElement(pending ? 'button' : 'span');
     title.textContent = item.title;
+    if (pending) {
+      title.type = 'button';
+      title.className = 'gate-locate';
+      title.textContent += ' · ดูรายการ';
+      title.addEventListener('click', () => dialog.close('stairs'));
+    }
     const count = document.createElement('strong');
-    count.textContent = item.count;
+    count.textContent = pending ? `${item.count} ชุด` : item.count;
     li.append(title, count);
     list.appendChild(li);
   }
@@ -304,7 +331,10 @@ function confirmBuild(checks) {
     list.appendChild(li);
   }
   return new Promise(resolve => {
-    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'build'), { once: true });
+    dialog.addEventListener('close', () => {
+      resolve(dialog.returnValue === 'build');
+      if (dialog.returnValue === 'stairs') requestAnimationFrame(showStairReview);
+    }, { once: true });
     dialog.returnValue = '';
     dialog.showModal();
     document.getElementById('buildConfirmGo').focus();
