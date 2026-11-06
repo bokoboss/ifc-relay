@@ -9,6 +9,7 @@ function planLevels() {
 }
 
 document.getElementById('planModeBtn').addEventListener('click', () => {
+  restoreSemanticPreview();
   const v = viewer();
   const levels = planLevels();
   if (!currentSemantic || !levels.length || !v) {
@@ -776,6 +777,7 @@ document.getElementById('sourceModeBtn').addEventListener('click', () => {
 });
 
 document.getElementById('simulationModeBtn').addEventListener('click', () => {
+  restoreSemanticPreview();
   leavePlanIfActive();
   viewer()?.setMode('simulation');
   setViewerBadge('simulation');

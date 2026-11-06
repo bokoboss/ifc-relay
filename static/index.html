@@ -54,6 +54,9 @@
               <input id="fileInput" type="file" accept=".ifc" aria-label="เลือกไฟล์ BIM สำหรับเปิดโมเดล" />
               <span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>เลือกไฟล์ BIM</span>
             </label>
+            <button id="desktopFilePicker" type="button" class="file-picker hidden" disabled>
+              <span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>เลือกไฟล์ BIM</span>
+            </button>
             <button id="uploadBtn" class="primary-btn hidden" disabled title="เปิดไฟล์ที่เลือกอีกครั้ง">เปิดโมเดล</button>
             <span class="toolbar-separator" aria-hidden="true"></span>
             <button id="generateSemanticBtn" class="secondary-btn prepare-btn" disabled
@@ -384,6 +387,8 @@
                 <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
                 <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
                 <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
+                <button id="downloadChecklistBtn" class="secondary-btn hidden" disabled>บันทึก Checklist</button>
+                <button id="downloadManifestBtn" class="secondary-btn hidden" disabled>บันทึก Manifest</button>
                 <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
               </div>
             </div>
@@ -584,11 +589,11 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=057" defer></script>
-  <script src="/static/app-plan.js?v=055" defer></script>
+  <script src="/static/app.js?v=060" defer></script>
+  <script src="/static/app-plan.js?v=056" defer></script>
   <script src="/static/app-model.js?v=054" defer></script>
   <script src="/static/app-review.js?v=054" defer></script>
   <script src="/static/app-tree.js?v=054" defer></script>
-  <script src="/static/app-build.js?v=054" defer></script>
+  <script src="/static/app-build.js?v=057" defer></script>
 </body>
 </html>

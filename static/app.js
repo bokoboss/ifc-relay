@@ -1,4 +1,5 @@
 const fileInput = document.getElementById('fileInput');
+const desktopFilePicker = document.getElementById('desktopFilePicker');
 const uploadBtn = document.getElementById('uploadBtn');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const load3dBtn = document.getElementById('load3dBtn');
@@ -214,12 +215,48 @@ function formatBytes(bytes) {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
+const desktopMode = location.origin === 'https://ifc-relay.invalid';
+const desktopReady = desktopMode && new Promise(resolve => {
+  if (window.pywebview?.api?.request) resolve(window.pywebview.api);
+  else window.addEventListener('pywebviewready', () => resolve(window.pywebview.api), { once: true });
+});
+
 async function api(url, options = {}) {
-  const response = await fetch(url, options);
-  const payload = await response.json().catch(() => ({}));
+  let response;
+  if (desktopMode) {
+    const bridge = await desktopReady;
+    const result = url === '/api/import'
+      ? await bridge.import_ifc(options.carrySelection)
+      : await bridge.request(options.method || 'GET', url, options.body ?? null);
+    if (result === null) return null;  // Native file dialog cancelled.
+    if (result.fileUrl) {
+      try {
+        response = await fetch(result.fileUrl, { cache: 'no-store', credentials: 'omit' });
+        if (response.ok) {
+          const geometry = await response.json();
+          scheduleWorkflowRefresh();
+          return geometry;
+        }
+      } finally {
+        await bridge.release_geometry(result.fileUrl);
+      }
+    } else {
+      response = new Response(result.body, {
+        status: result.status,
+        headers: { 'Content-Type': result.contentType },
+      });
+    }
+  } else {
+    response = await fetch(url, options);
+  }
   // Any change on the server can make the pedestrian model stale or move the
   // workflow on: re-read the project state once things settle.
   if ((options.method || 'GET') !== 'GET' && !url.startsWith('/api/project')) scheduleWorkflowRefresh();
+  return readApiResponse(response);
+}
+
+async function readApiResponse(response) {
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = payload.detail;
     const message = typeof detail === 'string' ? detail
@@ -246,7 +283,13 @@ function scheduleWorkflowRefresh() {
 
 async function refreshWorkflowState() {
   let state;
-  try { state = await (await fetch('/api/project')).json(); } catch { return; }
+  try {
+    state = desktopMode ? await api('/api/project') : await (await fetch('/api/project')).json();
+  } catch { return; }
+  renderWorkflowState(state);
+}
+
+function renderWorkflowState(state) {
   const semantic = state.semantic || {};
   const build = state.build || {};
   const ready = semantic.status === 'ready';
@@ -268,7 +311,10 @@ async function refreshWorkflowState() {
     validate: !current ? 'idle' : ['validated', 'success'].includes(build.status) ? 'done' : 'next',
     build: !current || !['validated', 'success'].includes(build.status) ? 'idle' : build.status === 'success' ? 'done' : 'next',
   };
-  const targets = { file: document.querySelector('.file-picker'), prepare: generateSemanticBtn, validate: validateBtn, build: buildViswalkBtn };
+  const targets = {
+    file: desktopMode ? desktopFilePicker : fileInput.closest('.file-picker'),
+    prepare: generateSemanticBtn, validate: validateBtn, build: buildViswalkBtn,
+  };
   const words = { done: 'เสร็จแล้ว', stale: 'ต้องทำใหม่', next: 'ขั้นถัดไป', idle: '' };
   for (const [step, el] of Object.entries(targets)) {
     if (!el) continue;
@@ -279,7 +325,7 @@ async function refreshWorkflowState() {
 }
 
 document.getElementById('staleRegenerateBtn').addEventListener('click', () => generateSemanticBtn.click());
-setTimeout(refreshWorkflowState, 0);
+if (!desktopMode) setTimeout(refreshWorkflowState, 0);
 
 // Left-panel search over the loaded IFC objects.
 (() => {
@@ -359,11 +405,32 @@ function setBuildOutputReady(ready) {
   downloadBuildReportBtn.disabled = !ready;
   downloadValidationBtn.disabled = !ready;
   downloadBuildLogBtn.disabled = !ready;
+  document.getElementById('downloadManifestBtn').disabled = !ready;
+  document.getElementById('downloadChecklistBtn').disabled = !ready;
   openBuildFolderBtn.disabled = !ready;
   if (!ready) document.getElementById('stepBuild').classList.remove('done');
 }
 
-function startDownload(url) {
+let savingOutput = false;
+async function startDownload(url) {
+  if (desktopMode) {
+    if (savingOutput) return;
+    savingOutput = true;
+    try {
+      const bridge = await desktopReady;
+      const result = await bridge.save_output(url);
+      const payload = await readApiResponse(new Response(result.body, {
+        status: result.status,
+        headers: { 'Content-Type': result.contentType },
+      }));
+      setMessage(payload.status === 'cancelled' ? 'ยกเลิกการบันทึกไฟล์' : `บันทึกไฟล์แล้ว: ${payload.path}`);
+    } catch (error) {
+      setMessage(`บันทึกไฟล์ไม่สำเร็จ: ${error.message}`);
+    } finally {
+      savingOutput = false;
+    }
+    return;
+  }
   const a = document.createElement('a');
   a.href = url;
   a.style.display = 'none';
@@ -416,9 +483,9 @@ function effectiveStatus(item) {
 }
 
 function updateSelectionSummary() {
-  if (!currentGeometry) return;
+  if (!currentGeometry && !desktopMode) return;
   const counts = { include: 0, review: 0, exclude: 0 };
-  for (const item of currentGeometry.elements || []) {
+  for (const item of currentGeometry?.elements || []) {
     const status = effectiveStatus(item);
     if (status in counts) counts[status] += 1;
   }
@@ -510,6 +577,7 @@ fileInput.addEventListener('change', () => {
 });
 
 uploadBtn.addEventListener('click', () => openSelectedFile());
+desktopFilePicker.addEventListener('click', () => openSelectedFile());
 
 async function decidePendingImport(pending) {
   const dialog = document.getElementById('importConfirm');
@@ -572,14 +640,24 @@ async function decidePendingImport(pending) {
 }
 
 async function openSelectedFile() {
-  if (!selectedFile) return;
+  if (desktopMode ? desktopFilePicker.disabled : !selectedFile) return;
+  if (desktopMode) desktopFilePicker.disabled = true;
   uploadBtn.disabled = true;
-  setMessage('กำลังอัปโหลด IFC เพื่อเตรียมการยืนยัน...');
+  setMessage(desktopMode ? 'เลือกไฟล์ IFC เพื่อเปิดโมเดล...' : 'กำลังอัปโหลด IFC เพื่อเตรียมการยืนยัน...');
   try {
-    const form = new FormData();
-    form.append('file', selectedFile);
-    form.append('carry_selection', document.getElementById('carrySelectionCheck')?.checked ? 'true' : 'false');
-    let result = await api('/api/import', { method: 'POST', body: form });
+    const carrySelection = !!document.getElementById('carrySelectionCheck')?.checked;
+    const options = { method: 'POST', carrySelection };
+    if (!desktopMode) {
+      const form = new FormData();
+      form.append('file', selectedFile);
+      form.append('carry_selection', String(carrySelection));
+      options.body = form;
+    }
+    let result = await api('/api/import', options);
+    if (!result) {
+      setMessage('ยกเลิกการเลือกไฟล์ IFC');
+      return;
+    }
     if (result.status === 'pending') {
       result = await decidePendingImport(result);
       if (!result) {
@@ -601,10 +679,25 @@ async function openSelectedFile() {
     setExportReady(false);
     if (geometryStoreySelect) geometryStoreySelect.innerHTML = '';
     document.getElementById('largeModelSection')?.classList.add('hidden');
+    if (desktopMode) {
+      viewer()?.load({});
+      renderModelTree();
+      render3dFilters({});
+      updateSelectionSummary();
+      selectedElement = null;
+      document.getElementById('inspectorContent').classList.add('hidden');
+      document.getElementById('emptyInspector').classList.remove('hidden');
+      document.getElementById('viewerEmpty').classList.remove('hidden');
+      document.getElementById('viewerStatus').textContent = 'ยังไม่ได้โหลดข้อมูลเรขาคณิต 3D';
+      document.getElementById('loadedSubsetText').textContent = 'ยังไม่ได้โหลดโมเดล 3D';
+      document.getElementById('previewNote').textContent = '';
+      for (const id of ['auditSection', 'categorySection']) document.getElementById(id).classList.add('hidden');
+      for (const id of ['stepAnalyze', 'stepExplore', 'stepSelect']) document.getElementById(id).classList.remove('done');
+    }
     setMessage('ยืนยันการนำเข้าแล้ว · กำลังตรวจ IFC...');
     if (result.upload?.extension === '.ifc') {
       const audit = await runAnalyze();
-      if (audit) {
+      if (audit && !desktopMode) {
         const loaded = await runLoad3d();
         if (loaded) {
           const large = audit.large_model?.recommended_load_mode === 'simulation_storey';
@@ -619,6 +712,7 @@ async function openSelectedFile() {
   } catch (error) {
     setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`);
   } finally {
+    if (desktopMode) desktopFilePicker.disabled = false;
     uploadBtn.disabled = false;
     fileInput.value = '';
   }
@@ -640,7 +734,7 @@ async function runAnalyze() {
     const decisions = result.revision?.decisions;
     setMessage(decisions
       ? `ตรวจ IFC เสร็จแล้ว · ใช้ผลการคัดเลือกเดิม ${decisions.carried} รายการ · ต้องตรวจใหม่ ${decisions.changed} · ตัดออก ${decisions.orphaned}`
-      : 'ตรวจ IFC เสร็จแล้ว');
+      : desktopMode ? 'ตรวจ IFC เสร็จแล้ว · เลือกรูปแบบการโหลด 3D แล้วกดโหลดโมเดล' : 'ตรวจ IFC เสร็จแล้ว');
     return result;
   } catch (error) {
     setMessage(`ตรวจ IFC ไม่สำเร็จ: ${error.message}`);
@@ -759,14 +853,15 @@ async function runLoad3d() {
     setMessage(
       (request.append
         ? 'เพิ่มชั้นในมุมมอง 3D แล้ว · ตรวจการคัดเลือก หรือเพิ่มชั้นถัดไป'
-        : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"') + partial
+        : desktopMode ? 'โหลดโมเดล 3D แล้ว · เลือกวัตถุหรือกรองโมเดลตามชั้นและประเภท'
+          : 'โหลดโมเดล 3D แล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"') + partial
     );
     return true;
   } catch (error) {
-    setMessage(`โหลดโมเดล 3D ไม่สำเร็จ: ${error.message}`);
+    if (!desktopMode || seq === geometryLoadSeq) setMessage(`โหลดโมเดล 3D ไม่สำเร็จ: ${error.message}`);
     return false;
   } finally {
-    load3dBtn.disabled = false;
+    if (!desktopMode || seq === geometryLoadSeq) load3dBtn.disabled = false;
   }
 }
 
@@ -981,6 +1076,13 @@ function leavePlanIfActive() {
   if (v?.isPlan?.()) v.exitPlan();
 }
 
+function restoreSemanticPreview() {
+  const v = viewer();
+  if (desktopMode && currentSemantic && v && !v.diagnostics().semanticMeshCount) {
+    v.loadSemantic(currentSemantic);
+  }
+}
+
 function setViewerBadge(mode) {
   // The legend explains the pedestrian-model colours (not shown over the source IFC).
   document.getElementById('viewerLegend')?.classList.toggle('hidden', !['simulation', 'overlay', 'plan'].includes(mode));
@@ -998,6 +1100,7 @@ document.getElementById('overlayModeBtn').addEventListener('click', () => {
     setMessage('ซ้อนภาพได้หลังกด "เตรียมโมเดลคนเดิน"');
     return;
   }
+  restoreSemanticPreview();
   leavePlanIfActive();
   viewer()?.setMode('overlay');
   setViewerBadge('overlay');
