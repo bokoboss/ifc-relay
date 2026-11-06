@@ -108,6 +108,8 @@ downloadInpxBtn.addEventListener('click', () => startDownload('/api/build/latest
 downloadBuildReportBtn.addEventListener('click', () => startDownload('/api/build/latest/report'));
 downloadValidationBtn.addEventListener('click', () => startDownload('/api/build/latest/validation'));
 downloadBuildLogBtn.addEventListener('click', () => startDownload('/api/build/latest/log'));
+document.getElementById('downloadManifestBtn').addEventListener('click', () => startDownload('manifest'));
+document.getElementById('downloadChecklistBtn').addEventListener('click', () => startDownload('checklist'));
 openBuildFolderBtn.addEventListener('click', async () => {
   openBuildFolderBtn.disabled = true;
   try {
@@ -126,7 +128,10 @@ async function renderVissimChoice() {
   const row = document.getElementById('vissimChoiceRow');
   const select = document.getElementById('vissimChoice');
   let info;
-  try { info = await api('/api/vissim'); } catch { return; }
+  try { info = await api('/api/vissim'); } catch (error) {
+    if (desktopMode) throw error;
+    return;
+  }
   const releases = info.registered || [];
   row.classList.toggle('hidden', !releases.length);
   if (!releases.length) return;
@@ -173,7 +178,8 @@ async function restoreState() {
           : 'ไม่พบ Vissim ในเครื่อง (ยังตรวจและเตรียมโมเดลได้)')
       : '';
     if (health.app_version) document.getElementById('appVersionText').textContent = `v${health.app_version}`;
-    renderVissimChoice();
+    const vissim = renderVissimChoice();
+    if (desktopMode) await vissim;
     if (health.credit) document.getElementById('creditText').textContent = health.credit;
 
     if (!health.three_vendor_ready) {
@@ -195,6 +201,18 @@ async function restoreState() {
       document.getElementById('stepAnalyze').classList.add('done');
     }
 
+    if (desktopMode) {
+      renderWorkflowState(state);
+      if (health.three_vendor_ready) {
+        setMessage(currentAudit
+          ? 'พร้อมโหลดโมเดล 3D · เลือกรูปแบบการโหลดก่อนเปิดโมเดล'
+          : 'พร้อมทำงาน · เลือกไฟล์ BIM เพื่อเริ่มต้น');
+        await waitForViewer();
+        document.getElementById('viewerStatus').textContent = 'WebGL พร้อม · ยังไม่ได้โหลดข้อมูลเรขาคณิต 3D';
+      }
+    }
+    if (desktopMode && currentAudit) refreshStairOverview();
+
     if (state.geometry?.status === 'loaded') {
       generateSemanticBtn.disabled = false;
     }
@@ -213,7 +231,7 @@ async function restoreState() {
 
     // Reopen the 3D workspace the way it was left: source model, then the
     // pedestrian-model preview if a current (non-stale) one exists.
-    if (currentAudit && health.three_vendor_ready && state.geometry?.status === 'loaded') {
+    if (!desktopMode && currentAudit && health.three_vendor_ready && state.geometry?.status === 'loaded') {
       const loaded = await runLoad3d();
       if (loaded && currentSemantic && state.semantic?.status === 'ready' && !state.semantic.stale) {
         try {
@@ -237,9 +255,30 @@ async function restoreState() {
     if (state.build?.status === 'success' && state.build?.result) {
       renderBuildResult({ result: state.build.result, validation: state.build.validation });
     }
+    if (desktopMode && state.build?.status === 'failed') {
+      document.getElementById('buildSection').classList.remove('hidden');
+      document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
+      setMessage(state.build.message || 'การสร้างไฟล์ครั้งล่าสุดไม่สำเร็จ · ตรวจ Geometry แล้วลองใหม่');
+    }
   } catch (error) {
     setMessage(`ตรวจความพร้อมตอนเริ่มโปรแกรมไม่สำเร็จ: ${error.message}`);
+  } finally {
+    if (desktopMode) desktopFilePicker.disabled = false;
   }
 }
 
+if (desktopMode) {
+  fileInput.closest('.file-picker').classList.add('hidden');
+  desktopFilePicker.classList.remove('hidden');
+  document.getElementById('downloadManifestBtn').classList.remove('hidden');
+  document.getElementById('downloadChecklistBtn').classList.remove('hidden');
+  for (const link of document.querySelectorAll('a[href^="/api/"]')) {
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      startDownload(link.getAttribute('href'));
+    });
+  }
+  setExportReady(false);
+  setMessage('กำลังอ่านสถานะโครงการ...');
+}
 restoreState();
