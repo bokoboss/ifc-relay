@@ -570,10 +570,12 @@ let currentGate = null;
 let validationBusy = false;
 let buildBusy = false;
 
-async function refreshGate() {
+async function refreshGate({ keepOnTransientError = false } = {}) {
   try {
     currentGate = await api('/api/gate');
   } catch (error) {
+    // Keep the last known gate for retry. A build still requires a fresh pass.
+    if (keepOnTransientError && (error.status == null || error.status >= 500)) throw error;
     currentGate = null;
   }
   renderGate(currentGate);
