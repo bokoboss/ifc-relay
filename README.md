@@ -122,6 +122,21 @@ Runs import (read-only, SHA-256 checked before/after) → IFC audit → geometry
 
 Lookup order (`project_paths.py`): engine `VBB_GEOMETRY_ENGINE` -> `local\` -> bundled `engine\` -> parent folder; base network and outputs `VBB_PROJECT_ROOT` -> `local\` -> parent folder. `local\` is git-ignored.
 
+## Desktop setup
+
+Use an existing user-level Python 3.14 installation and Microsoft Edge WebView2 Runtime.
+
+```bat
+py -3.14 -m venv .venv-desktop
+.venv-desktop\Scripts\python.exe -m pip install -r requirements-desktop.txt
+```
+
+If the virtual environment was created without pip and `uv` is already available, use `uv pip install --python .venv-desktop/Scripts/python.exe -r requirements-desktop.txt`.
+
+Run `start-desktop.bat` with the existing Web Mode assets in `static\vendor\`. If needed, copy `three.module.js`, `three.core.js` and `jsm\controls\OrbitControls.js` from an installed IFC Relay checkout so the OrbitControls relative import is preserved.
+
+The desktop window uses the existing workbench from IFC import through review, Prepare, Validate and Build. Choose an IFC in the native file dialog. After import and audit, the 3D view loads automatically, starting with the first storey when the audit recommends loading by storey. Output downloads use Windows Save dialogs, including the build checklist and manifest. Pending work finishes before the window can close. Saved project, review and build state is restored on startup. Geometry for a saved project loads on request.
+
 ## Repository layout
 
 ```text

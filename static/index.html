@@ -6,7 +6,7 @@
   <title>IFC Relay — IFC → INPX Model Builder</title>
   <meta name="theme-color" content="#14242c" />
   <link rel="preload" href="/static/fonts/ibm-plex-sans-thai-thai-400.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/static/app.css?v=10" />
+  <link rel="stylesheet" href="/static/app.css?v=11" />
 </head>
 <body>
   <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -54,6 +54,9 @@
               <input id="fileInput" type="file" accept=".ifc" aria-label="เลือกไฟล์ BIM สำหรับเปิดโมเดล" />
               <span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>เลือกไฟล์ BIM</span>
             </label>
+            <button id="desktopFilePicker" type="button" class="file-picker hidden" disabled>
+              <span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>เลือกไฟล์ BIM</span>
+            </button>
             <button id="uploadBtn" class="primary-btn hidden" disabled title="เปิดไฟล์ที่เลือกอีกครั้ง">เปิดโมเดล</button>
             <span class="toolbar-separator" aria-hidden="true"></span>
             <button id="generateSemanticBtn" class="secondary-btn prepare-btn" disabled
@@ -260,8 +263,9 @@
                   <path d="M8 118h15M16 111v15M145 18h16M153 10v16" stroke="#90a5a9" stroke-width="1.4"/>
                 </svg>
               </div>
-                            <strong>เปิดโมเดล BIM เพื่อเริ่มทำงาน</strong>
-              <span>เลือกไฟล์ IFC จากแถบคำสั่งด้านบน<br/>เพื่อตรวจสอบและเตรียมพื้นที่เดินสำหรับ Viswalk</span>
+              <strong id="viewerEmptyTitle">เปิดโมเดล BIM เพื่อเริ่มทำงาน</strong>
+              <span id="viewerEmptyHint">เลือกไฟล์ IFC จากแถบคำสั่งด้านบน<br/>เพื่อตรวจสอบและเตรียมพื้นที่เดินสำหรับ Viswalk</span>
+              <button id="desktopLoad3dBtn" type="button" class="secondary-btn hidden" disabled>โหลดโมเดล 3D</button>
               <div class="viewer-empty-formats">IFC2x3 <span>·</span> IFC4 <span>·</span> IFC4.3</div>
             </div>
           </div>
@@ -384,6 +388,8 @@
                 <button id="downloadBuildReportBtn" class="secondary-btn" disabled>รายงาน Engine</button>
                 <button id="downloadValidationBtn" class="secondary-btn" disabled>รายงานการตรวจ</button>
                 <button id="downloadBuildLogBtn" class="secondary-btn" disabled>Log การสร้าง</button>
+                <button id="downloadChecklistBtn" class="secondary-btn hidden" disabled>บันทึก Checklist</button>
+                <button id="downloadManifestBtn" class="secondary-btn hidden" disabled>บันทึก Manifest</button>
                 <button id="openBuildFolderBtn" class="secondary-btn" disabled>เปิดโฟลเดอร์ผลลัพธ์</button>
               </div>
             </div>
@@ -584,11 +590,11 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=057" defer></script>
-  <script src="/static/app-plan.js?v=055" defer></script>
-  <script src="/static/app-model.js?v=054" defer></script>
+  <script src="/static/app.js?v=062" defer></script>
+  <script src="/static/app-plan.js?v=056" defer></script>
+  <script src="/static/app-model.js?v=055" defer></script>
   <script src="/static/app-review.js?v=054" defer></script>
   <script src="/static/app-tree.js?v=054" defer></script>
-  <script src="/static/app-build.js?v=054" defer></script>
+  <script src="/static/app-build.js?v=059" defer></script>
 </body>
 </html>

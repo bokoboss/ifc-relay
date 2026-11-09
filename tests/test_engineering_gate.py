@@ -82,7 +82,16 @@ def client(tmp_path, monkeypatch):
 
 
 @requires_engine
-def test_build_goes_ahead_with_viswalk_checks(client, tmp_path):
+def test_build_goes_ahead_with_viswalk_checks(client, tmp_path, monkeypatch):
+    import app as app_module
+
+    calls = []
+
+    def unavailable_builder(*args):
+        calls.append("build")
+        raise RuntimeError("Mock builder unavailable")
+
+    monkeypatch.setattr(app_module, "build_vissim_model", unavailable_builder)
     b, ov = _two_storeys(with_stair=True)
     path = b.write(tmp_path / "api.ifc")
     with open(path, "rb") as fh:
@@ -97,8 +106,9 @@ def test_build_goes_ahead_with_viswalk_checks(client, tmp_path):
     assert gate["passed"] and "isolated_zones" in gate["to_check"]
     assert client.post("/api/gate/ack", json={"id": "isolated_zones"}).status_code in (404, 405)   # no ack step
 
-    r = client.post("/api/build-vissim")          # not stopped by the checks; COM build itself needs Windows
-    assert r.status_code == 500 and "Windows" in r.json()["detail"]
+    r = client.post("/api/build-vissim")  # Checks allow reaching the builder on every platform, without COM.
+    assert calls == ["build"]
+    assert r.status_code == 500 and "Mock builder unavailable" in r.json()["detail"]
 
 
 @requires_engine
@@ -190,3 +200,71 @@ def test_checklist_reads_codes_not_warning_text():
     items = {i["id"]: i for i in evaluate_gate(sem, OK)["items"]}
     assert items["doors_not_converted"]["identities"] == ["2O2Fr$t4X7Zf8NOew3FLOH"]
     assert items["multi_storey_no_doors"]["count"] == 3
+
+
+@pytest.mark.parametrize("states,connected,pending,missing", [
+    (["review", "review", "review"], False, 3, True),
+    (["include", "review", "review"], True, 2, False),
+    (["include", "exclude", "include"], True, 0, False),
+    (["exclude", "exclude", "exclude"], False, 0, True),
+    (["include", "include", "include"], False, 0, True),  # selection alone does not prove conversion
+])
+def test_c4_warnings_are_independent_nonblocking_checks(states, connected, pending, missing):
+    sem = {"ifc_semantic": {"connectivity": CLEAN_CONNECTIVITY},
+           "levels": [{"key": 1}, {"key": 2}],
+           "areas": [{"level_key": k, "polygon": [[0, 0], [4, 0], [4, 4], [0, 4]]} for k in (1, 2)],
+           "vertical_connections": ([{"key": 3001, "ifc_global_id": "built-flight",
+                                      "level_match": {"start": "exact", "end": "exact"}}] if connected else [])}
+    overview = {"units": [{"global_id": f"unit-{n}", "state": s} for n, s in enumerate(states)],
+                "counts": {"flights": 9}}  # flight count never drives pending-unit count
+    gate = evaluate_gate(sem, OK, overview)
+    items = {i["id"]: i for i in gate["items"]}
+    assert gate["passed"] and gate["blocked"] == []
+    assert ("missing_vertical_connection" in items) is missing
+    assert ("stair_review_pending" in items) is bool(pending)
+    assert all(i["policy"] == "check" for i in gate["items"])
+    if pending:
+        assert items["stair_review_pending"]["count"] == pending
+        assert set(items["stair_review_pending"]["identities"]) == {
+            f"unit-{n}" for n, s in enumerate(states) if s == "review"}
+    if missing:
+        assert items["missing_vertical_connection"]["identities"] == ["L1", "L2"]
+
+
+def test_c4_generated_landing_is_not_an_additional_storey():
+    sem = {"ifc_semantic": {"connectivity": CLEAN_CONNECTIVITY},
+           "levels": [{"key": 1}, {"key": 901, "generated": True}],
+           "areas": [{"level_key": k, "polygon": [[0, 0], [4, 0], [4, 4], [0, 4]]} for k in (1, 901)]}
+    assert "missing_vertical_connection" not in evaluate_gate(sem, OK)["to_check"]
+
+
+def test_c4_mock_build_records_both_warnings_and_unit_ids(client, tmp_path, monkeypatch):
+    import json
+    import app as module
+    from tests.test_stair_review import _model, _open, _prepare_gate
+
+    calls = []
+
+    def fake_build(*args):
+        calls.append("build")
+        out = tmp_path / "c4_viswalk.inpx"
+        out.write_bytes(b"mock INPX; no COM invoked")
+        return {"output_path": str(out), "output_filename": out.name}
+
+    monkeypatch.setattr(module, "validate_engine_input", lambda *args: OK)
+    monkeypatch.setattr(module, "build_vissim_model", fake_build)
+    path, ids = _model(tmp_path, with_ramp=True)
+    _open(client, path)
+    _, expected = _prepare_gate(client)
+    response = client.post("/api/build-vissim")
+    assert response.status_code == 200, response.text
+    assert calls == ["build"]
+    manifest = json.loads((tmp_path / "c4_build_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["engineering_gate"] == expected
+    assert manifest["viswalk_verified"] is False
+    counts = {i["id"]: i["count"] for i in manifest["check_in_viswalk"]}
+    assert counts["stair_review_pending"] == 3 and counts["missing_vertical_connection"] == 2
+    checklist = (tmp_path / "c4_viswalk_checklist.md").read_text(encoding="utf-8")
+    assert "บันได/ทางลาดที่ยังรอตรวจสอบ** (3)" in checklist
+    assert "หลายชั้นแต่ไม่มีบันได/ทางลาดในโมเดลคนเดิน" in checklist
+    assert all(ids[k] in checklist for k in ("parent", "loose", "ramp"))
