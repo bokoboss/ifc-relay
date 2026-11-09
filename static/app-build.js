@@ -77,9 +77,18 @@ buildViswalkBtn.addEventListener('click', async () => {
       return;
     }
     const checks = gate.items.filter(i => i.policy === 'check');
-    if (checks.length && !(await confirmBuild(checks))) {
-      dock.select('checks');
-      return;
+    if (checks.length) {
+      // A modal blocks clicks itself; keep the controls visually and immediately ready on Cancel.
+      buildViswalkBtn.disabled = false;
+      buildViswalkBtn.removeAttribute('aria-busy');
+      validateBtn.disabled = false;
+      if (!(await confirmBuild(checks))) {
+        dock.select('checks');
+        return;
+      }
+      buildViswalkBtn.disabled = true;
+      buildViswalkBtn.setAttribute('aria-busy', 'true');
+      validateBtn.disabled = true;
     }
     started = true;
     setBuildOutputReady(false);
