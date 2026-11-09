@@ -63,43 +63,50 @@ const jobPanel = (() => {
 })();
 
 buildViswalkBtn.addEventListener('click', async () => {
-  if (buildBusy || document.getElementById('buildConfirm').open) return;
-  buildViswalkBtn.disabled = true;
-  const gate = await refreshGate();
-  if (!gate?.passed) {
-    dock.select('checks');
-    setMessage('ยังสร้างไฟล์ไม่ได้ · เตรียมโมเดลคนเดินและตรวจ Geometry ให้ตรงกับการเลือกล่าสุด');
-    return;
-  }
-  const checks = gate.items.filter(i => i.policy === 'check');
-  if (checks.length && !(await confirmBuild(checks))) {
-    dock.select('checks');
-    return;
-  }
+  if (buildBusy || validationBusy || buildViswalkBtn.disabled || document.getElementById('buildConfirm').open) return;
   buildBusy = true;
   buildViswalkBtn.disabled = true;
   buildViswalkBtn.setAttribute('aria-busy', 'true');
   validateBtn.disabled = true;
-  setBuildOutputReady(false);
-  document.getElementById('buildSection').classList.remove('hidden');
-  document.getElementById('buildStatus').textContent = 'กำลังสร้าง...';
-  document.getElementById('buildDuration').textContent = '—';
-  setMessage('กำลังสร้างไฟล์ Viswalk · Vissim อาจเปิดขึ้นชั่วครู่ แล้วโปรแกรมจะบันทึกและปิดให้เอง');
-  jobPanel.start();
+  let started = false;
   try {
+    const gate = await refreshGate({ keepOnTransientError: true });
+    if (!gate?.passed) {
+      dock.select('checks');
+      setMessage('ยังสร้างไฟล์ไม่ได้ · เตรียมโมเดลคนเดินและตรวจ Geometry ให้ตรงกับการเลือกล่าสุด');
+      return;
+    }
+    const checks = gate.items.filter(i => i.policy === 'check');
+    if (checks.length && !(await confirmBuild(checks))) {
+      dock.select('checks');
+      return;
+    }
+    started = true;
+    setBuildOutputReady(false);
+    document.getElementById('buildSection').classList.remove('hidden');
+    document.getElementById('buildStatus').textContent = 'กำลังสร้าง...';
+    document.getElementById('buildDuration').textContent = '—';
+    setMessage('กำลังสร้างไฟล์ Viswalk · Vissim อาจเปิดขึ้นชั่วครู่ แล้วโปรแกรมจะบันทึกและปิดให้เอง');
+    jobPanel.start();
     const result = await api('/api/build-vissim', { method: 'POST' });
     renderBuildResult(result);
     dock.select('build');
     setMessage(`สร้างไฟล์ Viswalk สำเร็จ: ${result.result?.output_filename || 'ไฟล์ .inpx'} · เปิดตรวจผลใน Vissim ก่อนใช้งาน`);
   } catch (error) {
-    document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
-    setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
+    if (started) {
+      document.getElementById('buildStatus').textContent = 'ไม่สำเร็จ';
+      setMessage(`สร้างไฟล์ Viswalk ไม่สำเร็จ: ${error.message}`);
+    } else {
+      dock.select('checks');
+      setMessage(`ตรวจความพร้อมก่อนสร้างไฟล์ไม่สำเร็จ: ${error.message} · ลองอีกครั้ง`);
+    }
   } finally {
-    jobPanel.stop();
+    if (started) jobPanel.stop();
     buildViswalkBtn.removeAttribute('aria-busy');
     buildBusy = false;
-    validateBtn.disabled = false;
-    buildViswalkBtn.disabled = !(currentGate && currentGate.passed);
+    const semanticReady = !downloadSemanticTopBtn.disabled;
+    validateBtn.disabled = !semanticReady;
+    buildViswalkBtn.disabled = !semanticReady || !currentGate?.passed;
   }
 });
 
