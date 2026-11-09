@@ -3,6 +3,7 @@ const desktopFilePicker = document.getElementById('desktopFilePicker');
 const uploadBtn = document.getElementById('uploadBtn');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const load3dBtn = document.getElementById('load3dBtn');
+const desktopLoad3dBtn = document.getElementById('desktopLoad3dBtn');
 const generateSemanticBtn = document.getElementById('generateSemanticBtn');
 const exportEngineBtn = document.getElementById('exportEngineBtn');
 const downloadSemanticTopBtn = document.getElementById('downloadSemanticTopBtn');
@@ -52,9 +53,10 @@ window.addEventListener('unhandledrejection', event => {
   if (status) status.textContent = `โหลดโมดูล 3D ไม่สำเร็จ: ${message}`;
 });
 
-function setMessage(text) {
+function setMessage(text, { importError = false } = {}) {
   messageText.textContent = text;
   messageText.title = text;          // the bar shows one line; hover for all of it
+  messageText.parentElement.classList.toggle('import-error', importError);
 }
 
 // ---------------------------------------------------------------------------
@@ -669,7 +671,7 @@ async function openSelectedFile() {
     document.getElementById('fileMeta').textContent =
       `${result.upload.original_name} · ${formatBytes(result.upload.size_bytes)} · นำเข้าแล้ว`;
     analyzeBtn.disabled = false;
-    load3dBtn.disabled = true;
+    setGeometryLoadEnabled(false);
     generateSemanticBtn.disabled = true;
     currentAudit = null;
     currentGeometry = null;
@@ -688,6 +690,9 @@ async function openSelectedFile() {
       document.getElementById('inspectorContent').classList.add('hidden');
       document.getElementById('emptyInspector').classList.remove('hidden');
       document.getElementById('viewerEmpty').classList.remove('hidden');
+      document.getElementById('viewerEmptyTitle').textContent = 'นำเข้า IFC แล้ว';
+      document.getElementById('viewerEmptyHint').textContent = 'กำลังตรวจ IFC เบื้องต้น...';
+      desktopLoad3dBtn.classList.add('hidden');
       document.getElementById('viewerStatus').textContent = 'ยังไม่ได้โหลดข้อมูลเรขาคณิต 3D';
       document.getElementById('loadedSubsetText').textContent = 'ยังไม่ได้โหลดโมเดล 3D';
       document.getElementById('previewNote').textContent = '';
@@ -697,20 +702,23 @@ async function openSelectedFile() {
     setMessage('ยืนยันการนำเข้าแล้ว · กำลังตรวจ IFC...');
     if (result.upload?.extension === '.ifc') {
       const audit = await runAnalyze();
-      if (audit && !desktopMode) {
+      if (audit) {
+        if (desktopMode) {
+          dock.select('ifc');
+          document.getElementById('auditSection').scrollIntoView({ block: 'start' });
+        }
         const loaded = await runLoad3d();
-        if (loaded) {
-          const large = audit.large_model?.recommended_load_mode === 'simulation_storey';
-          setMessage(large
-            ? 'IFC ขนาดใหญ่: โหลดชั้นแรกที่มี Geometry แล้ว · เลือกชั้นอื่นหรือเพิ่มชั้นได้จากแผงโหลดโมเดล'
-            : 'เปิดโมเดลแล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"');
+        if (loaded && audit.large_model?.recommended_load_mode === 'simulation_storey') {
+          setMessage('IFC ขนาดใหญ่: โหลดชั้นแรกที่มี Geometry แล้ว · เลือกชั้นอื่นหรือเพิ่มชั้นได้จากแผงโหลดโมเดล');
+        } else if (loaded && !desktopMode) {
+          setMessage('เปิดโมเดลแล้ว · ตรวจการคัดเลือกองค์ประกอบ แล้วกด "เตรียมโมเดลคนเดิน"');
         }
       }
     } else {
       await runAnalyze();
     }
   } catch (error) {
-    setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`);
+    setMessage(`นำเข้าไฟล์ไม่สำเร็จ: ${error.message}`, { importError: desktopMode });
   } finally {
     if (desktopMode) desktopFilePicker.disabled = false;
     uploadBtn.disabled = false;
@@ -729,7 +737,6 @@ async function runAnalyze() {
     }
     currentAudit = result;
     renderAudit(result);
-    load3dBtn.disabled = false;
     document.getElementById('stepAnalyze').classList.add('done');
     const decisions = result.revision?.decisions;
     setMessage(decisions
@@ -737,7 +744,10 @@ async function runAnalyze() {
       : desktopMode ? 'ตรวจ IFC เสร็จแล้ว · เลือกรูปแบบการโหลด 3D แล้วกดโหลดโมเดล' : 'ตรวจ IFC เสร็จแล้ว');
     return result;
   } catch (error) {
-    setMessage(`ตรวจ IFC ไม่สำเร็จ: ${error.message}`);
+    if (desktopMode && !currentAudit) {
+      document.getElementById('viewerEmptyHint').textContent = 'ตรวจ IFC ไม่สำเร็จ · ดูข้อความด้านบน';
+    }
+    setMessage(`ตรวจ IFC ไม่สำเร็จ: ${error.message}`, { importError: desktopMode });
     return null;
   } finally {
     analyzeBtn.disabled = false;
@@ -780,14 +790,27 @@ async function loadReviewTier(baseRequest, seq) {
   }
 }
 
+function setGeometryLoadEnabled(enabled) {
+  load3dBtn.disabled = !enabled;
+  desktopLoad3dBtn.disabled = !enabled;
+}
+
 async function runLoad3d() {
-  load3dBtn.disabled = true;
+  setGeometryLoadEnabled(false);
   const request = geometryRequestFromControls();
   const seq = ++geometryLoadSeq;
+  const viewerStatus = document.getElementById('viewerStatus');
+  const emptyHint = document.getElementById('viewerEmptyHint');
   const subsetLabel = request.storey_ids.length
     ? `ชั้น ${geometryStoreySelect?.selectedOptions?.[0]?.textContent?.split(' · ')[0] || request.storey_ids[0]}`
     : 'ทั้งอาคาร';
-  setMessage(`กำลังโหลด Geometry ${request.mode === 'full' ? 'ทั้งหมด' : 'ที่เกี่ยวกับการจำลอง'} ของ${subsetLabel}...`);
+  const loading = `กำลังโหลด Geometry ${request.mode === 'full' ? 'ทั้งหมด' : 'ที่เกี่ยวกับการจำลอง'} ของ${subsetLabel}...`;
+  setMessage(loading);
+  if (desktopMode) {
+    viewerStatus.textContent = loading;
+    emptyHint.textContent = loading;
+    desktopLoad3dBtn.classList.add('hidden');
+  }
 
   try {
     const [geometry, selection] = await Promise.all([
@@ -803,8 +826,8 @@ async function runLoad3d() {
     if ((geometry.element_count || 0) === 0) {
       const selectedOption = geometryStoreySelect?.selectedOptions?.[0];
       const selectedLabel = selectedOption?.textContent || subsetLabel;
-      document.getElementById('viewerStatus').textContent =
-        `ไม่มี Geometry 3D ใน ${selectedLabel}`;
+      viewerStatus.textContent = `ไม่มี Geometry 3D ใน ${selectedLabel}`;
+      if (desktopMode) emptyHint.textContent = viewerStatus.textContent;
       setMessage(
         `ไม่พบ Geometry 3D ใน ${selectedLabel} · ` +
         `เลือกชั้นที่มีวัตถุสำหรับการจำลอง หรือเปลี่ยนเป็นโหมด IFC ทั้งหมด`
@@ -818,7 +841,7 @@ async function runLoad3d() {
 
     const explorerSection = document.getElementById('explorerSection');
     explorerSection.classList.remove('hidden');
-    document.getElementById('viewerStatus').textContent = 'กำลังเตรียมพื้นที่แสดงผล 3D...';
+    viewerStatus.textContent = 'กำลังเตรียมพื้นที่แสดงผล 3D...';
 
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
@@ -829,7 +852,7 @@ async function runLoad3d() {
     setViewerBadge('source');
     setActiveModeButton('sourceModeBtn');
 
-    document.getElementById('viewerStatus').textContent =
+    viewerStatus.textContent =
       `โหลดแล้ว ${currentGeometry.element_count} ชิ้น · ${currentGeometry.triangle_count || 0} triangles · WebGL พร้อม`;
     document.getElementById('previewNote').textContent = geometry.preview_note || '';
 
@@ -858,18 +881,29 @@ async function runLoad3d() {
     );
     return true;
   } catch (error) {
-    if (!desktopMode || seq === geometryLoadSeq) setMessage(`โหลดโมเดล 3D ไม่สำเร็จ: ${error.message}`);
+    if (!desktopMode || seq === geometryLoadSeq) {
+      if (desktopMode) {
+        viewerStatus.textContent = 'โหลดโมเดล 3D ไม่สำเร็จ';
+        emptyHint.textContent = 'โหลดโมเดล 3D ไม่สำเร็จ · ดูข้อความด้านบนแล้วลองใหม่';
+      }
+      setMessage(`โหลดโมเดล 3D ไม่สำเร็จ: ${error.message}`, { importError: desktopMode });
+    }
     return false;
   } finally {
-    if (!desktopMode || seq === geometryLoadSeq) load3dBtn.disabled = false;
+    if (!desktopMode || seq === geometryLoadSeq) {
+      setGeometryLoadEnabled(true);
+      if (desktopMode) desktopLoad3dBtn.classList.remove('hidden');
+    }
   }
 }
 
 load3dBtn.addEventListener('click', () => runLoad3d());
+desktopLoad3dBtn.addEventListener('click', () => load3dBtn.click());
 
 // Add one storey to the current 3D view (used by the storey filter list).
 async function loadStoreyIntoView(storeyId, name) {
   if (!geometryLoadMode || !geometryStoreySelect) return false;
+  if (desktopMode && load3dBtn.disabled) return false;
   const full = (geometryLoadMode.value || '').startsWith('full_');
   geometryLoadMode.value = full ? 'full_storey' : 'simulation_storey';
   geometryStoreySelect.value = String(storeyId);
@@ -996,6 +1030,12 @@ function renderAudit(result) {
       <td>${escapeHtml(row.viswalk_mapping)}</td>
     `;
     categoryRows.appendChild(tr);
+  }
+  setGeometryLoadEnabled(true);
+  if (desktopMode) {
+    document.getElementById('viewerEmptyTitle').textContent = 'นำเข้าและตรวจ IFC แล้ว';
+    document.getElementById('viewerEmptyHint').textContent = 'ดูผลตรวจที่แท็บรายละเอียด หรือโหลดโมเดล 3D';
+    desktopLoad3dBtn.classList.remove('hidden');
   }
 }
 

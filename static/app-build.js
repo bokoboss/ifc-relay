@@ -197,7 +197,6 @@ async function restoreState() {
     if (state.analysis?.kind === 'ifc') {
       currentAudit = state.analysis;
       renderAudit(currentAudit);
-      load3dBtn.disabled = false;
       document.getElementById('stepAnalyze').classList.add('done');
     }
 
