@@ -81,6 +81,7 @@ class DesktopBridge:
         if not paths:
             return None
 
+        self._window.run_js("setMessage('กำลังอ่านและตรวจไฟล์ IFC ที่เลือก...');")
         from fastapi import HTTPException, UploadFile
         from app import import_file
 

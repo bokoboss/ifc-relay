@@ -135,7 +135,7 @@ If the virtual environment was created without pip and `uv` is already available
 
 Run `start-desktop.bat` with the existing Web Mode assets in `static\vendor\`. If needed, copy `three.module.js`, `three.core.js` and `jsm\controls\OrbitControls.js` from an installed IFC Relay checkout so the OrbitControls relative import is preserved.
 
-The desktop window uses the existing workbench from IFC import through review, Prepare, Validate and Build. Choose an IFC in the native file dialog, then load geometry when ready. Output downloads use Windows Save dialogs, including the build checklist and manifest. Pending work finishes before the window can close. Saved project, review and build state is restored on startup, and 3D geometry loads on request.
+The desktop window uses the existing workbench from IFC import through review, Prepare, Validate and Build. Choose an IFC in the native file dialog. After import and audit, the 3D view loads automatically, starting with the first storey when the audit recommends loading by storey. Output downloads use Windows Save dialogs, including the build checklist and manifest. Pending work finishes before the window can close. Saved project, review and build state is restored on startup. Geometry for a saved project loads on request.
 
 ## Repository layout
 
