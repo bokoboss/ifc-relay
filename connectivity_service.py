@@ -23,13 +23,14 @@ from typing import Any
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
+from semantic_geometry import polygon_components
 
 # Free-space pieces smaller than this are slivers between touching obstacles.
 MIN_ZONE_AREA = 1.0
 # Obstacles starting this high above their level do not block walking.
 HEADROOM_CLEAR = 2.0
 # Tolerance when testing whether a stair end touches walking space.
-END_TOUCH = 0.15
+END_TOUCH = 1e-5
 
 
 def _poly(points: list[list[float]] | None) -> Polygon | None:
@@ -57,11 +58,13 @@ def _footprint(rec: dict[str, Any]) -> Any:
 
 
 def _ends(vc: dict[str, Any]) -> tuple[Any, Any]:
-    if vc.get("bottom_edge") and vc.get("top_edge"):
-        return LineString(vc["bottom_edge"]), LineString(vc["top_edge"])
     pts = vc.get("polygon") or []
     if len(pts) == 4:
-        return LineString(pts[0:2]), LineString(pts[2:4])
+        polygon = _poly(pts)
+        return tuple(LineString(edge).buffer(.1, cap_style=2).intersection(polygon)
+                     for edge in (pts[:2], pts[2:]))
+    if vc.get("bottom_edge") and vc.get("top_edge"):
+        return LineString(vc["bottom_edge"]), LineString(vc["top_edge"])
     c = _poly(pts).centroid if pts else Point(0, 0)
     return c, c
 
@@ -80,6 +83,17 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
             if geom is not None and not geom.is_empty:
                 blockers.setdefault(int(rec["level_key"]), []).append(geom)
 
+    endpoint_probes: dict[int, list[Any]] = {}
+    for vc in model.get("vertical_connections", []):
+        for end, geom in zip(("start", "end"), _ends(vc)):
+            support = vc.get("endpoint_support", {}).get(end, {})
+            if support.get("status") != "unresolved":
+                endpoint_probes.setdefault(int(vc[f"{end}_level"]), []).append(geom)
+    landing_floors: dict[int, Any] = {}
+    for a in model.get("areas", []):
+        if a.get("landing_support"):
+            key = int(a["level_key"])
+            landing_floors[key] = unary_union([landing_floors.get(key, Polygon()), _poly(a["polygon"])])
     nodes: list[dict[str, Any]] = []
     by_level: dict[int, list[int]] = {}
     for level_key in sorted({int(a["level_key"]) for a in model.get("areas", [])}):
@@ -87,9 +101,11 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
                              for p in [_poly(a.get("polygon"))] if p is not None])
         if blockers.get(level_key):
             floor = floor.difference(unary_union(blockers[level_key]))
-        parts = list(getattr(floor, "geoms", [floor]))
+        parts = polygon_components(floor)
         for part in parts:
-            if part.is_empty or part.area < MIN_ZONE_AREA:
+            small_support = (level_key in landing_floors and part.intersection(landing_floors[level_key]).area > 1e-8
+                             and any(part.intersects(end) for end in endpoint_probes.get(level_key, [])))
+            if part.is_empty or (part.area < MIN_ZONE_AREA and not small_support):
                 continue
             by_level.setdefault(level_key, []).append(len(nodes))
             nodes.append({"level_key": level_key, "geom": part})
@@ -110,12 +126,27 @@ def analyze_connectivity(model: dict[str, Any]) -> dict[str, Any]:
     dangling = []
     for vc in model.get("vertical_connections", []):
         bottom, top = _ends(vc)
-        a = touching(int(vc["start_level"]), bottom)
-        b = touching(int(vc["end_level"]), top)
+        hits = []
+        reasons = {}
+        for end, geom in (("start", bottom), ("end", top)):
+            key = int(vc[f"{end}_level"])
+            support = vc.get("endpoint_support", {}).get(end, {})
+            z = float(levels.get(key, {}).get("z", 0)) + float(vc.get(f"{end}_z_offset") or 0)
+            if support.get("status") == "unresolved":
+                hit, reason = [], support.get("reason", "unsupported_endpoint")
+            elif abs(z - float(support.get("surface_z", z))) > .005:
+                hit, reason = [], "endpoint_z_mismatch"
+            else:
+                hit = touching(key, geom)
+                reason = "connected" if hit else "no_free_walking_space"
+            hits.append(hit)
+            reasons[end] = reason
+        a, b = hits
         if not a or not b:
             dangling.append({"key": vc.get("key"), "ifc_global_id": vc.get("ifc_global_id"),
                              "start_level": vc["start_level"], "end_level": vc["end_level"],
-                             "bottom_connected": bool(a), "top_connected": bool(b)})
+                             "bottom_connected": bool(a), "top_connected": bool(b),
+                             "reasons": reasons})
             continue
         for i in a + b:
             parent[find(i)] = find(a[0])

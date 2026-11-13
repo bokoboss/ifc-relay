@@ -260,6 +260,8 @@ def test_c4_mock_build_records_both_warnings_and_unit_ids(client, tmp_path, monk
     assert response.status_code == 200, response.text
     assert calls == ["build"]
     manifest = json.loads((tmp_path / "c4_build_manifest.json").read_text(encoding="utf-8"))
+    assert expected["verification"]["geometry_valid"] is None
+    expected["verification"]["geometry_valid"] = True  # build validates after the preview snapshot
     assert manifest["engineering_gate"] == expected
     assert manifest["viswalk_verified"] is False
     counts = {i["id"]: i["count"] for i in manifest["check_in_viswalk"]}

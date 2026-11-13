@@ -16,8 +16,13 @@ import ifcopenshell.util.unit
 
 
 class Building:
-    def __init__(self, storey_elevations: Iterable[float]):
-        self.f = ifcopenshell.file(schema="IFC4")
+    def __init__(self, storey_elevations: Iterable[float], schema: str = "IFC4"):
+        self.f = ifcopenshell.file(schema=schema)
+        if schema == "IFC2X3":
+            person = self._run("owner.add_person", identification="tester")
+            organisation = self._run("owner.add_organisation", identification="tests", name="Tests")
+            self._run("owner.add_person_and_organisation", person=person, organisation=organisation)
+            self._run("owner.add_application", application_developer=organisation)
         self.project = self._run("root.create_entity", ifc_class="IfcProject", name="Synthetic")
         self._run("unit.assign_unit")
         self.scale = ifcopenshell.util.unit.calculate_unit_scale(self.f)

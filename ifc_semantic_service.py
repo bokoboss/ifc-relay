@@ -23,12 +23,11 @@ from ifc_service import (
 from ifc_vertical_service import (
     INTERMEDIATE_LANDING_THRESHOLD,
     LANDING_LEVEL_KEY_START,
-    LEVEL_SNAP_TOLERANCE,
+    PHYSICAL_LEVEL_TOLERANCE,
+    assign_landing_levels,
     build_vertical_connections,
     children_map,
-    cluster_landing_levels,
     collect_vertical_units,
-    is_intermediate_landing,
 )
 
 
@@ -196,6 +195,54 @@ def trim_ramp_end_overlaps(vertical_connections: list[dict[str, Any]],
         ]
         vc["end_overlap"] = {"bottom": ob, "top": ot}
     return trimmed
+
+
+def finalize_landing_ledger(entries: list[dict[str, Any]], candidates: list[dict[str, Any]],
+                            areas: list[dict[str, Any]], obstacles: list[dict[str, Any]],
+                            levels: list[dict[str, Any]]) -> None:
+    """Reconcile source components against final, keyed output geometry, including voids."""
+    candidates_by_id = {int(c["slab"].id()): c for c in candidates}
+    levels_by_key = {int(lv["key"]): lv for lv in levels}
+    masks: dict[int, list[Any]] = defaultdict(list)
+    for obs in obstacles:
+        if obs.get("type") == "walkable_void_mask":
+            masks[int(obs["level_key"])].append(Polygon(obs["polygon"]))
+    for entry in entries:
+        entry["output_area_keys"] = []
+        entry["components"] = []
+        if entry["outcome"] == "excluded":
+            continue
+        cand = candidates_by_id.get(entry["source_entity_id"])
+        key = cand.get("assigned_level_key") if cand else None
+        if key is None:
+            continue
+        entry["assigned_level_key"] = key
+        entry["assigned_z"] = float(levels_by_key[key]["z"])
+        entry["delta_z"] = round(entry["assigned_z"] - entry["source_z"], 6)
+        outputs = [(a, Polygon(a["polygon"])) for a in areas
+                   if int(a["level_key"]) == key
+                   and entry["source_entity_id"] in a.get("ifc_source_entity_ids", [])]
+        void = unary_union(masks.get(key, []))
+        for index, source in enumerate(cand["components"]):
+            mappings = [{"area_key": a["key"], "level_key": key,
+                         "intersection_area_m2": round(p.difference(void).intersection(source).area, 8)}
+                        for a, p in outputs if p.difference(void).intersection(source).area > EPS]
+            output = unary_union([p for a, p in outputs if any(m["area_key"] == a["key"] for m in mappings)])
+            output = output.difference(void)
+            covered = bool(mappings) and source.difference(output.buffer(1e-5)).area <= EPS
+            entry["components"].append({"index": index, "source_polygon": polygon_points(source),
+                                        "source_holes": [polygon_points(h) for h in hole_polygons(source)],
+                                        "source_area_m2": round(source.area, 8), "covered": covered,
+                                        "coverage_ratio": round(source.intersection(output).area / source.area, 8),
+                                        "output_mapping": mappings})
+        entry["output_area_keys"] = sorted({m["area_key"] for c in entry["components"] for m in c["output_mapping"]})
+        if not all(c["covered"] for c in entry["components"]):
+            entry.update(outcome="unresolved", reason="source_component_not_covered")
+        elif abs(entry["delta_z"]) > PHYSICAL_LEVEL_TOLERANCE:
+            entry.update(outcome="unresolved", reason="output_level_height_mismatch")
+        else:
+            entry.update(outcome="represented" if levels_by_key[key].get("generated")
+                         else "contributed_to_existing_area", reason="source_geometry_covered")
 
 
 def build_semantic_model(
@@ -454,6 +501,7 @@ def build_semantic_model(
 
     # Pass 1: collect every included slab with its footprint and walking height.
     slab_candidates: list[dict[str, Any]] = []
+    landing_ledger: list[dict[str, Any]] = []
 
     for slab in model.by_type("IfcSlab"):
         guid = global_id(slab)
@@ -461,12 +509,33 @@ def build_semantic_model(
         status = effective_status(slab, selection_overrides)
         predefined = str(getattr(slab, "PredefinedType", "") or "").upper()
         is_roof_child = int(slab.id()) in roof_children
+        parent = parent_lookup.get(int(slab.id()))
+        is_landing = predefined == "LANDING" or (
+            parent is not None and (is_a(parent, "IfcStair") or is_a(parent, "IfcRamp")))
 
         if manual is None and is_roof_child:
             status = "exclude"
         elif manual is None and predefined not in {"FLOOR", "LANDING"}:
             # BASESLAB is intentionally review-only by default in Large Model Mode.
             status = "review"
+
+        entry = None
+        if is_landing:
+            entry = {"source_global_id": guid, "source_entity_id": int(slab.id()),
+                     "ifc_parent_global_id": global_id(parent) if parent is not None else None,
+                     "source_geometry": {"entity_id": int(slab.id()),
+                                         "source_sha256": geometry_payload.get("source_sha256"),
+                                         "extractor": geometry_payload.get("extractor"),
+                                         "coordinate_frame": "world_metres"},
+                     "evidence_status": "Detected from IFC", "selection_status": status,
+                     "outcome": "excluded" if status == "exclude" else "unresolved",
+                     "reason": "explicit_exclude" if manual == "exclude" else
+                               "selection_excluded" if status == "exclude" else
+                               "selection_review" if status == "review" else "missing_mesh",
+                     "source_z": float(mesh_bounds(mesh_by_id[int(slab.id())])[1][2])
+                                 if int(slab.id()) in mesh_by_id else None,
+                     "source_storey_level_key": resolve_level_key(slab)}
+            landing_ledger.append(entry)
 
         if status != "include":
             excluded_detail.append({
@@ -484,25 +553,29 @@ def build_semantic_model(
         footprint_geom = mesh_footprint(mesh.get("vertices", []), mesh.get("indices", []))
         components = polygon_components(footprint_geom)
         if not components:
+            if entry is not None:
+                entry["reason"] = "invalid_footprint"
             warnings.append(f"Included slab {guid or slab.id()} produced no valid 2D footprint.")
             continue
 
         level_key = resolve_level_key(slab)
         if level_key is None:
+            if entry is not None:
+                entry["reason"] = "missing_storey"
             warnings.append(f"Slab {guid or slab.id()} is not assigned to a building storey.")
             continue
 
-        parent = parent_lookup.get(int(slab.id()))
-        is_landing = predefined == "LANDING" or (
-            parent is not None and (is_a(parent, "IfcStair") or is_a(parent, "IfcRamp"))
-        )
-        _, bbmax = mesh_bounds(mesh)
+        bbmin, bbmax = mesh_bounds(mesh)
+        if entry is not None:
+            entry.update(source_z=float(bbmax[2]), reason="awaiting_area_mapping")
         slab_candidates.append({
             "slab": slab,
             "guid": guid,
             "level_key": level_key,
             "components": components,
             "top_z": float(bbmax[2]),
+            "bottom_z": float(bbmin[2]),
+            "parent_guid": global_id(parent) if parent is not None else None,
             "is_landing": is_landing,
         })
 
@@ -540,7 +613,15 @@ def build_semantic_model(
     for cand in slab_candidates:
         level_key = cand["level_key"]
         datum = level_datum_by_key[level_key]
-        if cand["is_landing"] and is_intermediate_landing(cand["top_z"], datum):
+        if cand["is_landing"] or selection_overrides.get(cand["guid"]) == "include":
+            matching = [k for k, z in level_datum_by_key.items()
+                        if abs(cand["top_z"] - z) <= PHYSICAL_LEVEL_TOLERANCE]
+            if matching:
+                level_key = min(matching, key=lambda k: (abs(cand["top_z"] - level_datum_by_key[k]),
+                                                        k != level_key, k))
+                cand["level_key"] = level_key
+                datum = level_datum_by_key[level_key]
+        if cand["is_landing"] and abs(cand["top_z"] - datum) > PHYSICAL_LEVEL_TOLERANCE:
             intermediate_landings.append(cand)
             continue
         offset = cand["top_z"] - datum
@@ -586,6 +667,7 @@ def build_semantic_model(
                                     "offset_m": round(offset, 3), "area_m2": area})
 
         walkable_source_slab_count += 1
+        cand["assigned_level_key"] = level_key
         walkable_components_by_level[level_key].extend(cand["components"])
         walkable_source_ids_by_level[level_key].append(int(cand["slab"].id()))
         if cand["guid"]:
@@ -598,9 +680,16 @@ def build_semantic_model(
 
     gap_repairs: list[dict[str, Any]] = []
     for level_key in sorted(walkable_components_by_level):
-        source_components = walkable_components_by_level[level_key]
+        floor_members = [c for c in slab_candidates
+                         if c.get("assigned_level_key") == level_key]
+        source_components = [p for c in floor_members if not c["is_landing"] for p in c["components"]]
+        landing_components = [p for c in floor_members if c["is_landing"] for p in c["components"]]
         gap_stats: dict[str, Any] = {}
         merged_regions = merge_walkable_components(source_components, grid_size=0.005, stats=gap_stats)
+        landing_holes = [h for p in polygon_components(unary_union(landing_components))
+                         for h in hole_polygons(p)]
+        merged_regions = polygon_components(unary_union([*merged_regions, *landing_components]).difference(
+            unary_union(landing_holes)))
         for piece in gap_stats.get("repairs", []):
             c = piece.centroid
             gap_repairs.append({"level_key": level_key, "centroid": [round(c.x, 2), round(c.y, 2)],
@@ -629,22 +718,26 @@ def build_semantic_model(
             if total_regions > 1:
                 name += f" [region {region_no}/{total_regions}]"
 
+            contributors = [c for c in floor_members
+                            if any(p.intersection(region).area > EPS for p in c["components"])]
             areas.append({
                 "key": area_key,
                 "name": name,
                 "level_key": level_key,
                 "polygon": polygon_points(region),
-                "ifc_source_entity_ids": walkable_source_ids_by_level[level_key],
-                "ifc_source_global_ids": walkable_source_guids_by_level[level_key],
-                "consolidated_from_slabs": len(walkable_source_ids_by_level[level_key]),
+                "ifc_source_entity_ids": [int(c["slab"].id()) for c in contributors],
+                "ifc_source_global_ids": [c["guid"] for c in contributors if c["guid"]],
+                "consolidated_from_slabs": len(contributors),
+                "landing_support": any(c["is_landing"] for c in contributors),
             })
             area_key += 1
             walkable_region_count += 1
 
             holes = hole_polygons(region)
-            small = [h for h in holes if h.area < MIN_VOID_MASK_AREA]
+            small = [h for h in holes if h.area < MIN_VOID_MASK_AREA
+                     and not any(h.intersection(lh).area > EPS for lh in landing_holes)]
             ignored_void_count += len(small)
-            holes = [h for h in holes if h.area >= MIN_VOID_MASK_AREA]
+            holes = [h for h in holes if h not in small]
             for hole_no, hole in enumerate(holes, start=1):
                 generated_void_masks.append({
                     "name": f"Walkable Void - {level_name} [{region_no}.{hole_no}]",
@@ -670,30 +763,30 @@ def build_semantic_model(
     # sits at a different height. Each landing height becomes a generated
     # level (keys 901+) so stair flights can connect level -> landing -> level.
     # ---------------------------------------------------------
-    landing_levels = cluster_landing_levels(
+    landing_levels, landing_assignments = assign_landing_levels(
         [c["top_z"] for c in intermediate_landings],
         [{"key": k, "z": z} for k, z in level_datum_by_key.items()],
         key_start=max(LANDING_LEVEL_KEY_START, len(levels) + 1),
     )
+    for candidate, assigned in zip(intermediate_landings, landing_assignments):
+        candidate["assigned_level_key"] = assigned
     landing_area_count = 0
     for landing_level in landing_levels:
         members = [
-            c for c in intermediate_landings
-            if abs(c["top_z"] - float(landing_level["z"])) <= LEVEL_SNAP_TOLERANCE
+            c for c in intermediate_landings if c["assigned_level_key"] == landing_level["key"]
         ]
         if members and all(m.get("is_mezzanine") for m in members):
             landing_level["name"] = landing_level["name"].replace("Landing", "Mezzanine", 1)
-        # Express the landing in the same frame as its storey's output level.
+        # A generated physical plane keeps its world height, independent of its container datum.
         base_key = members[0]["level_key"]
-        shift = level_datum_by_key[base_key] - level_z_by_key[base_key]
         landing_level["match_z"] = landing_level["z"]
-        landing_level["z"] = round(float(landing_level["z"]) - shift, 6)
         landing_level["source_storey_level_key"] = base_key
 
         components: list[Polygon] = []
         for member in members:
             components.extend(member["components"])
-        regions = merge_walkable_components(components, grid_size=0.005)
+        # Landings carry actual walking surfaces; a gap alone is no evidence of floor.
+        regions = merge_walkable_components(components, grid_size=0, close_gap=0)
         if not regions:
             warnings.append(
                 f"{landing_level['name']}: {len(members)} landing slab(s) could not be consolidated."
@@ -704,16 +797,24 @@ def build_semantic_model(
             if len(regions) > 1:
                 name += f" [region {region_no}/{len(regions)}]"
             if region.interiors:
-                warnings.append(f"{name} has interior holes; only the outer boundary is used.")
+                for hole in hole_polygons(region):
+                    generated_void_masks.append({"name": f"Landing Void - {name}",
+                                                 "type": "walkable_void_mask", "level_key": int(landing_level["key"]),
+                                                 "height": .05, "z_offset": 0., "polygon": polygon_points(hole),
+                                                 "generated": True, "generated_from": "landing_union_interior_ring"})
+                    walkable_void_count += 1
+            contributors = [m for m in members
+                            if any(p.intersection(region).area > EPS for p in m["components"])]
             areas.append({
                 "key": area_key,
                 "name": name,
                 "level_key": int(landing_level["key"]),
                 "polygon": polygon_points(region),
-                "ifc_source_entity_ids": [int(m["slab"].id()) for m in members],
-                "ifc_source_global_ids": [m["guid"] for m in members if m["guid"]],
-                "consolidated_from_slabs": len(members),
+                "ifc_source_entity_ids": [int(m["slab"].id()) for m in contributors],
+                "ifc_source_global_ids": [m["guid"] for m in contributors if m["guid"]],
+                "consolidated_from_slabs": len(contributors),
                 "generated_level": True,
+                "landing_support": any(m["is_landing"] for m in contributors),
             })
             area_key += 1
             landing_area_count += 1
@@ -908,9 +1009,19 @@ def build_semantic_model(
         mesh_for=lambda e: mesh_by_id.get(int(e.id())),
         footprint_for=lambda m: largest_polygon(mesh_footprint(m.get("vertices", []), m.get("indices", []))),
         all_levels=match_levels,
+        support_surfaces=[{"level_key": c["assigned_level_key"], "z": c["top_z"],
+                           "bottom_z": c["bottom_z"], "polygon": p,
+                           "global_id": c["guid"], "parent_guid": c["parent_guid"]}
+                          for c in slab_candidates if "assigned_level_key" in c
+                          for p in c["components"]],
+        unit_scale=unit_scale,
     )
     warnings.extend(vertical_warnings)
-    trim_ramp_end_overlaps(vertical_connections, areas, obstacles)
+    for vc in vertical_connections:
+        for end, support in vc["endpoint_support"].items():
+            if support["status"] == "unresolved":
+                diag("stair_endpoint_unresolved", [vc["ifc_global_id"]], end=end,
+                     reason=support["reason"], source_z=support["source_z"])
 
     for element in model.by_type("IfcTransportElement"):
         if _included(element):
@@ -954,6 +1065,8 @@ def build_semantic_model(
             f"{manual_applied['passage']} passage (engineer-drawn, not from the IFC)."
         )
 
+    trim_ramp_end_overlaps(vertical_connections, areas, obstacles)
+
     key_ranges = assign_key_ranges({
         "areas": areas,
         "walls": walls,
@@ -961,6 +1074,11 @@ def build_semantic_model(
         "obstacles": obstacles,
         "vertical_connections": vertical_connections,
     })
+    finalize_landing_ledger(landing_ledger, slab_candidates, areas, obstacles, levels)
+    for entry in landing_ledger:
+        if entry["outcome"] == "unresolved":
+            diag("landing_unresolved", [entry["source_global_id"] or str(entry["source_entity_id"])],
+                 reason=entry["reason"])
 
     # Pedestrian connectivity (graph of free walking space + stairs). Diagnostic only.
     from connectivity_service import analyze_connectivity, connectivity_warnings
@@ -1006,7 +1124,7 @@ def build_semantic_model(
         "vertical_connections": len(vertical_connections),
         "vertical_ends_with_offset": sum(
             1 for v in vertical_connections for end in ("start", "end")
-            if v["level_match"][end] != "exact"
+            if v["level_match"][end] == "offset" or abs(v.get(f"{end}_z_offset", 0)) > 1e-5
         ),
         "generated_landing_levels": len(landing_levels),
         "off_level_slabs": len(off_level_slabs),
@@ -1016,6 +1134,12 @@ def build_semantic_model(
         "multi_storey_elements": multi_replicated,
         "multi_storey_copies": multi_copies,
         "landing_areas": landing_area_count,
+        "source_landings": len(landing_ledger),
+        "landings_represented": sum(e["outcome"] in {"represented", "contributed_to_existing_area"} for e in landing_ledger),
+        "landings_contributed_to_existing": sum(e["outcome"] == "contributed_to_existing_area" for e in landing_ledger),
+        "landings_excluded": sum(e["outcome"] == "excluded" for e in landing_ledger),
+        "landings_review": sum(e["outcome"] == "unresolved" for e in landing_ledger),
+        "landings_omitted": sum(e["outcome"] == "unresolved" for e in landing_ledger),
         "warnings": len(warnings),
     }
 
@@ -1062,6 +1186,13 @@ def build_semantic_model(
             "flattened_steps": flattened_steps,
             "gap_repairs": gap_repairs,
             "diagnostics": diagnostics,
+            "landing_ledger": landing_ledger,
+            "verification": {"geometry_valid": None,
+                             "landing_geometry_valid": all(e["outcome"] != "unresolved" for e in landing_ledger),
+                             "connectivity_valid": not connectivity.get("error") and "zones" in connectivity
+                                                   and not connectivity.get("stairs_not_linked")
+                                                   and not connectivity.get("isolated_zones"),
+                             "viswalk_verified": False},
             "connectivity": connectivity,
             "manual_edits": list(manual_edits or []),
             # Immutable record of inputs actually used by this semantic generation.
@@ -1093,7 +1224,7 @@ def build_semantic_model(
                 "Roof/base/non-floor slabs are not promoted automatically unless their IFC rule or manual selection includes them.",
                 "IfcSlab floor panels are consolidated per storey before creating Viswalk Areas.",
                 "Interior holes in consolidated floor regions become generated walkable-void obstacles because Vissim Areas cannot contain enclaves.",
-                "Stairs/ramps are converted one record per flight from mesh geometry; polygon order is bottom edge first. Ends snap to storey or generated landing levels within the snap tolerance, otherwise an explicit z offset and a warning are emitted.",
+                "Stairs/ramps are converted one record per flight, bottom edge first. Endpoint matching requires local source surface support; compensated and unresolved ends retain their evidence and reasons. An offset alone is not a connection.",
                 "Intermediate landing slabs become generated levels (keys 901+) with their own areas instead of being merged into the storey floor.",
             ],
         },

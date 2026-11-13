@@ -5,6 +5,9 @@ This app converts IFC into a Viswalk model; it is **not a BIM checker**. Anythin
 | Item | Policy | Why |
 | --- | --- | --- |
 | Engine errors / build not allowed | **block** | The Engine cannot build the file |
+| Landing inventory | info | Source counts and represented/review/excluded/incomplete outcomes are separate from Area/Level counts |
+| Landing source component missing or at an unsupported output height | check | Source-to-output ledger identifies component, output keys, coverage and reason |
+| Stair endpoint without spatial/height evidence | check | An offset preserves geometry for review; it does not establish a pedestrian connection |
 | Stair/ramp end not on a walkable area (Engine) | check | Viswalk will error at that ramp; connect it to an Area in Viswalk |
 | Connectivity diagnostic failed or missing | check | Listed, never read as "all connected"; does not affect the file |
 | Manual plan edit that could not be applied | check | The file will not contain it; redraw it or fix in Viswalk |

@@ -52,6 +52,26 @@ def test_flight_profile_reports_non_straight_footprint():
     assert profile["straightness"] < 0.85
 
 
+@pytest.mark.parametrize("x0,x1", [(2.0, 3.5), (3.5, 2.0)])
+@pytest.mark.parametrize("angle", [0, 37, 90])
+def test_wide_short_flight_uses_height_evidence_for_run_axis(x0, x1, angle):
+    from shapely.affinity import rotate
+
+    verts, footprint = _wedge(x0, x1, 0, 4, 0, 1)
+    theta = math.radians(angle)
+    points = [(verts[i], verts[i + 1], verts[i + 2]) for i in range(0, len(verts), 3)]
+    rotated = [c for x, y, z in points for c in
+               (x * math.cos(theta) - y * math.sin(theta),
+                x * math.sin(theta) + y * math.cos(theta), z)]
+    profile = flight_profile(rotated, rotate(footprint, angle, origin=(0, 0)))
+    assert profile["run_length"] == pytest.approx(1.5)
+    assert profile["width"] == pytest.approx(4)
+    assert profile["end_separation"] > .99
+    for edge, expected in (("bottom_edge", x0), ("top_edge", x1)):
+        assert all(x * math.cos(theta) + y * math.sin(theta) == pytest.approx(expected, abs=1e-4)
+                   for x, y in profile[edge])
+
+
 def test_match_level_snaps_within_tolerance_and_reports_offset_otherwise():
     levels = [{"key": 1, "z": 0.0}, {"key": 2, "z": 3.4}]
     assert match_level(0.1, levels) == (1, 0.0, True)
@@ -63,9 +83,9 @@ def test_match_level_snaps_within_tolerance_and_reports_offset_otherwise():
 
 def test_cluster_landing_levels_dedupes_heights_and_skips_storey_heights():
     storeys = [{"key": 1, "z": 0.0}, {"key": 2, "z": 3.4}]
-    result = cluster_landing_levels([1.70, 1.72, 3.38, 5.1], storeys)
+    result = cluster_landing_levels([1.70, 1.700001, 3.4, 5.1], storeys)
     assert [lv["key"] for lv in result] == [901, 902]
-    assert math.isclose(result[0]["z"], 1.71, abs_tol=1e-6)
+    assert math.isclose(result[0]["z"], 1.70, abs_tol=1e-6)
     assert all(lv["generated"] for lv in result)
 
 
