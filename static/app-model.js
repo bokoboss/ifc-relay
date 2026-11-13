@@ -159,7 +159,7 @@ function renderSemanticSummary(result) {
   document.getElementById('semanticSection').classList.remove('hidden');
   document.getElementById('semanticLevels').textContent = summary.levels ?? 0;
   document.getElementById('semanticSourceSlabs').textContent = summary.walkable_source_slabs ?? 0;
-  document.getElementById('semanticAreas').textContent = summary.walkable_regions ?? summary.walkable_areas ?? 0;
+  document.getElementById('semanticAreas').textContent = summary.walkable_areas ?? summary.walkable_regions ?? 0;
   document.getElementById('semanticVoidMasks').textContent = summary.walkable_void_masks ?? 0;
   document.getElementById('semanticLogicalWalls').textContent = summary.logical_walls ?? 0;
   document.getElementById('semanticWallSegments').textContent = summary.physical_wall_segments ?? 0;
@@ -168,6 +168,11 @@ function renderSemanticSummary(result) {
     (summary.columns ?? 0) + (summary.obstacles ?? 0);
   document.getElementById('semanticVertical').textContent = summary.vertical_connections ?? 0;
   document.getElementById('semanticWarnings').textContent = summary.warnings ?? warnings.length;
+  document.getElementById('landingSummaryText').textContent = summary.source_landings == null ? '' :
+    `ชานพักต้นทาง ${summary.source_landings} · มีพื้นที่รองรับ ${summary.landings_represented ?? 0} ` +
+    `(รวมกับชั้นเดิม ${summary.landings_contributed_to_existing ?? 0}) · ไม่ใช้ ${summary.landings_excluded ?? 0} · ` +
+    `รอตรวจ ${summary.landings_review ?? 0} · ผลลัพธ์ไม่ครบ ${summary.landings_omitted ?? 0} · ` +
+    `Landing Areas ${summary.landing_areas ?? 0} / Generated Levels ${summary.generated_landing_levels ?? 0}`;
   document.getElementById('doorLogicText').textContent =
     `ประตูที่เลือก ${summary.included_doors ?? 0} บาน → ตัดช่องในผนังได้ ${summary.door_openings_applied ?? 0} ช่อง · ` +
     `ช่องเปิดไม่มีประตู เปิดใช้ ${summary.unfilled_openings_applied ?? 0} จาก ${summary.unfilled_openings ?? 0} ช่อง · ` +

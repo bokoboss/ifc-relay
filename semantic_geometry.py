@@ -97,7 +97,18 @@ def precision_clean_polygon(poly: Polygon, grid_size: float = 0.005) -> Polygon 
         pass
     if not geom.is_valid:
         geom = geom.buffer(0)
+    if not preserves_source_components(geom, [poly], tolerance=grid_size):
+        return poly if poly.is_valid else poly.buffer(0)
     return geom if isinstance(geom, (Polygon, MultiPolygon)) else None
+
+
+def preserves_source_components(geom: Any, sources: list[Polygon], tolerance: float = 0.0) -> bool:
+    """Check each source separately: a large retained slab cannot hide a lost landing."""
+    if geom is None or geom.is_empty:
+        return False
+    cover = geom.buffer(tolerance) if tolerance else geom
+    return all(part.difference(cover).area <= EPS
+               for source in sources for part in polygon_components(source))
 
 
 # Viswalk connects walkable elements only where they touch or overlap (Vissim
@@ -115,7 +126,9 @@ def merge_walkable_components(components: list[Polygon], grid_size: float = 0.00
         cleaned.extend(polygon_components(precision_clean_polygon(poly, grid_size=grid_size)))
     if not cleaned:
         return []
-    merged = unary_union(cleaned)
+    # Buffering a fixed-precision polygon can erase isolated rotated components.
+    from shapely import set_precision
+    merged = set_precision(unary_union(cleaned), 0)
     if not merged.is_valid:
         merged = merged.buffer(0)
     before = len(polygon_components(merged))
@@ -127,12 +140,12 @@ def merge_walkable_components(components: list[Polygon], grid_size: float = 0.00
         if not closed.is_empty:
             closed = closed if closed.is_valid else closed.buffer(0)
             after = len(polygon_components(closed))
-            if after < before:
+            if after < before and preserves_source_components(closed, cleaned, tolerance=1e-7):
                 if stats is not None:
                     stats["gaps_closed"] = stats.get("gaps_closed", 0) + (before - after)
                     # Where the closing added floor (ENG-03): kept so the engineer can
                     # see every automatic repair on the plan.
-                    added = closed.difference(merged)
+                    added = set_precision(closed.difference(merged), grid_size or 1e-9)
                     stats.setdefault("repairs", []).extend(
                         piece for piece in polygon_components(added) if piece.area > 1e-5)
                 merged = closed

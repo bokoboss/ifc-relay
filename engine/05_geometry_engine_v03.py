@@ -788,6 +788,7 @@ def build_geometry_model(data):
                     f"{object_type} {key}",
                 ),
                 "type": object_type,
+                "source_type": item.get("type"),
                 "geometry": polygonal_only(
                     geometry
                 ),
@@ -1014,62 +1015,23 @@ def validate_model(
     # --------------------------------------------------------
 
     for record in vertical_connections:
-        start_walkable = (
-            walkable_by_level.get(
-                record["start_level"]
-            )
-        )
-        end_walkable = (
-            walkable_by_level.get(
-                record["end_level"]
-            )
-        )
-
-        if start_walkable is not None:
-            overlap = (
-                record["geometry"]
-                .intersection(
-                    start_walkable
-                )
-            )
-            if (
-                overlap.is_empty
-                or overlap.area
-                <= TOLERANCE
-            ):
-                warnings.append({
-                    "type":
-                        "vertical_connection_not_on_start_area",
-                    "key":
-                        record["key"],
-                    "name":
-                        record["name"],
-                    "start_level":
-                        record["start_level"],
-                })
-
-        if end_walkable is not None:
-            overlap = (
-                record["geometry"]
-                .intersection(
-                    end_walkable
-                )
-            )
-            if (
-                overlap.is_empty
-                or overlap.area
-                <= TOLERANCE
-            ):
-                warnings.append({
-                    "type":
-                        "vertical_connection_not_on_end_area",
-                    "key":
-                        record["key"],
-                    "name":
-                        record["name"],
-                    "end_level":
-                        record["end_level"],
-                })
+        polygon = list(record["geometry"].geoms)[0]
+        corners = list(polygon.exterior.coords)[:-1]
+        for end, edge in (("start", corners[:2]), ("end", corners[2:4])):
+            level_key = record[f"{end}_level"]
+            walkable = walkable_by_level.get(level_key, Polygon())
+            voids = [o["geometry"] for o in obstacles if o.get("source_type") == "walkable_void_mask"
+                     and o["level_key"] == level_key]
+            if voids:
+                walkable = walkable.difference(unary_union(voids))
+            # Use the actual, quantized ramp end rather than overlap somewhere along its run.
+            strip = LineString(edge).buffer(.1, cap_style=2).intersection(polygon)
+            z_offset = float(record.get(f"{end}_z_offset") or 0)
+            if strip.intersection(walkable).area <= TOLERANCE or abs(z_offset) > .005:
+                warnings.append({"type": f"vertical_connection_not_on_{end}_area",
+                                 "key": record["key"], "name": record["name"],
+                                 f"{end}_level": level_key, "validation": "endpoint_strip",
+                                 "reason": "endpoint_z_offset" if abs(z_offset) > .005 else "no_endpoint_overlap"})
 
     return warnings
 

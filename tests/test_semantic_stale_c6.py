@@ -123,3 +123,38 @@ def test_c6_missing_semantic_file_never_reports_ready(ctx):
     readiness = client.get("/api/build-readiness").json()
     assert readiness["semantic_export_ready"] is False
     assert readiness["ifc_semantic_mapping_ready"] is False
+
+
+def test_null_revision_cannot_bypass_stale_export_validate_or_build(ctx, monkeypatch):
+    from fastapi import HTTPException
+
+    module, client = ctx
+    semantic_path = module.SEMANTIC_DIR / "ready.json"
+    semantic_path.write_text("{}", encoding="utf-8")
+    state = module.store.read()
+    state["revision"] = None
+    state["semantic"] = {"status": "ready", "stale": False, "path": str(semantic_path)}
+    module.store.write(state)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A stale model reached validation/build work")
+
+    monkeypatch.setattr(module, "validate_engine_input", unexpected)
+    monkeypatch.setattr(module, "build_preflight", unexpected)
+    monkeypatch.setattr(module, "build_vissim_model", unexpected)
+    assert client.post("/api/selection", json={"global_id": "changed", "status": "exclude"}).status_code == 200
+    assert module.store.read()["revision"] is None
+    readiness = client.get("/api/build-readiness").json()
+    assert readiness["semantic_stale"] is True
+    assert readiness["semantic_export_ready"] is False
+    assert readiness["can_build_current_ifc"] is False
+    for endpoint in ("/api/ifc/semantic", "/api/ifc/semantic/download", "/api/ifc/semantic/engine-download"):
+        assert client.get(endpoint).status_code == 409
+    assert client.post("/api/ifc/semantic/export-engine-input").status_code == 409
+    assert client.post("/api/validate").status_code == 400
+    assert client.post("/api/build-vissim").status_code == 400
+    assert client.get("/api/gate").status_code == 400
+    with pytest.raises(HTTPException) as error:
+        module.commit_build_status(semantic_path, {"status": "success"})
+    assert error.value.status_code == 409
+    assert module.store.read()["semantic"]["stale"] is True
