@@ -26,7 +26,7 @@ import math
 from collections import defaultdict
 from typing import Any, Callable
 
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 
 from ifc_service import entity_name, global_id, is_a
 
@@ -35,6 +35,9 @@ from ifc_service import entity_name, global_id, is_a
 # landing when "end with riser" is off, so the snap tolerance must exceed one
 # riser but stay well below a storey height.
 LEVEL_SNAP_TOLERANCE = 0.25
+# Physical planes are distinct even when they differ by less than one riser.
+PHYSICAL_LEVEL_TOLERANCE = 1e-5
+SURFACE_MATCH_TOLERANCE = 0.005
 # Landing slabs whose walking surface is further than this above/below their
 # storey are treated as intermediate landings, not as part of the storey floor.
 INTERMEDIATE_LANDING_THRESHOLD = 0.25
@@ -250,7 +253,7 @@ def is_intermediate_landing(
 def cluster_landing_levels(
     landing_tops: list[float],
     storey_levels: list[dict[str, Any]],
-    tolerance: float = LEVEL_SNAP_TOLERANCE,
+    tolerance: float = PHYSICAL_LEVEL_TOLERANCE,
     key_start: int = LANDING_LEVEL_KEY_START,
 ) -> list[dict[str, Any]]:
     """Create generated levels for intermediate landing heights.
@@ -259,28 +262,74 @@ def cluster_landing_levels(
     (Vissim levels are global planes). Heights that already match a storey are
     not duplicated.
     """
-    levels: list[dict[str, Any]] = []
-    for z in sorted(landing_tops):
-        if any(abs(float(lv["z"]) - z) <= tolerance for lv in storey_levels):
-            continue
-        if levels and abs(levels[-1]["_zs"][-1] - z) <= tolerance:
-            levels[-1]["_zs"].append(z)
-            continue
-        levels.append({"_zs": [z]})
+    return assign_landing_levels(landing_tops, storey_levels, tolerance, key_start)[0]
 
-    result = []
-    for i, item in enumerate(levels):
-        z = sum(item["_zs"]) / len(item["_zs"])
-        result.append(
-            {
-                "key": key_start + i,
-                "name": f"Landing +{z:.2f}",
-                "z": round(z, 6),
-                "generated": True,
-                "generated_from": "intermediate_landing_slab",
+
+def assign_landing_levels(landing_tops: list[float], storey_levels: list[dict[str, Any]],
+                          tolerance: float = PHYSICAL_LEVEL_TOLERANCE,
+                          key_start: int = LANDING_LEVEL_KEY_START) -> tuple[list[dict[str, Any]], list[int]]:
+    """Assign every input once, anchored to an actual height rather than a chained mean."""
+    generated: list[dict[str, Any]] = []
+    assignments = [0] * len(landing_tops)
+    for index, z in sorted(enumerate(landing_tops), key=lambda pair: (pair[1], pair[0])):
+        close = [lv for lv in storey_levels + generated if abs(float(lv["z"]) - z) <= tolerance]
+        if close:
+            level = min(close, key=lambda lv: (abs(float(lv["z"]) - z), int(lv["key"])))
+        else:
+            level = {"key": key_start + len(generated), "name": f"Landing +{z:.3f}",
+                     "z": round(z, 6), "generated": True,
+                     "generated_from": "intermediate_landing_slab"}
+            generated.append(level)
+        assignments[index] = int(level["key"])
+    return generated, assignments
+
+
+def match_supported_level(z: float, edge: list[list[float]], levels: list[dict[str, Any]],
+                          surfaces: list[dict[str, Any]], parent_guid: str | None,
+                          riser_height: float | None) -> tuple[int, float, dict[str, Any]]:
+    """A nearby height is only a reference unless a local walking surface supports it."""
+    line = LineString(edge)
+    supported = []
+    local = []
+    for surface in surfaces:
+        if parent_guid and surface.get("parent_guid") and surface["parent_guid"] != parent_guid:
+            continue
+        contact = line.intersection(surface["polygon"].buffer(SURFACE_MATCH_TOLERANCE)).length
+        if contact < min(.05, line.length * .1):
+            continue
+        local.append(surface)
+        delta = float(surface["z"]) - z
+        same_parent = bool(parent_guid) and parent_guid == surface.get("parent_guid")
+        status, reason = None, None
+        if abs(delta) <= SURFACE_MATCH_TOLERANCE:
+            status, reason = "exact", "walking_surface"
+        elif (same_parent and 0 < delta <= LEVEL_SNAP_TOLERANCE
+              and abs(float(surface["bottom_z"]) - z) <= SURFACE_MATCH_TOLERANCE):
+            status, reason = "surface_adjusted", "related_slab_thickness"
+        elif (riser_height and 0 < delta <= LEVEL_SNAP_TOLERANCE
+              and abs(delta - riser_height) <= SURFACE_MATCH_TOLERANCE
+              and (not surface.get("parent_guid") or same_parent)):
+            status, reason = "riser_adjusted", "ifc_riser_height"
+        if status:
+            supported.append((abs(delta), 0 if same_parent else 1, surface, status, reason, contact))
+    if supported:
+        supported.sort(key=lambda item: (item[0], item[1], int(item[2]["level_key"])))
+        best = supported[0]
+        tied = {int(item[2]["level_key"]) for item in supported
+                if abs(item[0] - best[0]) <= PHYSICAL_LEVEL_TOLERANCE and item[1] == best[1]}
+        if len(tied) == 1:
+            _, _, surface, status, reason, contact = best
+            return int(surface["level_key"]), 0.0, {
+                "status": status, "reason": reason, "source_global_id": surface.get("global_id"),
+                "source_z": round(z, 6), "surface_z": round(float(surface["z"]), 6),
+                "delta_z": round(float(surface["z"]) - z, 6), "contact_length_m": round(contact, 6),
+                "same_stair": bool(parent_guid) and parent_guid == surface.get("parent_guid"),
             }
-        )
-    return result
+        reason = "ambiguous_spatial_support"
+    else:
+        reason = "height_mismatch" if local else "no_spatial_support"
+    key, offset, _ = match_level(z, levels, tolerance=PHYSICAL_LEVEL_TOLERANCE)
+    return key, offset, {"status": "unresolved", "reason": reason, "source_z": round(z, 6)}
 
 
 def _riser_count(entity: Any) -> int | None:
@@ -354,6 +403,9 @@ def build_vertical_connections(
     footprint_for: Callable[[dict[str, Any]], Polygon | None],
     all_levels: list[dict[str, Any]],
     key_start: int = 2001,
+    *,
+    support_surfaces: list[dict[str, Any]] | None = None,
+    unit_scale: float = 1.0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Convert flight units into engine vertical-connection records."""
     records: list[dict[str, Any]] = []
@@ -382,8 +434,18 @@ def build_vertical_connections(
                 f"Vertical element {label} is not a straight flight (footprint fills {profile['straightness']:.0%} of its rectangle); verify run direction and extent in 3D review."
             )
 
-        start_key, start_off, start_exact = match_level(profile["z_bottom"], all_levels)
-        end_key, end_off, end_exact = match_level(profile["z_top"], all_levels)
+        riser = getattr(element, "RiserHeight", None)
+        riser = float(riser) * unit_scale if riser else None
+        parent_guid = global_id(parent) if parent is not None else (
+            global_id(element) if any(is_a(element, t) for t in PARENT_TYPES) else None)
+        start_key, start_off, start_support = match_supported_level(
+            profile["z_bottom"], profile["bottom_edge"], all_levels,
+            support_surfaces or [], parent_guid, riser)
+        end_key, end_off, end_support = match_supported_level(
+            profile["z_top"], profile["top_edge"], all_levels,
+            support_surfaces or [], parent_guid, riser)
+        start_exact = start_support["status"] != "unresolved"
+        end_exact = end_support["status"] != "unresolved"
 
         if start_key == end_key and start_off == end_off:
             warnings.append(
@@ -401,7 +463,7 @@ def build_vertical_connections(
         for which, exact, z in (("bottom", start_exact, profile["z_bottom"]), ("top", end_exact, profile["z_top"])):
             if not exact:
                 warnings.append(
-                    f"Vertical element {label}: {which} at z={z:.3f} m matches no storey or landing level within {LEVEL_SNAP_TOLERANCE:.2f} m; z offset used. Verify connection in Vissim."
+                    f"Vertical element {label}: {which} at z={z:.3f} m matches no storey or landing level with spatial support; z offset used. Verify connection in Vissim."
                 )
 
         source = parent if parent is not None else element
@@ -450,9 +512,10 @@ def build_vertical_connections(
             "direction_reason": direction_reason,
             "direction_certified": False,
             "level_match": {
-                "start": "exact" if start_exact else "offset",
-                "end": "exact" if end_exact else "offset",
+                "start": start_support["status"] if start_exact else "offset",
+                "end": end_support["status"] if end_exact else "offset",
             },
+            "endpoint_support": {"start": start_support, "end": end_support},
         }
         if conn_type == "stairway":
             # Use the flight's own riser count only: a parent IfcStair count

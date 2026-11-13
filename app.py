@@ -36,7 +36,7 @@ APP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = project_root()
 PROJECT_ROOT.mkdir(parents=True, exist_ok=True)
 STATIC_DIR = APP_DIR / "static"
-RUNTIME_DIR = APP_DIR / "runtime"
+RUNTIME_DIR = Path(os.environ.get("VBB_RUNTIME_DIR", APP_DIR / "runtime"))
 UPLOAD_DIR = RUNTIME_DIR / "uploads"
 CACHE_DIR = RUNTIME_DIR / "cache"
 SEMANTIC_DIR = RUNTIME_DIR / "semantic"

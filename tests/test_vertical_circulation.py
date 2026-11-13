@@ -63,9 +63,9 @@ def test_match_level_snaps_within_tolerance_and_reports_offset_otherwise():
 
 def test_cluster_landing_levels_dedupes_heights_and_skips_storey_heights():
     storeys = [{"key": 1, "z": 0.0}, {"key": 2, "z": 3.4}]
-    result = cluster_landing_levels([1.70, 1.72, 3.38, 5.1], storeys)
+    result = cluster_landing_levels([1.70, 1.700001, 3.4, 5.1], storeys)
     assert [lv["key"] for lv in result] == [901, 902]
-    assert math.isclose(result[0]["z"], 1.71, abs_tol=1e-6)
+    assert math.isclose(result[0]["z"], 1.70, abs_tol=1e-6)
     assert all(lv["generated"] for lv in result)
 
 

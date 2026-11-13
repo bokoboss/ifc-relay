@@ -66,6 +66,23 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None,
     vcs = semantic.get("vertical_connections", [])
     vc_by_key = {int(v["key"]): v for v in vcs if "key" in v}
     items: list[dict[str, Any]] = []
+    ledger = info.get("landing_ledger", [])
+    if ledger:
+        counts = info.get("summary", {})
+        items.append(_item("landing_inventory", "info", [str(e["source_global_id"] or e["source_entity_id"]) for e in ledger],
+                           "ชานพักจาก IFC", f"ต้นทาง {len(ledger)} · มีพื้นที่รองรับ {counts.get('landings_represented', 0)} · "
+                           f"รอตรวจ {counts.get('landings_review', 0)} · ไม่มีผลลัพธ์ครบ {counts.get('landings_omitted', 0)} · "
+                           "นับวัตถุต้นทาง แยกจากจำนวน Areas/Levels"))
+        unresolved = [f"{e['source_global_id'] or e['source_entity_id']}:{e['reason']}"
+                      for e in ledger if e["outcome"] == "unresolved"]
+        if unresolved:
+            items.append(_item("landing_review", "check", unresolved, "ชานพักที่ยังไม่มีผลลัพธ์ครบ",
+                               "ตรวจ Source-to-Output Ledger · ไม่สร้างพื้นจากช่องว่างหรือเดาระดับ"))
+    unsupported = [f"{i}:{d.get('end')}:{d.get('reason')}" for d in info.get("diagnostics", [])
+                   if d.get("code") == "stair_endpoint_unresolved" for i in d.get("ids", [])]
+    if unsupported:
+        items.append(_item("stair_endpoint_review", "check", unsupported, "ปลายบันไดที่ไม่มีหลักฐานพื้นที่รองรับ",
+                           "อ้างระดับด้วย offset เพื่อเก็บ Geometry เท่านั้น · ไม่รับรองว่ามีทางเชื่อม"))
 
     pending = [str(u["global_id"]) for u in (stair_overview or {}).get("units", [])
                if u.get("state") == "review" and u.get("global_id")]
@@ -128,10 +145,16 @@ def gate_items(semantic: dict[str, Any], validation: dict[str, Any] | None,
         items.append(_item("stair_direction_review", "check", review_dir, "ทิศบันไดหาจาก Geometry ไม่ได้",
                            "ลูกศรสีส้มใน 3D · ตรวจทิศขึ้นของบันไดเหล่านี้ใน Vissim หลังสร้างไฟล์"))
     offsets = [f"{v.get('ifc_global_id') or v.get('key')}:{end}" for v in vcs for end in ("start", "end")
-               if (v.get("level_match") or {}).get(end) != "exact"]
+               if (v.get("level_match") or {}).get(end) == "offset" or abs(v.get(f"{end}_z_offset", 0)) > 1e-5]
     if offsets:
         items.append(_item("stair_end_offset", "check", offsets, "ปลายบันไดใช้ z offset",
                            "ปลายบันไดไม่ตรงระดับชั้นใด · ตรวจการเชื่อมต่อใน Vissim"))
+    compensated = [f"{v.get('ifc_global_id') or v.get('key')}:{end}:{s.get('reason')}"
+                   for v in vcs for end, s in v.get("endpoint_support", {}).items()
+                   if s.get("status") in {"surface_adjusted", "riser_adjusted"}]
+    if compensated:
+        items.append(_item("stair_end_compensated", "check", compensated, "ปลายบันไดชดเชยตามหลักฐาน",
+                           "ใช้ความหนาชานพักที่สัมพันธ์กันหรือ RiserHeight ของ Flight · ตรวจระดับผิวเดินใน Viswalk"))
     left_out = [str(s.get("global_id")) for s in info.get("off_level_slabs", []) if s.get("decision") != "include"]
     if left_out:
         items.append(_item("off_level_left_out", "check", left_out, "แผ่นพื้นต่างระดับมากที่ยังไม่ใช้เป็นพื้นเดิน",
@@ -233,6 +256,7 @@ def evaluate_gate(semantic: dict[str, Any], validation: dict[str, Any] | None,
     items = gate_items(semantic, validation, stair_overview)
     blocked = [i["id"] for i in items if i["policy"] == "block"]
     to_check = [i["id"] for i in items if i["policy"] == "check"]
+    con = semantic.get("ifc_semantic", {}).get("connectivity")
     return {
         "policy_version": POLICY_VERSION,
         "items": items,
@@ -240,6 +264,11 @@ def evaluate_gate(semantic: dict[str, Any], validation: dict[str, Any] | None,
         "to_check": to_check,
         "check_count": sum(i["count"] for i in items if i["policy"] == "check"),
         "passed": not blocked,
+        "verification": {"geometry_valid": bool(validation.get("build_allowed")) if validation is not None else None,
+                         "connectivity_valid": (not con.get("error") and not con.get("stairs_not_linked")
+                                                and not con.get("isolated_zones"))
+                                               if isinstance(con, dict) and "zones" in con else None,
+                         "viswalk_verified": False},
     }
 
 

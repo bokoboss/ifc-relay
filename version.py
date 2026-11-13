@@ -10,7 +10,7 @@
 APP_VERSION = "0.6.0"
 PROJECT_STATE_VERSION = "0.6"
 GEOMETRY_PAYLOAD_VERSION = "0.6"
-SEMANTIC_SCHEMA_VERSION = "0.6.0"
+SEMANTIC_SCHEMA_VERSION = "0.6.1"
 ENGINE_CONTRACT = "Geometry Engine v0.3 (engine/05_geometry_engine_v03.py)"
 SUPPORTED_VISSIM = "PTV Vissim 2025 SP15 and 2026 (both tested; picks the newest installed via COM)"
 
