@@ -96,7 +96,7 @@ def flight_profile(
     if len(corners) != 4:
         return None
 
-    # Edge 0-1 vs 1-2: the longer one is the run direction.
+    # Prefer the longer edge unless mesh heights identify a wide, short flight.
     e01 = math.dist(corners[0], corners[1])
     e12 = math.dist(corners[1], corners[2])
     if e01 >= e12:
@@ -120,6 +120,21 @@ def flight_profile(
     high_side = [z for x, y, z in coords if t_of(x, y) >= half - band]
     if not low_side or not high_side:
         return None
+
+    rise = max(c[2] for c in coords) - min(c[2] for c in coords)
+    if abs(max(high_side) - max(low_side)) < DIRECTION_MIN_END_SEPARATION * rise:
+        alt_ux, alt_uy = -uy, ux
+        alt_half = width / 2.0
+        alt_band = max(width * END_SAMPLE_FRACTION, 1e-3)
+        alt_low = [z for x, y, z in coords
+                   if (x - cx) * alt_ux + (y - cy) * alt_uy <= -alt_half + alt_band]
+        alt_high = [z for x, y, z in coords
+                    if (x - cx) * alt_ux + (y - cy) * alt_uy >= alt_half - alt_band]
+        if alt_low and alt_high and abs(max(alt_high) - max(alt_low)) >= DIRECTION_MIN_END_SEPARATION * rise:
+            ux, uy = alt_ux, alt_uy
+            run_length, width = width, run_length
+            half = alt_half
+            low_side, high_side = alt_low, alt_high
 
     # The walking surface is the top of the solid, so compare the highest
     # vertex near each end. Swap the axis if the "high" sample is lower.
